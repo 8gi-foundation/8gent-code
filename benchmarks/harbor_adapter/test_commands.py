@@ -20,6 +20,20 @@ class Commands(unittest.TestCase):
         self.assertNotIn("latest", s)
         self.assertIn("prebuilt", s)
 
+    def test_bun_pin_required_and_never_latest(self):
+        for bad in ("", "latest", "^1.2", "1.2", "bun-v1.2.3"):
+            with self.assertRaises(ValueError):
+                c.pinned_bun_version({"BUN_VERSION": bad})
+        with self.assertRaises(ValueError):
+            c.pinned_bun_version({})
+        self.assertEqual(c.pinned_bun_version({"BUN_VERSION": "1.2.3"}), "1.2.3")
+        self.assertEqual(c.pinned_bun_version({}, "1.3.0"), "1.3.0")
+
+    def test_bun_install_is_pinned(self):
+        s = c.bun_install_command("1.2.3")
+        self.assertEqual(s, "curl -fsSL https://bun.sh/install | bash -s bun-v1.2.3")
+        self.assertNotIn("latest", s)
+
     def test_timeout(self):
         self.assertIsNone(c.task_timeout({}))
         self.assertEqual(c.task_timeout({"EIGHT_TASK_TIMEOUT_SEC": "900"}), 900)

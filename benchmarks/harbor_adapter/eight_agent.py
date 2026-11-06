@@ -4,7 +4,7 @@
 Runs 8gent inside Harbor's Docker environments for Terminal-Bench 2.1,
 DeepSWE and other Harbor datasets. See benchmarks/TERMINAL-BENCH.md.
 
-    EIGHT_VERSION=0.20.43 PYTHONPATH=. harbor run -d terminal-bench-sample@2.1 \
+    EIGHT_VERSION=0.20.43 BUN_VERSION=1.2.3 PYTHONPATH=. harbor run -d terminal-bench-sample@2.1 \
         --agent-import-path benchmarks.harbor_adapter.eight_agent:EightAgent \
         -m <model> -o benchmarks/harbor-results
 
@@ -23,9 +23,10 @@ from . import commands as cmd
 class EightAgent(BaseAgent):
     """Harbor adapter for 8gent Code."""
 
-    def __init__(self, *args, eight_version: str | None = None, task_timeout_sec: int | None = None, **kwargs):
+    def __init__(self, *args, eight_version: str | None = None, bun_version: str | None = None, task_timeout_sec: int | None = None, **kwargs):
         super().__init__(*args, **kwargs)
         self._version = cmd.pinned_version(os.environ, eight_version)
+        self._bun_version = cmd.pinned_bun_version(os.environ, bun_version)
         self._timeout = cmd.task_timeout(os.environ, task_timeout_sec)
 
     @staticmethod
@@ -44,7 +45,7 @@ class EightAgent(BaseAgent):
                 user="root",
                 timeout_sec=300,
             )
-            await environment.exec(command="curl -fsSL https://bun.sh/install | bash", user="root", timeout_sec=120)
+            await environment.exec(command=cmd.bun_install_command(self._bun_version), user="root", timeout_sec=120)
             await environment.exec(
                 command="ln -sf /root/.bun/bin/bun /usr/local/bin/bun && ln -sf /root/.bun/bin/bunx /usr/local/bin/bunx",
                 user="root",

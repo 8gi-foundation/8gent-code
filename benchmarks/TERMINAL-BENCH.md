@@ -20,6 +20,7 @@ python3 -m unittest benchmarks.harbor_adapter.test_commands
 | Variable | Meaning |
 |----------|---------|
 | `EIGHT_VERSION` | Required. Released version to install, for example `0.20.43`. `latest` and ranges are refused. Also accepted as `eight_version=` |
+| `BUN_VERSION` | Required. Bun release the installer fetches, for example `1.2.3`, passed as `bash -s bun-v$BUN_VERSION`. `latest` and ranges are refused. Also accepted as `bun_version=` |
 | `EIGHT_HARBOR_MODEL` | Model id sent to the endpoint. Falls back to Harbor's `-m` |
 | `EIGHT_HARBOR_BASE_URL` | OpenAI-compatible endpoint (for example `https://host/v1`). Written to `~/.8gent/providers.json` inside the trial as provider `harbor-endpoint` |
 | `EIGHT_HARBOR_API_KEY_ENV` | Name of the variable that holds the key (default `OPENAI_API_KEY`). Only that one variable is passed into the trial |
@@ -28,7 +29,7 @@ python3 -m unittest benchmarks.harbor_adapter.test_commands
 
 ### Version pin
 
-Setup installs exactly `@8gi-foundation/8gent-code@$EIGHT_VERSION`. If the image already has Bun and that version, nothing is fetched at trial time, so a prebuilt image with the release baked in runs with no install step. Record the pin next to any submitted result.
+Setup installs exactly `@8gi-foundation/8gent-code@$EIGHT_VERSION`. If the image already has Bun and that version, nothing is fetched at trial time, so a prebuilt image with the release baked in runs with no install step. Bun is pinned the same way through `BUN_VERSION`. Record both pins next to any submitted result. The system packages installed with apt (curl, unzip, git, ca-certificates) follow the image distro and are not pinned; a prebuilt image avoids them.
 
 ### Approval
 
@@ -57,6 +58,7 @@ Use `terminal-bench-sample@2.0` if `harbor datasets list` does not show a 2.1 sa
 
 ```bash
 export EIGHT_VERSION=0.20.43
+export BUN_VERSION=1.2.3
 export EIGHT_HARBOR_BASE_URL=https://your-endpoint/v1
 export EIGHT_HARBOR_API_KEY_ENV=MY_ENDPOINT_KEY   # the key itself stays in your shell
 export EIGHT_HARBOR_MODEL=<model id on that endpoint>

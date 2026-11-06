@@ -6,6 +6,8 @@ Configuration (all optional except the version pin):
 
   EIGHT_VERSION              Released version to install, e.g. 0.20.43. Required.
                              "latest" and empty are refused.
+  BUN_VERSION                Bun release the installer fetches, e.g. 1.2.3. Required.
+                             "latest" and empty are refused.
   EIGHT_HARBOR_MODEL         Model id sent to the endpoint (or pass -m to Harbor).
   EIGHT_HARBOR_BASE_URL      OpenAI-compatible endpoint, e.g. https://host/v1.
   EIGHT_HARBOR_API_KEY_ENV   Name of the env var holding the key (default OPENAI_API_KEY).
@@ -39,6 +41,22 @@ def pinned_version(env: dict, arg: str | None = None) -> str:
             "such as 0.20.43. 'latest' and ranges are not accepted."
         )
     return value
+
+
+def pinned_bun_version(env: dict, arg: str | None = None) -> str:
+    """Return the pinned Bun version or raise. Never resolves to latest."""
+    value = (arg or env.get("BUN_VERSION") or "").strip()
+    if not value or not _VERSION_RE.match(value):
+        raise ValueError(
+            "Set BUN_VERSION (or pass bun_version=) to a released Bun version "
+            "such as 1.2.3. 'latest' and ranges are not accepted."
+        )
+    return value
+
+
+def bun_install_command(version: str) -> str:
+    """Run the bun.sh installer pinned to one release (bun-v<version>)."""
+    return f"curl -fsSL https://bun.sh/install | bash -s {shlex.quote(f'bun-v{version}')}"
 
 
 def install_command(version: str) -> str:
