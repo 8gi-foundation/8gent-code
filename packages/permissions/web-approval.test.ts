@@ -80,3 +80,20 @@ describe("web tools with nobody to ask (real PermissionManager)", () => {
 		expect(await webApprovalRefusal(manager(), "web_search", "anything")).toBeNull();
 	});
 });
+
+describe("a No on the TUI card is final", () => {
+	test("no second card from the permission manager", async () => {
+		const { registerTuiApprovalHandler, _resetTuiApprovalChannel } = await import(
+			"./tui-approval-channel"
+		);
+		registerTuiApprovalHandler(async () => "deny");
+		try {
+			const pm = stub(true);
+			const r = await webApprovalRefusal(pm, "web_search", "anything");
+			expect(r).toContain("[PERMISSION DENIED]");
+			expect(pm.calls.length).toBe(0);
+		} finally {
+			_resetTuiApprovalChannel();
+		}
+	});
+});

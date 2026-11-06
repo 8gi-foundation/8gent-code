@@ -37,6 +37,7 @@ import {
 	listAgentsTool,
 	spawnAgentTool,
 } from "../orchestration/delegation-tools";
+import { getPermissionManager } from "../permissions";
 import { cdPrefix, folderLabel } from "../permissions/cd-prefix";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import {
@@ -75,6 +76,7 @@ import {
 import { isolatedInlinePython } from "../permissions/s1-inline-python";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { ToolG8 } from "../permissions/toolg8";
+import { webApprovalRefusal } from "../permissions/web-approval";
 import {
 	applyAt,
 	blockedToolMessage,
@@ -1456,6 +1458,8 @@ const webSearchTool = tool({
 		maxResults: z.number().optional().describe("Max results (default: 5)"),
 	}),
 	execute: async ({ query, maxResults }) => {
+		const refused = await webApprovalRefusal(getPermissionManager(), "web_search", String(query));
+		if (refused) return refused;
 		try {
 			const { webSearch, formatSearchResults } = await import("../tools/web");
 			const results = await webSearch(query, { maxResults: maxResults || 10 });
@@ -1472,6 +1476,8 @@ const webFetchTool = tool({
 		url: z.string().describe("URL to fetch"),
 	}),
 	execute: async ({ url }) => {
+		const refused = await webApprovalRefusal(getPermissionManager(), "web_fetch", String(url));
+		if (refused) return refused;
 		try {
 			const { webFetch, formatFetchResult } = await import("../tools/web");
 			const result = await webFetch(url);

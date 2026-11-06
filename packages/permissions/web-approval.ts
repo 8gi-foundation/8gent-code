@@ -25,8 +25,10 @@ export async function webApprovalRefusal(
 	if (pm.isInfiniteMode()) return null;
 	const what = toolName === "web_search" ? "Search the web for" : "Fetch the page";
 	const details = `${what}: ${target.slice(0, 300)}. This leaves your device.`;
-	let approved = (await requestTuiApproval({ action: "Web request", details })) === true;
-	if (!approved) {
+	const card = await requestTuiApproval({ action: "Web request", details });
+	let approved = card === true;
+	// A No on the card is final; only "no card shown" (null) falls through to the manager.
+	if (card === null) {
 		const interactive = !!process.stdin.isTTY && !process.env.EIGHT_HEADLESS;
 		// Only an interactive prompt may default to No outright; headless goes through
 		// the permission manager's opt-in check.
