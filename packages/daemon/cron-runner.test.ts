@@ -6,6 +6,8 @@ import {
 	RUNNER_STALE_MS,
 	acquireRunner,
 	addJob,
+	cronTick,
+	getJobs,
 	loadJobs,
 	releaseRunner,
 	removeJob,
@@ -50,8 +52,11 @@ function job(id: string, extra: Record<string, unknown> = {}) {
 	};
 }
 const ids = () =>
-	JSON.parse(fs.readFileSync(path.join(root, "cron.json"), "utf8")).map((j: { id: string }) => j.id);
-const write = (jobs: unknown[]) => fs.writeFileSync(path.join(root, "cron.json"), JSON.stringify(jobs));
+	JSON.parse(fs.readFileSync(path.join(root, "cron.json"), "utf8")).map(
+		(j: { id: string }) => j.id,
+	);
+const write = (jobs: unknown[]) =>
+	fs.writeFileSync(path.join(root, "cron.json"), JSON.stringify(jobs));
 const hourAgo = () => new Date(Date.now() - 3_600_000).toISOString();
 
 test("one process holds the runner lock, a second is refused, the holder may refresh", () => {
@@ -121,4 +126,35 @@ test("a job finishing writes its own run state and keeps jobs another process ad
 	addJob(job("z") as never);
 	await Bun.sleep(100);
 	expect(ids()).toEqual(["a", "b", "z"]);
+});
+
+test("a failed save does not stop later saves (8SO #27: poisoned saveChain)", async () => {
+	write([job("a")]);
+	await loadJobs();
+	fs.writeFileSync(path.join(root, "cron.json"), JSON.stringify({ not: "a list" })); // apply() throws on this
+	addJob(job("b") as never);
+	await Bun.sleep(100);
+	write([job("a")]); // the file is a list again
+	addJob(job("c") as never);
+	await Bun.sleep(100);
+	expect(ids()).toEqual(["a", "c"]);
+});
+
+test("the runner re-reads cron.json every tick, so a job removed elsewhere stops (8SO #27)", async () => {
+	const never = { expression: "once:2000-01-01T00:00:00Z", lastRun: null };
+	write([job("keep", never), job("gone", never)]);
+	await startCron();
+	expect(getJobs().map((j) => j.id)).toEqual(["keep", "gone"]);
+	write([job("keep", never)]); // another daemon, or a hand edit, deletes "gone"
+	await cronTick();
+	expect(getJobs().map((j) => j.id)).toEqual(["keep"]);
+});
+
+test("an unreadable cron.json on a tick keeps the jobs the runner already holds", async () => {
+	const never = { expression: "once:2000-01-01T00:00:00Z", lastRun: null };
+	write([job("keep", never)]);
+	await startCron();
+	fs.writeFileSync(path.join(root, "cron.json"), "{ half written");
+	await cronTick();
+	expect(getJobs().map((j) => j.id)).toEqual(["keep"]);
 });

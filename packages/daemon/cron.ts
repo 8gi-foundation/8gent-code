@@ -61,7 +61,7 @@ let saveChain: Promise<void> = Promise.resolve();
  * Saves in this process are serialised so two jobs finishing together cannot interleave read and write.
  */
 function persist(apply: (disk: CronJob[]) => CronJob[]): Promise<void> {
-	saveChain = saveChain.then(async () => {
+	const next = saveChain.then(async () => {
 		let disk: CronJob[] = jobs;
 		try {
 			const f = Bun.file(cronPath());
@@ -74,7 +74,30 @@ function persist(apply: (disk: CronJob[]) => CronJob[]): Promise<void> {
 		await Bun.write(tmp, JSON.stringify(jobs, null, 2));
 		renameSync(tmp, cronPath());
 	});
-	return saveChain.catch((err) => console.error("[cron] save failed:", err));
+	// A failed save is logged and ends there: the chain continues from a settled promise, so one bad save
+	// (disk full, a non-list cron.json) cannot stop every later save until restart (8SO on #27).
+	saveChain = next.catch((err) => console.error("[cron] save failed:", err));
+	return saveChain;
+}
+
+/**
+ * Re-read cron.json for the runner. A job removed or disabled by another process or a hand edit stops on the
+ * next tick (8SO on #27). An unreadable or non-list file keeps the jobs already held, so a half-written file
+ * never silently stops every job; a missing file means no jobs.
+ */
+async function reloadForTick(): Promise<void> {
+	try {
+		const f = Bun.file(cronPath());
+		if (!(await f.exists())) {
+			jobs = [];
+			return;
+		}
+		const disk = await f.json();
+		if (Array.isArray(disk)) jobs = disk;
+		else console.error("[cron] cron.json is not a list; keeping the jobs already loaded");
+	} catch (err) {
+		console.error("[cron] cron.json unreadable; keeping the jobs already loaded:", err);
+	}
 }
 
 /** Write one job's run state onto the on-disk copy of that job; a job removed meanwhile stays removed. */
@@ -82,7 +105,13 @@ function saveRun(job: CronJob): Promise<void> {
 	return persist((disk) =>
 		disk.map((j) =>
 			j.id === job.id
-				? { ...j, lastRun: job.lastRun, enabled: job.enabled, skips: job.skips, nextRun: job.nextRun }
+				? {
+						...j,
+						lastRun: job.lastRun,
+						enabled: job.enabled,
+						skips: job.skips,
+						nextRun: job.nextRun,
+					}
 				: j,
 		),
 	);
@@ -140,7 +169,8 @@ export function acquireRunner(now = Date.now(), pid = process.pid): boolean {
 /** Give the lock up on a clean stop, only if it is ours. */
 export function releaseRunner(pid = process.pid): void {
 	try {
-		if (JSON.parse(readFileSync(runnerLockPath(), "utf8")).pid === pid) unlinkSync(runnerLockPath());
+		if (JSON.parse(readFileSync(runnerLockPath(), "utf8")).pid === pid)
+			unlinkSync(runnerLockPath());
 	} catch {}
 	isRunner = false;
 }
@@ -343,10 +373,8 @@ async function tick(): Promise<void> {
 		if (was) console.log("[cron] lost the runner lock, standing by");
 		return;
 	}
-	if (!was) {
-		console.log("[cron] took the runner lock");
-		await loadJobs(); // jobs changed on disk while another process was the runner
-	}
+	if (!was) console.log("[cron] took the runner lock");
+	await reloadForTick(); // every tick, not only on takeover: another process may have changed the jobs
 	const now = new Date();
 	// Saved routines (scouts by default): RoutineManager.tick had no caller before #4926.
 	void tickRoutines({ now });
@@ -375,6 +403,9 @@ async function catchup(): Promise<void> {
 		}
 	}
 }
+
+/** One runner tick, exported for tests. */
+export const cronTick = (): Promise<void> => tick();
 
 export async function startCron(): Promise<void> {
 	await loadJobs();
