@@ -1,6 +1,3 @@
-<p align="center">
-  <img src=".github/assets/readme-header.png" width="100%" alt="8gent Code" />
-</p>
 
 <p align="center">
   <strong>An open source coding assistant for the terminal that runs local models by default.</strong>
@@ -11,7 +8,7 @@
   <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-0.20.43-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v0.20.43" /></a>
 </p>
 
-8gent Code reads your project, edits files, runs commands and works through multi-step tasks from a chat interface in your terminal. It is built to be free, local first and private: it starts on a model running on your own machine, needs no account or API key, and sends nothing off the device unless you turn on a hosted provider yourself.
+8gent Code reads your project, edits files, runs commands and works through multi-step tasks from a chat interface in your terminal. It is built to be free, local first and private: it starts on a model running on your own machine, needs no account or API key, and your prompts and code go only to a model on your machine unless you turn on a hosted provider. Web search and page fetches go to the web.
 
 ## Install
 
@@ -35,7 +32,7 @@ Check what 8gent found on your machine (models, optional tools) with `8gent doct
 
 ## Models and providers
 
-Out of the box the active provider is `8gent`, with the model `eight-1.0-q3:14b`. It is served by Ollama at `http://localhost:11434`, so that model needs to be installed in Ollama. The `ollama` provider (any model you have pulled) and `lmstudio` (LM Studio's local server at `http://localhost:1234`) are also on by default. `llama-server` is available with `EIGHT_LOCAL_SERVER=llama-server`. If no model is reachable, the chat area shows how to connect one.
+On first run 8gent picks a model you already have: LM Studio, then Ollama, then Apple's on-device server on Apple Silicon. The built-in `8gent` provider uses `eight-1.0-q3:14b` through Ollama. The `ollama` provider (any model you have pulled) and `lmstudio` (LM Studio's local server at `http://localhost:1234`) are also on by default. `llama-server` is available with `EIGHT_LOCAL_SERVER=llama-server`. If no model is reachable, the chat area shows how to connect one.
 
 Hosted providers are opt-in and each needs your own key:
 
@@ -71,14 +68,14 @@ Inside the interface:
 | `/fork`, `/rewind` | Branch the conversation, or go back to a checkpoint |
 | `/export` | Save the session as HTML |
 | `/skills` | List and manage skills |
-| `/boardroom` | Get a structured review of a proposed change from a set of role-based viewpoints before you build it. It returns a decision and a requirements doc and writes no code |
+| `/boardroom` | Get a structured review of a proposed change from a set of role-based viewpoints before you build it. It returns a decision and, on go, a requirements doc, and writes no code |
 | `/privacy` | Show how much stayed on this machine and each cloud call |
 | `/hotkeys` | List every keyboard shortcut |
 | `/quit` | Exit |
 
 Type `/` to see the core commands, or start typing a name to find any other. In a message, `@` picks a project file, `!cmd` runs a shell command and sends its output with your next message, and `!!cmd` runs it without sending the output.
 
-`Shift+Tab` changes how much 8gent may do without asking: Plan (changes nothing), Ask (the default), Guarded (safe steps run, risky ones ask) or Infinite (never asks). See [docs/guides/permission-modes.md](docs/guides/permission-modes.md). All keys are in [docs/user/keys.md](docs/user/keys.md).
+`Shift+Tab` changes how much 8gent may do without asking: Plan (changes nothing), Ask (the default), Guarded (safe steps run, risky ones ask) or Infinite (runs without asking, except pushes to the default branch and commands that send data; returns to Ask after 30 minutes). See [docs/guides/permission-modes.md](docs/guides/permission-modes.md). All keys are in [docs/user/keys.md](docs/user/keys.md).
 
 ## Configuration and files
 
@@ -98,7 +95,7 @@ Set `NO_COLOR=1` to turn colour off.
 
 ## Privacy
 
-With the defaults, prompts and code go only to a model on your own machine. Nothing is sent to a hosted provider until you add a key for it and select it. Your keys stay in files on your machine, and `/privacy` shows what stayed local and lists each cloud call. Security reports: see [SECURITY.md](SECURITY.md).
+With the defaults, prompts and code go only to a model on your own machine. Nothing is sent to a hosted provider until you add a key for it. If no local model is running and exactly one hosted provider has a key, 8gent uses it. Keys stay on your machine, in ~/.8gent/keys.env or the OS keychain. Web search and fetch requests also leave the machine; /privacy lists every off-machine request. Security reports: see [SECURITY.md](SECURITY.md).
 
 ## Help and contributing
 
