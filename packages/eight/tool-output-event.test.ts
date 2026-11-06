@@ -16,6 +16,8 @@ const ENV: Record<string, string> = {
 	EIGHT_TOOL_CAPABILITY_GATE: "0",
 	"8GENT_TWO_STAGE_COMPACT": "0",
 	EIGHT_TEXT_TOOLS: "1",
+	// No terminal in a test run: opt in so the scripted commands run.
+	EIGHT_HEADLESS_APPROVE: "1",
 };
 let home: string;
 let repo: string;
