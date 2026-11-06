@@ -1,135 +1,92 @@
 """
 8gent Code - Harbor Framework Adapter
 
-Runs 8gent's agent loop inside Harbor's Docker environments for
-Terminal-Bench, SWE-bench, and other benchmark datasets.
+Runs 8gent inside Harbor's Docker environments for Terminal-Bench 2.1,
+DeepSWE and other Harbor datasets. See benchmarks/TERMINAL-BENCH.md.
 
-Usage:
-    PYTHONPATH=. harbor run -d terminal-bench-sample@2.0 \
+    EIGHT_VERSION=0.20.43 BUN_VERSION=1.2.3 PYTHONPATH=. harbor run -d terminal-bench-sample@2.1 \
         --agent-import-path benchmarks.harbor_adapter.eight_agent:EightAgent \
-        -o benchmarks/harbor-results -y
+        -m <model> -o benchmarks/harbor-results
 
-The adapter installs Bun + 8gent-code from npm inside the container,
-then pipes the task instruction through `8gent chat --yes`.
+Command building lives in commands.py (no Harbor import, unit tested).
 """
+
+import os
 
 from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
+from . import commands as cmd
+
 
 class EightAgent(BaseAgent):
-    """Harbor adapter for 8gent Code agent."""
+    """Harbor adapter for 8gent Code."""
+
+    def __init__(self, *args, eight_version: str | None = None, bun_version: str | None = None, task_timeout_sec: int | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._version = cmd.pinned_version(os.environ, eight_version)
+        self._bun_version = cmd.pinned_bun_version(os.environ, bun_version)
+        self._timeout = cmd.task_timeout(os.environ, task_timeout_sec)
 
     @staticmethod
     def name() -> str:
         return "8gent"
 
     def version(self) -> str | None:
-        return "2.0.0"
+        return self._version
 
     async def setup(self, environment: BaseEnvironment) -> None:
-        """Install Bun and 8gent-code in the Docker environment."""
-
-        # Install system dependencies that 8gent needs
+        """Install the pinned release. A prebuilt image that has it skips the fetch."""
+        probe = await environment.exec(command="command -v bun >/dev/null && command -v 8gent >/dev/null && echo ok", user="root")
+        if not (probe.stdout or "").strip() == "ok":
+            await environment.exec(
+                command="apt-get update -qq && apt-get install -y -qq curl unzip git ca-certificates > /dev/null 2>&1",
+                user="root",
+                timeout_sec=300,
+            )
+            await environment.exec(command=cmd.bun_install_command(self._bun_version), user="root", timeout_sec=120)
+            await environment.exec(
+                command="ln -sf /root/.bun/bin/bun /usr/local/bin/bun && ln -sf /root/.bun/bin/bunx /usr/local/bin/bunx",
+                user="root",
+            )
+        await environment.exec(command=cmd.install_command(self._version), user="root", timeout_sec=300)
         await environment.exec(
-            command=(
-                "apt-get update -qq && "
-                "apt-get install -y -qq curl unzip git ca-certificates > /dev/null 2>&1"
-            ),
+            command="ln -sf /root/.bun/install/global/node_modules/.bin/8gent /usr/local/bin/8gent || true",
             user="root",
-            timeout_sec=120,
         )
+        result = await environment.exec(command="8gent --version", user="root")
+        self.logger.info(f"8gent pinned {self._version}, reports: {(result.stdout or '').strip()}")
 
-        # Install Bun
+    async def run(self, instruction: str, environment: BaseEnvironment, context: AgentContext) -> None:
+        model = cmd.resolve_model(self.model_name, os.environ)
+        setup = cmd.provider_setup_command(os.environ, model)
+        if setup:
+            await environment.exec(command=setup, user="root")
+
         result = await environment.exec(
-            command="curl -fsSL https://bun.sh/install | bash",
-            user="root",
-            timeout_sec=60,
+            command=cmd.run_command(instruction, os.environ, model),
+            env=cmd.run_env(os.environ, model),
+            timeout_sec=self._timeout,
         )
-
-        # Make bun available globally
-        await environment.exec(
-            command=(
-                "ln -sf /root/.bun/bin/bun /usr/local/bin/bun && "
-                "ln -sf /root/.bun/bin/bunx /usr/local/bin/bunx"
-            ),
-            user="root",
-        )
-
-        # Install 8gent-code globally from npm
-        await environment.exec(
-            command="bun install -g @8gi-foundation/8gent-code",
-            user="root",
-            timeout_sec=120,
-        )
-
-        # Symlink the binary to a global path
-        await environment.exec(
-            command=(
-                "ln -sf /root/.bun/install/global/node_modules/.bin/8gent /usr/local/bin/8gent || "
-                "ln -sf $(find /root/.bun -name '8gent' -type f 2>/dev/null | head -1) /usr/local/bin/8gent || "
-                "true"
-            ),
-            user="root",
-        )
-
-        # Verify installation
-        result = await environment.exec(
-            command="which 8gent && 8gent --version 2>/dev/null || echo '8gent not found in PATH'",
-            user="root",
-        )
-        version_out = result.stdout.strip() if result.stdout else "unknown"
-        self.logger.info(f"8gent setup complete: {version_out}")
-
-    async def run(
-        self,
-        instruction: str,
-        environment: BaseEnvironment,
-        context: AgentContext,
-    ) -> None:
-        """Run 8gent's agent against the task instruction.
-
-        The agent executes shell commands autonomously to complete the task.
-        AgentContext is a pydantic data model for token/cost tracking only.
-        """
-
-        # Escape single quotes in instruction for shell
-        escaped = instruction.replace("'", "'\\''")
-
-        # Determine model config from self.model_name
-        env_vars = {
-            "PATH": "/usr/local/bin:/root/.bun/bin:/usr/bin:/bin",
-            "BUN_INSTALL": "/root/.bun",
-            "HOME": "/root",
-            "DEBIAN_FRONTEND": "noninteractive",
-        }
-
-        if self.model_name:
-            if "/" in self.model_name:
-                provider, model = self.model_name.split("/", 1)
-                env_vars["EIGHT_PROVIDER"] = provider
-                env_vars["EIGHT_MODEL"] = model
-            else:
-                env_vars["EIGHT_MODEL"] = self.model_name
-
-        # Run 8gent in non-interactive chat mode
-        # --yes auto-approves all tool calls (benchmark mode)
-        result = await environment.exec(
-            command=f"8gent chat '{escaped}' --yes 2>&1 || echo '[8gent exited with error]'",
-            env=env_vars,
-            timeout_sec=300,
-        )
-
-        # Log output for debugging
         stdout = result.stdout or ""
-        stderr = result.stderr or ""
-        self.logger.info(
-            f"8gent completed (exit {result.return_code}), "
-            f"stdout: {len(stdout)} chars, stderr: {len(stderr)} chars"
+        summary = cmd.parse_events(stdout)
+        context.n_input_tokens = summary["n_input_tokens"]
+        context.n_output_tokens = summary["n_output_tokens"]
+        if summary["cost_usd"] is not None:
+            context.cost_usd = summary["cost_usd"]
+        meta = dict(getattr(context, "metadata", None) or {})
+        meta.update(
+            eight_version=self._version,
+            trajectory_path=summary["trajectory_path"],
+            result=summary["result"],
+            exit_code=result.return_code,
         )
-
-        if stdout:
-            self.logger.debug(f"stdout (last 2000): {stdout[-2000:]}")
-        if stderr:
-            self.logger.debug(f"stderr (last 1000): {stderr[-1000:]}")
+        try:
+            context.metadata = meta
+        except Exception:
+            pass
+        self.logger.info(
+            f"8gent exit {result.return_code}, in={summary['n_input_tokens']} "
+            f"out={summary['n_output_tokens']} log={summary['trajectory_path']}"
+        )
