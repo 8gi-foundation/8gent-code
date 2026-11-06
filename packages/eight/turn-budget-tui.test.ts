@@ -21,6 +21,8 @@ const ENV: Record<string, string> = {
 	// These tests run long silent tool chains on purpose; the silent-call stop (#4794) is not under test.
 	EIGHT_SILENT_CALLS: "0",
 	EIGHT_TURN_BUDGET_MS: "2000",
+	// No terminal in a test run: opt in so the scripted commands run.
+	EIGHT_HEADLESS_APPROVE: "1",
 };
 let home: string;
 let repo: string;

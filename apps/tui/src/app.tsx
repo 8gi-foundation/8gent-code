@@ -2179,7 +2179,7 @@ export function App({
 						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
 					}
 				} else if (currentProvider === "openrouter-free" && !process.env.OPENROUTER_API_KEY) {
-					if (!cancelled) setAvailableModels(["google/gemini-2.5-flash:free"]);
+					if (!cancelled) setAvailableModels([]);
 				} else if (currentProvider === "openrouter-free") {
 					// Fetch free models from OpenRouter API
 					const apiKey = process.env.OPENROUTER_API_KEY || "";

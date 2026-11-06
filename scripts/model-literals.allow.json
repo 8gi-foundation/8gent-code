@@ -3,7 +3,6 @@
 	"entries": {
 		"apps/tui/src/app.tsx": {
 			":free": 3,
-			"auto:free": 1,
 			"google/gemini-2.5-flash:free": 1
 		},
 		"apps/tui/src/components/ActivityRail.tsx": {

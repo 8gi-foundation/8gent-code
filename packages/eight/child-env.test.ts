@@ -35,6 +35,7 @@ const NAMES = [
 	"FAKE_DEPLOY_KEY",
 	"EIGHT_SHELL_ENV_PASS",
 	"EIGHT_SHELL_ENV_INHERIT",
+	"EIGHT_HEADLESS_APPROVE",
 ];
 let dir: string;
 let ex: ToolExecutor;
@@ -43,6 +44,8 @@ const saved: Record<string, string | undefined> = {};
 beforeEach(() => {
 	for (const n of NAMES) saved[n] = process.env[n];
 	for (const n of NAMES) delete process.env[n];
+	// No terminal in a test run: opt in so the scripted commands run.
+	process.env.EIGHT_HEADLESS_APPROVE = "1";
 	process.env.FAKE_SECRET_KEY = CANARY;
 	process.env.FAKE_DEPLOY_KEY = `${CANARY}-deploy`;
 	dir = mkdtempSync(join(tmpdir(), "child-env-"));
