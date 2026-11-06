@@ -1,4 +1,3 @@
-
 <p align="center">
   <strong>An open source coding assistant for the terminal that runs local models by default.</strong>
 </p>
@@ -95,7 +94,7 @@ Set `NO_COLOR=1` to turn colour off.
 
 ## Privacy
 
-With the defaults, prompts and code go only to a model on your own machine. Nothing is sent to a hosted provider until you add a key for it. If no local model is running and exactly one hosted provider has a key, 8gent uses it. Keys stay on your machine, in ~/.8gent/keys.env or the OS keychain. Web search and fetch requests also leave the machine; /privacy lists every off-machine request. Security reports: see [SECURITY.md](SECURITY.md).
+With the defaults, prompts and code go only to a model on your own machine. Nothing is sent to a hosted provider until you add a key for it. If no local model is running and exactly one hosted provider has a key, 8gent uses it. Keys stay on your machine, in ~/.8gent/keys.env or the OS keychain. Web search and fetch requests also leave the machine. /privacy shows how much stayed local and lists each hosted model call, not web requests. Security reports: see [SECURITY.md](SECURITY.md).
 
 ## Help and contributing
 
