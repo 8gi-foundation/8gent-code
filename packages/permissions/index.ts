@@ -108,6 +108,16 @@ function sessionKey(command: string, where?: string): string {
 // Types
 // ============================================
 
+/**
+ * Headless opt-in: with no terminal, anything that would prompt is refused
+ * unless this process sets EIGHT_HEADLESS_APPROVE=1. Never read from a saved file.
+ */
+export function headlessApproveOptIn(
+	env: Record<string, string | undefined> = process.env,
+): boolean {
+	return env.EIGHT_HEADLESS_APPROVE === "1";
+}
+
 export interface PermissionConfig {
 	allowedPatterns: string[];
 	deniedPatterns: string[];
@@ -1222,7 +1232,7 @@ export class PermissionManager {
 
 	/**
 	 * Prompt user for permission (Y/n)
-	 * In headless mode: auto-approve safe commands, deny dangerous ones
+	 * In headless mode: deny everything that would prompt, unless EIGHT_HEADLESS_APPROVE=1
 	 */
 	private async promptUser(
 		action: string,
@@ -1261,9 +1271,16 @@ export class PermissionManager {
 				console.log(`[permissions] DENIED (headless, dangerous): ${command}`);
 				return false;
 			}
-			// Auto-approve non-dangerous commands in headless mode
-			console.log(`[permissions] AUTO-APPROVED (headless): ${command || action}`);
-			return true;
+			// Unattended means no: anything that would have prompted is refused unless
+			// the operator opted in for this process with EIGHT_HEADLESS_APPROVE=1.
+			if (headlessApproveOptIn()) {
+				console.log(`[permissions] AUTO-APPROVED (headless, opted in): ${command || action}`);
+				return true;
+			}
+			console.log(
+				`[permissions] DENIED (headless, nobody to ask; set EIGHT_HEADLESS_APPROVE=1 to opt in): ${command || action}`,
+			);
+			return false;
 		}
 
 		// Interactive: prefer a registered TUI handler so we can render the

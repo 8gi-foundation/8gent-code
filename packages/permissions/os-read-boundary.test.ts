@@ -50,6 +50,7 @@ let ws: string;
 let home: string;
 const saved: Record<string, string | undefined> = {};
 const KEYS = [
+	"EIGHT_HEADLESS_APPROVE",
 	"HOME",
 	"EIGHT_FAKE_HOME",
 	OS_READ_BOUNDARY_FLAG,
@@ -63,6 +64,8 @@ let answer: boolean | null = null;
 
 beforeAll(() => {
 	for (const k of KEYS) saved[k] = process.env[k];
+	// These run with no terminal and expect commands to run: opt in to headless approval.
+	process.env.EIGHT_HEADLESS_APPROVE = "1";
 	fs.mkdirSync(repoTmp, { recursive: true });
 	// Real paths: the kernel matches real paths, and the profile is built from these.
 	base = fs.realpathSync(fs.mkdtempSync(path.join(repoTmp, "os-read-")));

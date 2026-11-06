@@ -264,7 +264,7 @@ Every policy that governs what the agent can do is a YAML file you can read, edi
 Every memory the agent stores is a SQLite database on your own disk. Nothing phones home.
 
 Self-improvement: the autoresearch loop runs benchmarks, mutates the system prompt, and promotes what works. This runs locally.
-Your agent runs locally. Your data never leaves your machine. Every policy is readable YAML.
+Your agent runs locally. Your data never leaves your machine. Web search and fetch ask first (the prompt defaults to No), and nothing is sent to a hosted provider until you add a key for it. Every policy is readable YAML.
 No central vendor captures that value.
 
 The floor is zero cost. The ceiling is what a self-improving local agent can learn from your codebase.

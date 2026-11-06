@@ -205,7 +205,7 @@ export async function resolveReadyProvider(
 		reason,
 		notice:
 			`${configured.label} ${what} and no other local provider answered. ` +
-			"Nothing will run until one does. Start LM Studio or Ollama, or pick another provider with /provider.",
+			"Nothing will run until one does, and nothing is sent anywhere meanwhile. Start a local model (LM Studio or Ollama), or add a key for a hosted provider with /provider.",
 	};
 }
 
