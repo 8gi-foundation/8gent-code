@@ -34,7 +34,6 @@ import {
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
 import { writeScopeLine } from "../ai/write-scope";
 import { writeShapeLine } from "../ai/write-shape";
-import { ToolArgGuard } from "../schema/tool-args";
 import {
 	type FileOutline,
 	type RepoIndex,
@@ -213,8 +212,8 @@ import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { systemOneGate, systemOneMode } from "../permissions/system-one-gate";
 import { ToolG8 } from "../permissions/toolg8.js";
 import { hasTuiApprovalHandler, requestTuiApproval } from "../permissions/tui-approval-channel";
-import { webApprovalRefusal } from "../permissions/web-approval";
 import type { PolicyActionType } from "../permissions/types.js";
+import { webApprovalRefusal } from "../permissions/web-approval";
 import { gateWriteTool } from "../permissions/write-content-gate.js";
 import {
 	WRITE_CONTENT_TOOLS,
@@ -225,6 +224,7 @@ import {
 	resolveEdit,
 	writtenContentFor,
 } from "../permissions/write-content-gate.js";
+import { ToolArgGuard } from "../schema/tool-args";
 import { loadSettings } from "../settings/store";
 import {
 	formatTaskOutput,
