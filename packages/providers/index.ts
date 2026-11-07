@@ -895,6 +895,22 @@ export class ProviderManager {
 		return null;
 	}
 
+	/**
+	 * True when a call to `name` can carry credentials: it needs none (local
+	 * runtime, host CLI), or a key resolves from env, vault or providers.json.
+	 * Failover uses it to skip a hop that would fail on a missing key. An unknown
+	 * name answers true, so a name this registry does not know is not skipped.
+	 */
+	hasCredentials(name: string): boolean {
+		try {
+			const config = this.getProvider(name as ProviderName);
+			if (!config.apiKeyEnv && !config.apiKeyRef) return true;
+			return this.getApiKey(name as ProviderName) !== null;
+		} catch {
+			return true;
+		}
+	}
+
 	/** The base URL compiled in for a built-in, or undefined for a declared provider. */
 	compiledBaseUrl(name: ProviderName): string | undefined {
 		return builtinDefaults(name)?.baseUrl;
