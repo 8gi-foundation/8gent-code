@@ -136,7 +136,7 @@ Defaults (all over HTTPS):
 - `github.com/8gi-foundation/*` and `objects.githubusercontent.com/*` - 8GI Foundation source repos and GitHub release artifacts.
 - `raw.githubusercontent.com/8gi-foundation/*`
 - `cdn.8gent.dev/*` - foundation-managed CDN.
-- `*.fly.dev` is **not** in the default allowlist; vessel hosts are dynamic and should not be a default trust root.
+- Hosting-provider wildcard domains are **not** in the default allowlist; vessel hosts are dynamic and should not be a default trust root.
 
 Operators can extend the allowlist via `EIGHT_ARCHIVE_ALLOWLIST` (comma-separated host patterns). Patterns support a leading `*.` wildcard for subdomain matches, but cannot use full glob syntax.
 

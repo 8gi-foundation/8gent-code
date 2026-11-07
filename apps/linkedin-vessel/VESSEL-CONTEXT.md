@@ -4,14 +4,11 @@ You are the LinkedIn outreach vessel for the 8GI Foundation infrastructure.
 
 ## Your Environment
 
-- **Location:** Fly.io Amsterdam (ams region)
+- **Location:** a host the operator controls
 - **App name:** linkedin-vessel
-- **Endpoint:** https://linkedin-vessel.fly.dev
-- **Health:** https://linkedin-vessel.fly.dev/health
-- **Manifest:** https://linkedin-vessel.fly.dev/manifest
-- **MCP:** https://linkedin-vessel.fly.dev/mcp
+- **Endpoints:** `/health`, `/manifest` and `/mcp` on the vessel's own host
 - **Container:** Bun runtime, 256MB RAM, shared CPU
-- **State:** Persistent Fly volume at /data/.8gent/ (survives restarts)
+- **State:** Persistent volume at /data/.8gent/ (survives restarts)
 - **Control plane:** off unless `CONTROL_PLANE_URL` is set
 
 ## What You Do
@@ -73,7 +70,7 @@ also spaced at least 120s (connections) and 60s (messages) apart; queue.ts.
 
 ## Secrets Required
 
-Set these in Fly secrets (never in env file or code):
+Set these in your secret manager (never in code):
 - LINKEDIN_VESSEL_MCP_TOKEN, LINKEDIN_VESSEL_APPROVER_TOKEN (32+ chars each, different)
 - TELEGRAM_BOT_TOKEN, JAMES_TELEGRAM_CHAT_ID (approval notices)
 - LINKEDIN_SESSION_COOKIE (li_at cookie value)

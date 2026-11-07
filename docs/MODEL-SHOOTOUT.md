@@ -10,7 +10,7 @@ Two 8gent instances running the same codebase, different models:
 | Instance | Location | Model | Runtime |
 |----------|----------|-------|---------|
 | **Local** | MacBook, ws://localhost:18789 | eight-1-q-14b (Qwen 3 14B fine-tuned) | Ollama |
-| **Vessel** | Fly.io Amsterdam, wss://daemon.example.com | nvidia/nemotron-3-super-120b-a12b:free | OpenRouter |
+| **Vessel** | wss://daemon.example.com | nvidia/nemotron-3-super-120b-a12b:free | OpenRouter |
 
 ## Round 1: Issue Dispatch (5 tasks, 2 agents)
 
