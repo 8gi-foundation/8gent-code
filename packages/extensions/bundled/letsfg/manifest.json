@@ -1,0 +1,13 @@
+{
+	"name": "letsfg",
+	"version": "0.1.0",
+	"description": "Search flights with LetsFG. Booking asks you first, every time, with the price.",
+	"command": "bun",
+	"args": ["letsfg.ts"],
+	"permissions": [
+		"tool:search_flights",
+		"tool:get_flight_results",
+		"tool:get_flight_booking",
+		"tool:book_flight"
+	]
+}
