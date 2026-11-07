@@ -9,11 +9,14 @@
  *
  * Off until a person turns it on: enableExtension() asks, default No, and a
  * session with no terminal answers No. The grant is bound to the manifest
- * bytes, so editing the manifest turns the extension off again. An unattended
- * host never starts the child at all.
+ * bytes and to the program it runs (grant.ts), so editing either turns the
+ * extension off again. An unattended host starts nothing unless the person
+ * approved that one run in advance (`8gent ext approve-run`).
+ *
+ * Children are closed when the host exits and on SIGINT, SIGTERM and SIGHUP.
+ * SIGKILL cannot be caught: after one, a child only sees its stdin close.
  */
 
-import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline/promises";
@@ -21,6 +24,19 @@ import { unattended } from "../core/one-yes";
 import type { MCPToolSchema } from "../mcp/tool-bridge";
 import { StdioTransport } from "../mcp/transport";
 import { ToolG8 } from "../permissions/toolg8";
+import {
+	DEFAULT_TTL_MS,
+	type Fingerprint,
+	MAX_TTL_MS,
+	changedMessage,
+	fingerprint,
+	grantHash,
+	grantText,
+	mintApproval,
+	newRunId,
+	pruneRuns,
+	verifyApproval,
+} from "./grant";
 
 export const PROCESS_MANIFEST = "manifest.json";
 const ENABLED_FILE = ".enabled";
@@ -62,24 +78,64 @@ export function parseProcessManifest(bytes: Buffer): ProcessManifest | null {
 /** A folder name that would reorder or rewrite a terminal line is not an extension. */
 export const unsafeFolderName = (dir: string): boolean => UNSAFE.test(path.basename(dir));
 
-const digest = (bytes: Buffer): string => createHash("sha256").update(bytes).digest("hex");
+export type GrantState =
+	| { state: "ok"; fp: Fingerprint; hash: string }
+	| { state: "none" }
+	| { state: "changed"; message: string };
 
-/** Read a manifest once; `enabled` says whether a person granted exactly these bytes. */
+/** Hash the manifest and what it names now. Throws when the program cannot be resolved. */
+export function currentFingerprint(dir: string, manifestFile: string, bytes: Buffer): Fingerprint {
+	if (manifestFile === PROCESS_MANIFEST) {
+		const m = parseProcessManifest(bytes);
+		if (!m) throw new Error("Invalid manifest");
+		return fingerprint(dir, bytes, m);
+	}
+	// A legacy in-process manifest: bind its entry file.
+	let entry: unknown;
+	try {
+		entry = JSON.parse(bytes.toString("utf-8"))?.entry;
+	} catch {}
+	return fingerprint(dir, bytes, { entry });
+}
+
+/** Compare the recorded grant with the manifest and the program as they are on disk now. */
+function checkGrant(dir: string, manifestFile: string, bytes: Buffer): GrantState {
+	let recorded: string;
+	try {
+		recorded = fs.readFileSync(path.join(dir, ENABLED_FILE), "utf-8").trim();
+	} catch {
+		return { state: "none" };
+	}
+	const folder = path.basename(dir);
+	// A grant from before #47 bound the manifest bytes only.
+	if (/^[0-9a-f]{64}$/.test(recorded))
+		return {
+			state: "changed",
+			message: `enabled before program checks; run 8gent ext enable ${folder} to review`,
+		};
+	try {
+		const fp = currentFingerprint(dir, manifestFile, bytes);
+		if (grantText(fp) === recorded) return { state: "ok", fp, hash: grantHash(fp) };
+	} catch {}
+	return { state: "changed", message: changedMessage(folder) };
+}
+
+/**
+ * Read a manifest once and check the grant against those same bytes and the
+ * program on disk now. `enabled` is true only when the grant still matches.
+ */
 export function readManifestFile(
 	dir: string,
 	manifestFile: string,
-): { bytes: Buffer; enabled: boolean } | null {
+): { bytes: Buffer; enabled: boolean; grant: GrantState } | null {
 	let bytes: Buffer;
 	try {
 		bytes = fs.readFileSync(path.join(dir, manifestFile));
 	} catch {
 		return null;
 	}
-	let enabled = false;
-	try {
-		enabled = fs.readFileSync(path.join(dir, ENABLED_FILE), "utf-8").trim() === digest(bytes);
-	} catch {}
-	return { bytes, enabled };
+	const grant = checkGrant(dir, manifestFile, bytes);
+	return { bytes, enabled: grant.state === "ok", grant };
 }
 
 export async function promptDefaultNo(question: string): Promise<boolean> {
@@ -104,13 +160,30 @@ export async function enableExtension(
 	if (!read) return false;
 	const m = manifestFile === PROCESS_MANIFEST ? parseProcessManifest(read.bytes) : null;
 	if (manifestFile === PROCESS_MANIFEST && !m) return false;
-	// JSON.stringify keeps every argument visible as one quoted element.
-	const what = m
-		? `runs the program ${JSON.stringify(m.command)} with arguments ${JSON.stringify(m.args ?? [])} as its own process`
-		: "runs code inside this process";
+	let fp: Fingerprint;
+	try {
+		fp = currentFingerprint(dir, manifestFile, read.bytes);
+	} catch {
+		// A program that cannot be found, or that leaves the folder, is never offered.
+		return false;
+	}
+	// JSON.stringify keeps every argument visible as one quoted element. The
+	// resolved path is shown, so the person sees which python3 would run.
+	const what =
+		m && fp.program
+			? `runs the program ${JSON.stringify(fp.program.path)} with arguments ${JSON.stringify(m.args ?? [])} as its own process`
+			: "runs code inside this process";
 	if (!(await ask(`Enable extension ${JSON.stringify(path.basename(dir))}? It ${what}.`)))
 		return false;
-	fs.writeFileSync(path.join(dir, ENABLED_FILE), digest(read.bytes));
+	// Grant what the person was shown: a change while the prompt was open is not granted.
+	const again = readManifestFile(dir, manifestFile);
+	try {
+		if (!again || grantText(currentFingerprint(dir, manifestFile, again.bytes)) !== grantText(fp))
+			return false;
+	} catch {
+		return false;
+	}
+	fs.writeFileSync(path.join(dir, ENABLED_FILE), grantText(fp));
 	return true;
 }
 
@@ -122,62 +195,110 @@ export interface ProcessExtension {
 }
 
 /** Declared permission first (deny by default), then the policy engine's extension_call rules. */
-function refusal(m: ProcessManifest, tool: string, attended: boolean): string | null {
+function refusal(
+	m: ProcessManifest,
+	tool: string,
+	attended: boolean,
+	runApproved: boolean,
+): string | null {
 	const declared = m.permissions ?? [];
 	if (!declared.includes(`tool:${tool}`) && !declared.includes("tool:*"))
 		return `[BLOCKED] extension ${m.name}/${tool} is not in the permissions its manifest declares. Nothing was sent to it.`;
+	// The policy engine sees the truth: who is at the keyboard, and whether this run was approved.
 	const gate = ToolG8.instance().gate("primary", "extension_call", {
 		server: m.name,
 		tool,
 		action: `${m.name}/${tool}`,
 		attended,
+		run_approved: runApproved,
 	});
 	if (gate.allowed) return null;
 	return `[BLOCKED] extension ${m.name}/${tool} was refused by policy: ${gate.reason ?? "no reason given"}. Nothing was sent to it.`;
 }
 
+// ── Host exit and signals ────────────────────────────────────────────────────
+
+const live = new Set<StdioTransport>();
+const SIGNALS: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
+const hooks = new Map<string, () => void>();
+
+function closeAll(): void {
+	for (const t of live) t.close();
+	live.clear();
+	for (const [event, fn] of hooks) process.removeListener(event, fn);
+	hooks.clear();
+}
+
+/** Close every child on exit or a terminating signal, then let the signal do what it would have done. */
+function track(t: StdioTransport): void {
+	live.add(t);
+	if (hooks.size) return;
+	hooks.set("exit", closeAll);
+	for (const sig of SIGNALS) {
+		hooks.set(sig, () => {
+			closeAll();
+			// Nobody else listens: re-raise so the default action (the host ends) still happens.
+			if (process.listenerCount(sig) === 0) process.kill(process.pid, sig);
+		});
+	}
+	for (const [event, fn] of hooks) process.on(event, fn);
+}
+
+function untrack(t: StdioTransport): void {
+	t.close();
+	live.delete(t);
+	if (live.size === 0) closeAll();
+}
+
 /**
- * The program to run. A command with a path separator is the extension's own
- * file: resolved against its folder, real path inside it. A bare name is
- * looked up on PATH, never in the host's working directory.
+ * Why this enabled extension may not start in this host, or null when it may:
+ * the grant must still match the program on disk, and either a person can
+ * answer or a valid approval covers this one run.
  */
-function resolveCommand(dir: string, command: string): string {
-	if (!command.includes("/") && !command.includes(path.sep)) return command;
-	const root = fs.realpathSync(dir);
-	const real = fs.realpathSync(path.resolve(dir, command));
-	if (real !== root && !real.startsWith(root + path.sep))
-		throw new Error(`command ${JSON.stringify(command)} is outside the extension folder`);
-	return real;
+export function startRefusal(
+	dir: string,
+	grant: GrantState,
+	attended: boolean,
+	env: Record<string, string | undefined> = process.env,
+): string | null {
+	if (grant.state === "changed") return grant.message;
+	if (grant.state !== "ok") return "disabled";
+	if (attended) return null;
+	const approval = verifyApproval(path.basename(dir), grant.hash, { env });
+	if (approval.ok) return null;
+	return env.EIGHT_EXT_APPROVAL
+		? `disabled (unattended): ${approval.reason}`
+		: "disabled (unattended)";
 }
 
 /** Spawn the child, handshake, list its tools. Throws if the child never answers. */
 export async function startProcessExtension(
 	dir: string,
-	opts: { attended?: boolean } = {},
+	opts: { attended?: boolean; env?: Record<string, string | undefined> } = {},
 ): Promise<ProcessExtension> {
+	const env = opts.env ?? process.env;
 	// A person is at the keyboard when both ends are terminals; the host may say otherwise.
 	const attended = opts.attended ?? !unattended();
 	// Unattended means no: the child's code runs at spawn, before any call is gated.
-	if (!attended) throw new Error("disabled (unattended)");
+	if (!attended && !env.EIGHT_EXT_APPROVAL) throw new Error("disabled (unattended)");
 	const read = readManifestFile(dir, PROCESS_MANIFEST);
 	const manifest = read && parseProcessManifest(read.bytes);
 	if (!read || !manifest) throw new Error("Invalid manifest");
-	if (!read.enabled) throw new Error("disabled");
+	// Checked right before every spawn: the program on disk now must be the one granted.
+	const refused = startRefusal(dir, read.grant, attended, env);
+	if (refused) throw new Error(refused);
+	const program = read.grant.state === "ok" ? read.grant.fp.program : undefined;
+	if (!program) throw new Error("Invalid manifest");
 
 	const args = manifest.args ?? [];
 	if (args.some((a) => a.split(/[\\/]/).includes("..")))
 		throw new Error("an argument leaves the extension folder");
+	// The absolute path that was hashed is the path spawned, never a fresh PATH lookup.
 	// The extension's folder is its working directory, so relative arguments mean its own files.
-	const transport = new StdioTransport(
-		resolveCommand(dir, manifest.command),
-		args,
-		undefined,
-		fs.realpathSync(dir),
-	);
+	const transport = new StdioTransport(program.path, args, undefined, fs.realpathSync(dir));
 	await transport.start();
-	// The host leaving takes the child with it.
-	const onExit = () => transport.close();
-	process.once("exit", onExit);
+	// The host leaving, or a terminating signal, takes the child with it.
+	track(transport);
 
 	let listed: MCPToolSchema[];
 	try {
@@ -189,16 +310,16 @@ export async function startProcessExtension(
 		transport.notify("notifications/initialized");
 		listed = ((await transport.send("tools/list")) as { tools?: MCPToolSchema[] })?.tools ?? [];
 	} catch (err) {
-		process.off("exit", onExit);
-		transport.close();
+		untrack(transport);
 		throw err;
 	}
 
 	const tools: ProcessExtension["tools"] = {};
 	for (const t of listed) {
 		tools[t.name] = async (callArgs = {}) => {
-			const refused = refusal(manifest, t.name, attended);
-			if (refused) return refused;
+			// Unattended reaches here only with a verified approval for this run and program.
+			const blocked = refusal(manifest, t.name, attended, !attended);
+			if (blocked) return blocked;
 			try {
 				const res = (await transport.send("tools/call", {
 					name: t.name,
@@ -217,16 +338,112 @@ export async function startProcessExtension(
 		manifest,
 		tools,
 		close() {
-			process.off("exit", onExit);
-			transport.close();
+			untrack(transport);
 		},
 	};
 }
 
-if (import.meta.main && process.argv[2] === "enable" && process.argv[3]) {
-	const dir = path.resolve(process.env.HOME ?? "~", ".8gent", "extensions", process.argv[3]);
-	const file = fs.existsSync(path.join(dir, PROCESS_MANIFEST))
-		? PROCESS_MANIFEST
-		: "8gent-extension.json";
-	console.log((await enableExtension(dir, file)) ? "enabled" : "not enabled");
+// ── 8gent ext ────────────────────────────────────────────────────────────────
+
+const EXTENSIONS_ROOT = () => path.resolve(process.env.HOME ?? "~", ".8gent", "extensions");
+
+const TTL_UNIT: Record<"s" | "m" | "h", number> = { s: 1000, m: 60_000, h: 3_600_000 };
+
+/** "90m", "1h", "45s" or a bare number of minutes. */
+export function parseTtl(v: string | undefined): number | null {
+	if (v === undefined) return DEFAULT_TTL_MS;
+	const m = /^(\d+)(s|m|h)?$/.exec(v.trim());
+	if (!m) return null;
+	const ms = Number(m[1]) * TTL_UNIT[(m[2] ?? "m") as keyof typeof TTL_UNIT];
+	return ms > 0 && ms <= MAX_TTL_MS ? ms : null;
 }
+
+/**
+ * `8gent ext enable <name>` and `8gent ext approve-run <name> [--ttl 1h]`.
+ * Both ask a person at a terminal, default No. Returns the exit code.
+ */
+export async function runExtCli(
+	argv: string[],
+	opts: {
+		root?: string;
+		log?: (line: string) => void;
+		ask?: (q: string) => Promise<boolean>;
+	} = {},
+): Promise<number> {
+	const log = opts.log ?? console.log;
+	const ask = opts.ask ?? promptDefaultNo;
+	const [sub, name, ...rest] = argv;
+	const usage = "Usage: 8gent ext enable <name> | 8gent ext approve-run <name> [--ttl 1h]";
+	if (!sub || !name || (sub !== "enable" && sub !== "approve-run")) {
+		log(usage);
+		return 2;
+	}
+	// A folder name only: never a path out of the extensions folder.
+	if (
+		name.includes("/") ||
+		name.includes("\\") ||
+		name === "." ||
+		name === ".." ||
+		UNSAFE.test(name)
+	) {
+		log("Not an extension name.");
+		return 2;
+	}
+	const dir = path.join(opts.root ?? EXTENSIONS_ROOT(), name);
+	if (!fs.existsSync(dir)) {
+		log(`No extension named ${JSON.stringify(name)} is installed.`);
+		return 1;
+	}
+	const legacy = !fs.existsSync(path.join(dir, PROCESS_MANIFEST));
+
+	if (sub === "enable") {
+		const ok = await enableExtension(dir, legacy ? "8gent-extension.json" : PROCESS_MANIFEST, ask);
+		log(ok ? "enabled" : "not enabled");
+		return ok ? 0 : 1;
+	}
+
+	const ttlFlag = rest.indexOf("--ttl");
+	const ttl = parseTtl(ttlFlag >= 0 ? rest[ttlFlag + 1] : undefined);
+	if (ttl === null) {
+		log("--ttl must be like 30m or 2h, at most 24h.");
+		return 2;
+	}
+	if (legacy) {
+		log("Only out-of-process extensions (manifest.json) can be approved for a run.");
+		return 1;
+	}
+	const read = readManifestFile(dir, PROCESS_MANIFEST);
+	if (!read || read.grant.state !== "ok") {
+		log(
+			read?.grant.state === "changed"
+				? read.grant.message
+				: `not enabled; run 8gent ext enable ${name} first`,
+		);
+		return 1;
+	}
+	const minutes = Math.round(ttl / 60_000);
+	const program = read.grant.fp.program?.path ?? "";
+	// The manifest was validated on read: no control characters reach this line.
+	const declared = (parseProcessManifest(read.bytes)?.permissions ?? [])
+		.filter((p) => p.startsWith("tool:"))
+		.map((p) => (p === "tool:*" ? "every tool it offers" : p.slice(5)));
+	const tools = declared.length ? JSON.stringify(declared) : "none (no tool can be called)";
+	if (
+		!(await ask(
+			`Let extension ${JSON.stringify(name)} start once, with nobody at the keyboard, within ${minutes} min? It runs ${JSON.stringify(program)}, and its tools ${tools} will be called without asking during that run, unless a policy rule blocks them.`,
+		))
+	) {
+		log("not approved");
+		return 1;
+	}
+	const run = newRunId();
+	pruneRuns();
+	const token = mintApproval({ ext: name, grant: read.grant.hash, run, ttlMs: ttl });
+	log(`Approved ${name} for one run, until ${new Date(Date.now() + ttl).toISOString()}.`);
+	log("Set both in that run's environment:");
+	log(`EIGHT_RUN_ID=${run}`);
+	log(`EIGHT_EXT_APPROVAL=${token}`);
+	return 0;
+}
+
+if (import.meta.main) process.exitCode = await runExtCli(process.argv.slice(2));
