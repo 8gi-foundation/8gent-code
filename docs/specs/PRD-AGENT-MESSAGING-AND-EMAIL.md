@@ -192,6 +192,8 @@ After 4-week reputation warm-up + abuse infra in place + first 50 paying users, 
 ## Boardroom dissent (recorded for audit)
 
 - **8CO Luis** dissented on building over partnering with AgentMail.to. Position: standards-aligned, fast time-to-ship. Resolution: AgentMail confirmed closed-source SaaS via WebFetch; partnering would cede identity layer; Chair ratified build path.
+- **8SO Karen** initial veto on `*.8gentos.com` subdomain email assumed Fly.io hosting (port 25 blocked, no PTR). Reissued position with Hetzner context: technical blockers resolved, residual risk = shared sender reputation, mitigated by per-user DKIM + abuse rate limits + Postmark relay for outbound deliverability.
+  - Superseded 2026-11-07: the hosting named in this ruling is retired and hosting is no longer described in this repo. The conditions still bind any mail host: outbound port 25 open, PTR matching the MX, per-user DKIM, abuse rate limits, relay for outbound until reputation is warm.
 - **8GO Solomon** asked for heavy 8gi-foundation RFC. Chair downgraded to RFC-light: this PRD + decision comments on #1428/#1633 + cross-link from each downstream repo's CLAUDE.md.
 
 ## References
