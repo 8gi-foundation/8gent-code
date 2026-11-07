@@ -527,7 +527,14 @@ import {
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as pathMod from "node:path";
+import { MemoryStore } from "../../../packages/memory/store.js";
 import { bootTrace } from "./lib/boot-trace.js";
+import {
+	HISTORY_USAGE,
+	formatHits,
+	parseHistoryArgs,
+	runHistorySearch,
+} from "./lib/history-search.js";
 import { createFallbackNoticeGate } from "./lib/fallback-notice-once.js";
 import {
 	type CliTabPin,
@@ -5483,6 +5490,36 @@ export function App({
 
 				case "history": {
 					historyPickDaemonRef.current = false;
+					const hist = parseHistoryArgs(args);
+					if (hist.kind === "usage") {
+						addSystemMessage(HISTORY_USAGE);
+						break;
+					}
+					if (hist.kind === "open") {
+						const target = sessionMgr.resume(hist.id);
+						if (!target) addSystemMessage(`Session "${hist.id}" not found. /history search finds them.`);
+						else openStoredSession(target.id);
+						break;
+					}
+					if (hist.kind === "search") {
+						try {
+							// Same local memory file as the agent's global store; nothing leaves the device.
+							const dataDir = process.env.EIGHT_DATA_DIR || pathMod.join(os.homedir(), ".8gent");
+							const memDir = pathMod.join(dataDir, "memory");
+							fs.mkdirSync(memDir, { recursive: true, mode: 0o700 });
+							const store = new MemoryStore(pathMod.join(memDir, "memory.db"));
+							try {
+								addSystemMessage(
+									formatHits(hist.query, runHistorySearch(store.db, sessionMgr, hist.query)),
+								);
+							} finally {
+								store.db.close();
+							}
+						} catch (err) {
+							addSystemMessage(`History search failed: ${err instanceof Error ? err.message : String(err)}`);
+						}
+						break;
+					}
 					// Show local session history screen
 					const localSessions = sessionMgr.list(50);
 					if (localSessions.length === 0) {
