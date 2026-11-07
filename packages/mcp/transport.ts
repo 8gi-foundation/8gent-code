@@ -94,12 +94,14 @@ export class StdioTransport implements Transport {
 		private command: string,
 		private args: string[] = [],
 		private env?: Record<string, string>,
+		private cwd?: string,
 	) {}
 
 	async start(): Promise<void> {
 		this.proc = spawn({
 			cmd: [this.command, ...this.args],
 			env: serverEnv(this.env),
+			...(this.cwd ? { cwd: this.cwd } : {}),
 			stdin: "pipe",
 			stdout: "pipe",
 			stderr: "pipe",

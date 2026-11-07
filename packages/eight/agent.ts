@@ -35,6 +35,7 @@ import { agentTools } from "../ai/tools";
 import { createBudgetDrain, resolveTurnBudgetMs } from "../ai/turn-budget";
 import { ensureIndexed as astEnsureIndexed } from "../ast-index";
 import { loggableToolArgs } from "../computer/desktop-approval";
+import { unattended } from "../core/one-yes";
 import {
 	ExtensionHost,
 	type ExtensionLoadResult,
@@ -1244,7 +1245,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// ── Extensions: Load from ~/.8gent/extensions/ ──────────────────
 		const extMgr = getExtensionManager();
 		extMgr
-			.loadAll()
+			.loadAll({
+				// Unattended means no: nothing is started unless a person can be asked.
+				attended: config.unattended !== true && (config.attended ?? !unattended()),
+			})
 			.then((exts) => {
 				const loaded = exts.filter((e) => e.status === "loaded");
 				if (loaded.length > 0) {

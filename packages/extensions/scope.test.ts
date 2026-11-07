@@ -6,6 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -48,6 +49,13 @@ function writeExt(name: string, version: number, entry = ENTRY(version)): string
 		}),
 	);
 	fs.writeFileSync(path.join(dir, "index.js"), entry);
+	// In-process loading is off until enabled; this fixture is the enabled case.
+	fs.writeFileSync(
+		path.join(dir, ".enabled"),
+		createHash("sha256")
+			.update(fs.readFileSync(path.join(dir, "8gent-extension.json")))
+			.digest("hex"),
+	);
 	return dir;
 }
 
@@ -73,7 +81,7 @@ describe("extension scope (EIGHT_EXT_SCOPE=1)", () => {
 		const mgr = createExtensionManager({ dir: root });
 		writeExt("alpha", 1);
 		writeExt("beta", 1);
-		await mgr.loadAll();
+		await mgr.loadAll({ attended: true });
 
 		expect(mgr.getTools()["alpha:echo"]?.()).toBe("v1");
 		expect(live.count).toBe(2);
@@ -94,7 +102,7 @@ describe("extension scope (EIGHT_EXT_SCOPE=1)", () => {
 	test("reload gives exactly one of each and picks up edits", async () => {
 		const mgr = createExtensionManager({ dir: root });
 		const dir = writeExt("alpha", 1);
-		await mgr.loadAll();
+		await mgr.loadAll({ attended: true });
 
 		fs.writeFileSync(path.join(dir, "index.js"), ENTRY(2));
 		const res = await mgr.reload("alpha");
@@ -140,7 +148,7 @@ describe("extension scope (EIGHT_EXT_SCOPE=1)", () => {
 				}, 20);
 			}`,
 		);
-		await mgr.loadAll();
+		await mgr.loadAll({ attended: true });
 		expect((await mgr.unload("late")).errors).toEqual([]);
 		await Bun.sleep(60);
 		expect(bus.listenerCount("msg")).toBe(0);
@@ -158,7 +166,7 @@ describe("extension scope (EIGHT_EXT_SCOPE=1)", () => {
 				return new Promise(() => {});
 			}`,
 		);
-		const loaded = await mgr.loadAll();
+		const loaded = await mgr.loadAll({ attended: true });
 		const hang = loaded.find((e) => e.manifest.name === "hang");
 		expect(hang?.status).toBe("error");
 		expect(hang?.error).toContain("timed out");
@@ -180,7 +188,7 @@ describe("extension scope (EIGHT_EXT_SCOPE=1)", () => {
 				throw new Error("kaboom");
 			}`,
 		);
-		const ext = await loadExtension(path.join(root, "broken"));
+		const ext = await loadExtension(path.join(root, "broken"), { attended: true });
 		expect(ext.status).toBe("error");
 		expect(ext.error).toContain("kaboom");
 		expect(ext.scope).toBeUndefined();
@@ -219,7 +227,7 @@ describe("flag off (default)", () => {
 
 	test("loader does not call activate and gives no scope", async () => {
 		writeExt("alpha", 1);
-		const ext = await loadExtension(path.join(root, "alpha"));
+		const ext = await loadExtension(path.join(root, "alpha"), { attended: true });
 		expect(ext.status).toBe("loaded");
 		expect(ext.scope).toBeUndefined();
 		expect(bus.listenerCount("msg")).toBe(0);
@@ -232,7 +240,7 @@ describe("flag off (default)", () => {
 	test("manager unload and reload refuse without touching anything", async () => {
 		const mgr = createExtensionManager({ dir: root });
 		writeExt("alpha", 1);
-		await mgr.loadAll();
+		await mgr.loadAll({ attended: true });
 		expect(Object.keys(mgr.getTools())).toEqual(["alpha:ping"]);
 		expect(live.count).toBe(0);
 

@@ -1,0 +1,8 @@
+{
+	"name": "hello",
+	"version": "0.1.0",
+	"description": "Test fixture: replies hello. Not installed by default.",
+	"command": "python3",
+	"args": ["hello.py"],
+	"permissions": ["tool:hello", "tool:pid", "tool:crash"]
+}
