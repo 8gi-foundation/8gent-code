@@ -23,12 +23,12 @@
  * in the HyperFrames convention so the offline path stays open.
  */
 
-import { resolveHome } from "../core/home";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { renderSlide, THEME_VERSION, esc, type RenderContext } from "./slide-render";
+import { resolveHome } from "../core/home";
+import { type RenderContext, THEME_VERSION, esc, renderSlide } from "./slide-render";
 import type { SlideSpec } from "./slide-spec";
 
 // resolveHome reads the env at call time; the OS lookup is frozen at process
@@ -125,7 +125,12 @@ export function ensureHuddleDirs(huddleId: string): string {
  * huddle, on the floor's critical path - so it does the pure render plus one
  * file write and nothing else.
  */
-export function writeSlide(huddleId: string, turnId: string, spec: SlideSpec, ctx: RenderContext): { path: string; sha256: string } {
+export function writeSlide(
+	huddleId: string,
+	turnId: string,
+	spec: SlideSpec,
+	ctx: RenderContext,
+): { path: string; sha256: string } {
 	const dir = ensureHuddleDirs(huddleId);
 	// The huddle id is already an argument here, so the caller cannot forget it.
 	const { html, sha256 } = renderSlide(spec, { ...ctx, huddleId });
@@ -169,9 +174,13 @@ export function emitDeckV2V(manifest: HuddleManifest): string {
 		.map((t) => {
 			const spec = t.spec;
 			const lines: string[] = [`<h1>${esc(spec.heading)}</h1>`];
-			if (spec.metric) lines.push(`<p class="metric">${esc(spec.metric.value)} <small>${esc(spec.metric.label)}</small></p>`);
+			if (spec.metric)
+				lines.push(
+					`<p class="metric">${esc(spec.metric.value)} <small>${esc(spec.metric.label)}</small></p>`,
+				);
 			if (spec.quote) lines.push(`<blockquote>${esc(spec.quote.text)}</blockquote>`);
-			if (spec.compare) lines.push(`<p>${esc(spec.compare.left)} vs ${esc(spec.compare.right)}</p>`);
+			if (spec.compare)
+				lines.push(`<p>${esc(spec.compare.left)} vs ${esc(spec.compare.right)}</p>`);
 			if (spec.code) lines.push(`<pre>${esc(spec.code.text)}</pre>`);
 			const list = spec.bullets ?? spec.timeline;
 			if (list?.length) lines.push(`<ul>${list.map((b) => `<li>${esc(b)}</li>`).join("")}</ul>`);
@@ -251,7 +260,9 @@ export function emitTranscript(manifest: HuddleManifest): string {
 		"",
 	];
 	const body = manifest.turns.map((t) => {
-		const asserted = t.assertedFields.length ? `\nUnverified fields: ${t.assertedFields.join(", ")}` : "";
+		const asserted = t.assertedFields.length
+			? `\nUnverified fields: ${t.assertedFields.join(", ")}`
+			: "";
 		return [
 			`## ${t.index + 1}. ${t.name} (${t.code})`,
 			"",
@@ -328,12 +339,6 @@ export function slugify(text: string, fallback = "huddle"): string {
 	return s || fallback;
 }
 
-/**
- * Bake the manifest into the artifact set. Returns paths; never throws. A
- * failure to build the MP4 is reported honestly in `videoError` rather than
- * being swallowed, because a huddle that produced no watchable file is a
- * fact James needs, not one to hide.
- */
 /** Turns one slide's HTML into a PNG at pngPath; true only when the PNG exists. */
 export type SlideCapture = (htmlPath: string, pngPath: string) => boolean;
 
@@ -344,7 +349,17 @@ export interface BakeOptions {
 	capture?: SlideCapture;
 }
 
-export function bakeHuddle(manifest: HuddleManifest, stamp: string, opts: BakeOptions = {}): BakeResult {
+/**
+ * Bake the manifest into the artifact set. Returns paths; never throws. A
+ * failure to build the MP4 is reported honestly in `videoError` rather than
+ * being swallowed, because a huddle that produced no watchable file is a
+ * fact James needs, not one to hide.
+ */
+export function bakeHuddle(
+	manifest: HuddleManifest,
+	stamp: string,
+	opts: BakeOptions = {},
+): BakeResult {
 	const dir = ensureHuddleDirs(manifest.huddleId);
 	mkdirSync(CREATIVE_DIR, { recursive: true });
 
@@ -360,7 +375,14 @@ export function bakeHuddle(manifest: HuddleManifest, stamp: string, opts: BakeOp
 	const transcriptPath = join(dir, "transcript.md");
 	writeFileSync(transcriptPath, emitTranscript(manifest), "utf8");
 
-	const result: BakeResult = { manifestPath, deckPath, deckV2VPath, transcriptPath, videoPath: null, slidePngs: [] };
+	const result: BakeResult = {
+		manifestPath,
+		deckPath,
+		deckV2VPath,
+		transcriptPath,
+		videoPath: null,
+		slidePngs: [],
+	};
 
 	if (manifest.turns.length === 0) {
 		result.videoError = "no turns to bake";
@@ -411,15 +433,38 @@ export function bakeHuddle(manifest: HuddleManifest, stamp: string, opts: BakeOp
 		const clip = join(work, `clip-${String(turn.index).padStart(3, "0")}.mp4`);
 		const secs = (turn.durationMs / 1000).toFixed(3);
 		const video = ["-loop", "1", "-framerate", "30", "-t", secs, "-i", png];
-		const audio = turn.audioPath && existsSync(turn.audioPath)
-			? ["-ss", (turn.audioOffsetMs / 1000).toFixed(3), "-t", secs, "-i", turn.audioPath]
-			: ["-f", "lavfi", "-t", secs, "-i", "anullsrc=r=44100:cl=stereo"];
+		const audio =
+			turn.audioPath && existsSync(turn.audioPath)
+				? ["-ss", (turn.audioOffsetMs / 1000).toFixed(3), "-t", secs, "-i", turn.audioPath]
+				: ["-f", "lavfi", "-t", secs, "-i", "anullsrc=r=44100:cl=stereo"];
 		const ok = ffmpegClip([
-			"-y", ...video, ...audio,
-			"-map", "0:v:0", "-map", "1:a:0",
-			"-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-r", "30",
-			"-c:a", "aac", "-b:a", "160k", "-ar", "44100", "-ac", "2",
-			"-t", secs, "-shortest", clip,
+			"-y",
+			...video,
+			...audio,
+			"-map",
+			"0:v:0",
+			"-map",
+			"1:a:0",
+			"-c:v",
+			"libx264",
+			"-preset",
+			"veryfast",
+			"-pix_fmt",
+			"yuv420p",
+			"-r",
+			"30",
+			"-c:a",
+			"aac",
+			"-b:a",
+			"160k",
+			"-ar",
+			"44100",
+			"-ac",
+			"2",
+			"-t",
+			secs,
+			"-shortest",
+			clip,
 		]);
 		if (!ok || !existsSync(clip)) {
 			result.videoError = `ffmpeg clip failed for turn ${turn.index}`;
@@ -431,10 +476,27 @@ export function bakeHuddle(manifest: HuddleManifest, stamp: string, opts: BakeOp
 	// 3. Concat. All clips share codec parameters by construction, so a stream
 	//    copy is safe and fast.
 	const listPath = join(work, "clips.txt");
-	writeFileSync(listPath, clips.map((c) => `file '${c.replace(/'/g, "'\\''")}'`).join("\n"), "utf8");
+	writeFileSync(
+		listPath,
+		clips.map((c) => `file '${c.replace(/'/g, "'\\''")}'`).join("\n"),
+		"utf8",
+	);
 	const outName = `huddle-${slugify(manifest.topic)}-${stamp}.mp4`;
 	const outPath = join(CREATIVE_DIR, outName);
-	const ok = ffmpegClip(["-y", "-f", "concat", "-safe", "0", "-i", listPath, "-c", "copy", "-movflags", "+faststart", outPath]);
+	const ok = ffmpegClip([
+		"-y",
+		"-f",
+		"concat",
+		"-safe",
+		"0",
+		"-i",
+		listPath,
+		"-c",
+		"copy",
+		"-movflags",
+		"+faststart",
+		outPath,
+	]);
 	if (!ok || !existsSync(outPath)) {
 		result.videoError = "ffmpeg concat failed";
 		return result;
@@ -456,7 +518,9 @@ export function bakeHuddle(manifest: HuddleManifest, stamp: string, opts: BakeOp
 	try {
 		result.recording = writeRecordingToManifest(manifestPath, manifest, outPath);
 	} catch (err) {
-		console.warn(`[bake] recording linkage failed for ${manifest.huddleId}: ${(err as Error).message}`);
+		console.warn(
+			`[bake] recording linkage failed for ${manifest.huddleId}: ${(err as Error).message}`,
+		);
 	}
 	return result;
 }

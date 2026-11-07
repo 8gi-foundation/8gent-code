@@ -26,22 +26,22 @@
  */
 
 import { afterAll, describe, expect, it } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { spawnSync } from "node:child_process";
 import {
-	bakeHuddle,
-	findChrome,
-	slideToPng,
-	huddleDir,
-	sha256File,
-	writeRecordingToManifest,
-	THEME_VERSION,
 	type BakedTurn,
 	type HuddleManifest,
 	type SlideCapture,
+	THEME_VERSION,
+	bakeHuddle,
+	findChrome,
+	huddleDir,
+	sha256File,
+	slideToPng,
+	writeRecordingToManifest,
 } from "../bake";
 
 function manifestOf(huddleId: string, turns: BakedTurn[]): HuddleManifest {
@@ -83,7 +83,18 @@ const ffmpegPresent = spawnSync("ffmpeg", ["-version"], { encoding: "utf8" }).st
 const stillFrame: SlideCapture = (_htmlPath, pngPath) =>
 	spawnSync(
 		"ffmpeg",
-		["-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=0x100c0b:s=1920x1080", "-frames:v", "1", pngPath],
+		[
+			"-y",
+			"-loglevel",
+			"error",
+			"-f",
+			"lavfi",
+			"-i",
+			"color=c=0x100c0b:s=1920x1080",
+			"-frames:v",
+			"1",
+			pngPath,
+		],
 		{ encoding: "utf8", timeout: 60_000 },
 	).status === 0 && existsSync(pngPath);
 
