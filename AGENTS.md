@@ -21,7 +21,7 @@
 - **Monorepo:** `apps/` (tui, clui, dashboard, debugger, demos, installer) + `packages/` (agent, providers, tools, etc.)
 - **Provider model (CRITICAL - do not restate as "Ollama default"):** Out-of-box active provider = `8gent` (localhost, model `eight-1.0-q3:14b`); `ollama` is also enabled. Runtime clients exist for Ollama + LM Studio + OpenRouter (`packages/eight/clients/`). 11 providers wired in the registry (`packages/providers/index.ts`): `8gent`, `ollama`, `openrouter`, `groq`, `grok`, `openai`, `anthropic`, `mistral`, `together`, `fireworks`, `replicate`. Everything except `8gent`/`ollama` is opt-in via API key. Failover chain (`packages/providers/failover.ts`): local 8gent -> local Qwen -> OpenRouter `:free`. `auto:free` resolves to the best currently-available `:free` model on OpenRouter. Apple Foundation Model is NOT wired (James runs it externally). Cerebras / Chutes / Cohere are NOT wired (candidates to add).
 - **Multi-agent orchestration:** First-class. `packages/daemon/agent-pool.ts` holds up to 10 concurrent sessions. `claude-code/src/tools/AgentTool/forkSubagent.ts` lets a parent spawn children that inherit full context. Sessions carry a `channel` field (`os`, `app`, `telegram`, `discord`, `api`) - extensible for third-party terminal hosts (cmux, etc.).
-- **Deployment:** Eight kernel as persistent daemon on Fly.io Amsterdam ([daemon.example.com](https://daemon.example.com))
+- **Deployment:** Eight kernel runs as a persistent daemon you self-host. Protocol: `docs/specs/DAEMON-PROTOCOL.md`. Hosted service: see the platform repos (control plane, model proxy).
 
 ### Ecosystem
 
@@ -59,9 +59,8 @@ See [BRAND.md](BRAND.md) for all design, color, typography, and brand rules.
 
 ### Eight Kernel (Vessel Daemon)
 
-The Eight kernel runs as a persistent daemon on **Fly.io** (Amsterdam region).
+The Eight kernel runs as a persistent daemon that you self-host. For the hosted service, see the platform repos (control plane, model proxy).
 
-- **URL:** [daemon.example.com](https://daemon.example.com)
 - **Protocol:** Daemon Protocol v1.0 (WebSocket, auth, sessions, streaming)
 - **Package:** `packages/daemon/` - always-on process with `AgentPool`
 - **Retry:** 4-strategy retry loop
@@ -150,7 +149,7 @@ benchmarks/           <- Execution-graded benchmarks + autoresearch harness.
 3. **No dollar values on benchmarks.** Describe what tasks test, not what they'd cost.
 4. **No stat padding.** Never pad descriptions with arbitrary numbers (package counts, benchmark counts, commit counts). Only state what actually exists with evidence.
 5. **No enthusiasm inflation.** Don't oversell. State what was done, what works, what doesn't.
-6. **No secrets in chat. Ever.** Never ask the user to paste tokens, API keys, passwords, or any credentials in the chat. Never output secrets to chat logs. Read secrets from env files or secret managers directly. Use `flyctl secrets set`, env files, or similar tooling. This rule is non-negotiable and applies to all agents, sub-agents, and vessel processes.
+6. **No secrets in chat. Ever.** Never ask the user to paste tokens, API keys, passwords, or any credentials in the chat. Never output secrets to chat logs. Read secrets from env files or secret managers directly. Use env files or your secret manager. This rule is non-negotiable and applies to all agents, sub-agents, and vessel processes.
 7. **No AI tooling company traces in 8GI GitHub.** Never add "Co-Authored-By: Claude", "Anthropic", "Generated with Claude Code", "OpenAI", or any AI tool vendor attribution to commits, PRs, issues, or code comments. Work is signed by 8GI Foundation and/or the 8gent vessels (8EO, 8TO, etc.) when James is orchestrating. No third-party AI tool branding in any 8GI repo.
 8. **No AI vendor names in any product surface.** No "Export for AI", "Send to Claude", etc. No customer-facing AI/tooling language.
 9. **No direct push to main.** Always feature branch + PR.
@@ -558,7 +557,6 @@ apps/tui/src/
 - **Auth**: Clerk (prod + dev)
 - **Billing**: Stripe
 - **Storage**: Hetzner Object Storage
-- **Vessel runtime**: Fly.io Amsterdam (daemon.example.com) - parallel to Hetzner, not replaced yet
 
 ### 8gent OS Tenant Model
 - Each user gets `{username}.8gentos.com`
@@ -680,7 +678,6 @@ Async messaging across sessions and agents.
 |-----------|-------|
 | Vercel | All repos deployed, green |
 | Hetzner cax21 (nbg1) | IP [REDACTED-IP] - greenfield, SSH key setup needed |
-| Fly.io (daemon.example.com) | Running, parallel to Hetzner |
 | Convex | Multi-tenant, row-level via tenantId |
 | Clerk | Auth on prod + dev |
 | Stripe | Billing configured |

@@ -190,7 +190,7 @@ High-precision async debounce with cancellation token.
 
 ### Model Selection
 - Primary: Ollama (local, `eight-1-q-14b` or `qwen3.5`)
-- Fallback: Vessel pool (5 instances on Fly.io AMS, round-robin)
+- Fallback: Vessel pool (5 instances, round-robin)
 - Timeout: 30 seconds per request
 - Retry: 3 attempts with exponential backoff
 
@@ -504,7 +504,7 @@ Every 20 experiments (or weekly), analyze factory-log.json for patterns in succe
 | **Factory Log** | scripts/factory-log.json | JSONL append-only | Audit trail of all experiments | ~100 entries/week |
 | **Meta-Analyzer** | scripts/meta-analyzer.ts | Bun | Weekly analysis, recommendations | On-demand |
 | **Ollama** | localhost:11434 | Local or remote | LLM for code generation | Single instance |
-| **Vessel Pool** | eight-factory on Fly.io AMS | Fly.io | Fallback/parallel generation | 5 instances |
+| **Vessel Pool** | eight-factory | self-hosted | Fallback/parallel generation | 5 instances |
 | **GitHub API** | Octokit (npm) | Cloud | Branch/PR creation, merging | Rate-limited: 60 req/hour |
 | **Telegram Bot** | [REDACTED-BOT] | Cloud | Notifications and approvals | Instant |
 
@@ -537,7 +537,7 @@ Every 20 experiments (or weekly), analyze factory-log.json for patterns in succe
   },
   "modelFallback": {
     "type": "vessel",
-    "endpoint": "https://eight-factory.fly.dev",
+    "endpoint": "https://factory.example.com",
     "poolSize": 5,
     "timeout": 30000
   },
