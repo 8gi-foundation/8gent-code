@@ -4195,10 +4195,17 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						console.log(
 							`[agent] ${currentEntry.provider}/${currentEntry.model} failed: ${msg.slice(0, 200)} -> failover`,
 						);
+						// The HTTP status rides on the error object, not its message (AI SDK
+						// APICallError, or the last one inside a RetryError): keep it, so the
+						// turn's error row can say "HTTP 401, key rejected" and not a bare count.
+						const status = err?.statusCode ?? err?.lastError?.statusCode;
 						errors.push({
 							provider: currentEntry.provider,
 							model: currentEntry.model,
-							error: msg.slice(0, 200),
+							error: (typeof status === "number" && !msg.startsWith(`HTTP ${status}`)
+								? `HTTP ${status}: ${msg}`
+								: msg
+							).slice(0, 200),
 						});
 						failover.markDown(currentEntry.model, currentEntry.provider);
 						if (affinityOn) this.affinityDown.push({ ...currentEntry });

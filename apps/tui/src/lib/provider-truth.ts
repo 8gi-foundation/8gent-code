@@ -141,6 +141,21 @@ export function registryKeyNotice(
 	}
 }
 
+/**
+ * The provider answered its own model-list request with 401 or 403: the key it holds is
+ * rejected, so no turn can succeed. Before this, a provider whose models were recorded
+ * by an earlier discovery kept that list, a model was picked from it, and the first
+ * message failed as "all providers failed (1 tried)" with the 401 dropped. Null when
+ * the error is anything else (or none).
+ */
+export function keyRejectedNotice(displayName: string, name: string, err: unknown): string | null {
+	const msg = err instanceof Error ? err.message : err ? String(err) : "";
+	const status = /: (40[13])\b/.exec(msg)?.[1];
+	if (!status) return null;
+	const id = name === "openrouter-free" ? "openrouter" : name;
+	return `${displayName} rejected its key (HTTP ${status}), so nothing was sent. Run \`8gent keys set ${id}\` with a new key, then restart 8gent, or /provider to pick another.`;
+}
+
 /** Why a model list could not be had, from the discovery error. Key is present here. */
 export function modelListFailureNotice(displayName: string, err: unknown): string {
 	const msg = err instanceof Error ? err.message : err ? String(err) : "";
