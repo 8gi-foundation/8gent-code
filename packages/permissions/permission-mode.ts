@@ -188,6 +188,7 @@ export const PLAN_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
 	"update_plan",
 	"read_file",
 	"list_files",
+	"batch", // read-only calls only; each is gated again on its own (#69)
 	"git_status",
 	"git_diff",
 	"git_log",

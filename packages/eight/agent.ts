@@ -1604,6 +1604,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"get_symbol",
 			"search_symbols",
 			"locate",
+			"batch",
 			// Sight (#3641): a model that can see gets the pixels through
 			// read_image; one that cannot gets a description through describe_image.
 			"read_image",

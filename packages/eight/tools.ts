@@ -298,6 +298,7 @@ import {
 } from "./placeholder-paths";
 import { readOnlyChain, readPrefixesFor } from "./read-chain";
 import { RetiredFacts } from "./retired-facts";
+import { BATCH_TOOL_DEF, runReadBatch } from "./batch-read";
 import { RUN_BATCH_TOOL_DEF, runBatch, runBatchOn } from "./run-batch";
 import { ensureScratchExcludedIfPresent } from "./scratch-exclude";
 import { scrubKeepingAttachment, scrub as scrubSecrets } from "./secret-scanner";
@@ -2376,6 +2377,8 @@ export class ToolExecutor {
 			...getTermToolDefs(),
 			// Lean MCP access (#3474): advertised only with EIGHT_MCP_LEAN=1 exactly.
 			...(process.env.EIGHT_MCP_LEAN === "1" ? MCP_LEAN_TOOL_DEFS : []),
+			// Read-only batch (#69): always offered, refuses anything that is not a read.
+			BATCH_TOOL_DEF,
 			// Action chunks (#3502): advertised only with EIGHT_RUN_BATCH=1 exactly.
 			...(runBatchOn() ? [RUN_BATCH_TOOL_DEF] : []),
 			// Posting (#3595): advertised only where the tg-group helper is installed.
@@ -3155,6 +3158,10 @@ export class ToolExecutor {
 				return vercelListDomains(args.projectId as string);
 			case "vercel_get_deployment_logs":
 				return vercelGetDeploymentLogs(args.deploymentId as string);
+
+			case "batch":
+				// Each call re-enters execute(): same permission mode, gate and read boundary as alone.
+				return runReadBatch(args.calls, (t, a) => this.execute(t, a));
 
 			case "run_batch":
 				if (!runBatchOn()) return "Error: run_batch is not enabled. Nothing was run.";
