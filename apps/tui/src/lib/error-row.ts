@@ -9,6 +9,8 @@
  * warning, a nudge, the circuit breaker) is one `!` line in the agent's own words.
  */
 
+import { scrub } from "../../../../packages/eight/secret-scanner.js";
+
 export type ErrorKind =
 	| "timeout"
 	| "network"
@@ -24,6 +26,8 @@ export interface ErrorRow {
 	/** One line, at most 70 characters. */
 	cause: string;
 	retry?: { n: number; of: number };
+	/** Each provider a failed turn tried, as "provider/model: its error", in order. */
+	tried?: string[];
 	next?: string;
 }
 
@@ -79,11 +83,19 @@ export function classifyError(text: string): ErrorRow {
 	const t = clean(text);
 	const exhausted = /^\s*(?:\[Error\]\s*)?All providers exhausted \((\d+) attempted\)/.exec(t);
 	if (exhausted) {
-		return {
+		// The turn lists every provider it tried as "  - provider/model: error" (packages/eight).
+		const tried = t
+			.split("\n")
+			.map((l) => /^\s*-\s+(\S+:\s.*\S)\s*$/.exec(l)?.[1])
+			.filter((l): l is string => !!l);
+		const row: ErrorRow = {
 			kind: "provider",
 			cause: `all providers failed (${exhausted[1]} tried)`,
 			next: NEXT.provider,
 		};
+		// A provider can quote part of a rejected key back: every line goes through scrub().
+		if (tried.length) row.tried = tried.map((l) => scrub(l).scrubbed);
+		return row;
 	}
 	let kind: ErrorKind = "error";
 	if (/\[BLOCKED\]|refused by policy|\[PERMISSION DENIED\]|blocked by policy/i.test(t))
@@ -148,6 +160,8 @@ export function errorLines(row: ErrorRow, width: number): string[] {
 		out.push(clip(`✗ ${LABEL[row.kind]}: ${cause}`, width));
 		if (row.retry) out.push(clip(`  retry ${row.retry.n}/${row.retry.of}`, width));
 	}
+	for (const t of row.tried ?? [])
+		out.push(clip(`  ${scrub(clean(t)).scrubbed.replace(/\s+/g, " ")}`, width));
 	if (row.next) out.push(clip(`  next: ${clean(row.next)}`, width));
 	return out;
 }

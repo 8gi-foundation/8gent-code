@@ -138,7 +138,9 @@ describe("the deck follows the real player", () => {
 		// mpv complains while it loads.
 		player?.stderr.emit("data", "[ytdl_hook] ERROR: youtube-dl failed: unable to download\n");
 		const result = await started;
-		expect(result).toMatch(/^Could not play: the stream would not open\./);
+		expect(result).toMatch(
+			/^Could not play: mpv could not open the stream \(cause not checked\)\. mpv said: "/,
+		);
 		expect(result).not.toMatch(/Now playing|ytdl_hook/);
 		expect((await dj.status()).playing).toBe(false);
 	});
@@ -287,7 +289,9 @@ describe("the verdict and the player's output", () => {
 		player?.stderr.emit("data", "[cplayer] Failed to open https://example.invalid/track.\n");
 		const result = await started;
 		// The complaint is kept and mapped; the chatter is dropped and never shown.
-		expect(result).toMatch(/^Could not play: the stream would not open\./);
+		expect(result).toMatch(
+			/^Could not play: mpv could not open the stream \(cause not checked\)\. mpv said: "/,
+		);
 		expect(result).not.toMatch(/AO:|opensles|cplayer/);
 	});
 

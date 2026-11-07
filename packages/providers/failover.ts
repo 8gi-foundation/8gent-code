@@ -672,6 +672,44 @@ export class ModelFailover {
 		return null;
 	}
 
+	/**
+	 * Where a turn goes after `current` failed (and was marked down), or null when nothing
+	 * is left. A model with a chain of its own goes where resolve() sends it, unchanged. A
+	 * model with none (a hosted registry model such as minimax's) used to end the turn after
+	 * one try (phone, 7 Nov); now, unless the policy is cloud-first, a local entry from this
+	 * channel's chains comes first, then whatever resolve() would have given. Local entries
+	 * pass the same allowlist as the chains, and one already down is never handed back.
+	 */
+	nextAfter(
+		current: FailoverEntry,
+		channel: FailoverChannel = "text",
+		sessionId?: string,
+	): FailoverEntry | null {
+		let next: FailoverEntry | null;
+		try {
+			next = this.resolve(current.model, channel, sessionId);
+		} catch (err) {
+			if (!(err instanceof NoAllowedProviderError)) throw err;
+			next = null;
+		}
+		if (next && sameEntry(next, current)) next = null;
+		if (this.chainsByChannel[channel]?.[current.model]) return next;
+		if (next && this.isDown(next.model, next.provider)) next = null;
+		if (next && this.policy() === "cloud-first") return next;
+		return this.localFallback(channel) ?? next;
+	}
+
+	/** The first local entry of this channel's chains that is not down, in chain order. */
+	private localFallback(channel: FailoverChannel): FailoverEntry | null {
+		for (const chain of Object.values(this.chainsByChannel[channel] ?? {})) {
+			for (const e of chain?.models ?? []) {
+				if (typeof e?.provider !== "string" || isHostedProvider(e.provider)) continue;
+				if (!this.isDown(e.model, e.provider)) return e;
+			}
+		}
+		return null;
+	}
+
 	markDown(model: string, provider: string): void {
 		this.down.add(this.key(model, provider));
 	}
@@ -702,4 +740,8 @@ export class ModelFailover {
 			process.stderr.write(`[failover] ${JSON.stringify(event)}\n`);
 		}
 	}
+}
+
+function sameEntry(a: FailoverEntry, b: FailoverEntry): boolean {
+	return a.model === b.model && a.provider === b.provider;
 }
