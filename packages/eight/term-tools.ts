@@ -157,7 +157,7 @@ export async function gateInput(tool: string, text: string): Promise<string | nu
 	if (unreadable(text)) {
 		const ok = await pm.askPerson(
 			"Type Into Terminal Session",
-			"The agent wants to type text that cannot be read as a plain command.",
+			"8gent wants to type text that cannot be read as a plain command.",
 			tail(text),
 		);
 		return ok
@@ -169,7 +169,7 @@ export async function gateInput(tool: string, text: string): Promise<string | nu
 		if (pm.checkPermission(line) === "ask") {
 			const ok = await pm.requestPermission(
 				"Execute Shell Command",
-				"The agent wants to run a command in a terminal session.",
+				"8gent wants to run a command in a terminal session.",
 				tail(line),
 			);
 			if (!ok) return refuse(`user declined to run: ${line}`);

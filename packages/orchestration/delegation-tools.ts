@@ -103,7 +103,7 @@ async function gateShellChild(
 					"Spawn Shell Agent",
 					dangerous
 						? "This command may modify system files or cause data loss."
-						: "The agent wants to run a shell command as a background agent.",
+						: "8gent wants to run a shell command as a background agent.",
 					command,
 					{ cwd },
 				);

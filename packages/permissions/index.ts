@@ -1502,7 +1502,7 @@ export async function requestCommandPermission(command: string): Promise<boolean
 
 	return manager.requestPermission(
 		"Execute Command",
-		"The agent wants to run a shell command.",
+		"8gent wants to run a shell command.",
 		command,
 	);
 }

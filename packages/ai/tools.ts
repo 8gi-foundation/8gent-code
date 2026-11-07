@@ -1792,7 +1792,7 @@ async function commandRefusal(
 			"Execute Shell Command",
 			isCommandDangerous(command)
 				? "This command may modify system files or cause data loss."
-				: "The agent wants to run a shell command.",
+				: "8gent wants to run a shell command.",
 			command,
 			{ where, cwd },
 		);
