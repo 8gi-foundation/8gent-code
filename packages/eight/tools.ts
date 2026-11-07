@@ -5,6 +5,7 @@
  * This is the bridge between LLM tool calls and actual system operations.
  */
 
+import { hashFooter, staleHashRefusal, withEditHash } from "./range-hash";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -778,7 +779,8 @@ type FnDef = { type: string; function: { name: string; description: string; para
  * anchors; edit_file keeps oldText as an optional alternative. Flag off: the
  * definitions are returned untouched.
  */
-function withHashline(defs: object[]): object[] {
+function withHashline(input: object[]): object[] {
+	const defs = withEditHash(input);
 	if (!hashlineEnabled()) return defs;
 	return defs.map((d) => {
 		const def = d as FnDef;
@@ -2828,6 +2830,9 @@ export class ToolExecutor {
 					args.oldText as string,
 					args.newText as string,
 					typeof args.startLine === "number" ? args.startLine : undefined,
+					typeof args.expected_hash === "string" && args.expected_hash !== ""
+						? args.expected_hash
+						: undefined,
 				);
 			}
 			case "search_files": {
@@ -3605,7 +3610,8 @@ export class ToolExecutor {
 			}
 			const count = limit ?? (isCodeFile ? 200 : lines.length);
 			const end = Math.min(lines.length, start - 1 + count);
-			const body = numberRows(lines.slice(start - 1, end), start);
+			const shown = lines.slice(start - 1, end);
+			const body = `${numberRows(shown, start)}${hashFooter(shown, start)}`;
 			return withLinks(
 				end < lines.length
 					? `${body}\n\n[Lines ${start}-${end} of ${lines.length}. Use offset=${end + 1} to read more.]`
@@ -3654,7 +3660,7 @@ export class ToolExecutor {
 			}
 
 			return withLinks(
-				`${outlineHeader}// File has ${lines.length} lines. Showing first 200:\n\n${numberRows(lines.slice(0, 200), 1)}\n\n// ... truncated. Use offset=201 to read on, or get_outline + get_symbol for specific sections.`,
+				`${outlineHeader}// File has ${lines.length} lines. Showing first 200:\n\n${numberRows(lines.slice(0, 200), 1)}${hashFooter(lines.slice(0, 200), 1)}\n\n// ... truncated. Use offset=201 to read on, or get_outline + get_symbol for specific sections.`,
 			);
 		}
 
@@ -3662,7 +3668,7 @@ export class ToolExecutor {
 			const diff = numberDiffLines(lines);
 			if (diff !== null) return diff;
 		}
-		return withLinks(numberRows(lines, 1));
+		return withLinks(`${numberRows(lines, 1)}${hashFooter(lines, 1)}`);
 	}
 
 	private async writeFile(filePath: string, content: string): Promise<string> {
@@ -3788,6 +3794,7 @@ export class ToolExecutor {
 		oldText: string,
 		newText: string,
 		startLine?: number,
+		expectedHash?: string,
 	): Promise<string> {
 		// No anchor, no edit (#3101): indexOf("") is 0, so an empty oldText
 		// used to prepend newText to the file.
@@ -3833,6 +3840,11 @@ export class ToolExecutor {
 				return `Error: Could not find the text to replace in ${filePath}. oldText starts each line with a read_file line-number prefix (number + tab). That prefix is not in the file: send the line text only.`;
 			}
 			return formatEditNotFound(filePath, content, oldText);
+		}
+		// Hash-anchored (#70): the lines about to be replaced must still hash as read.
+		if (expectedHash) {
+			const stale = staleHashRefusal(content, resolved.idx, resolved.oldLength, expectedHash);
+			if (stale) return stale;
 		}
 		const placeholderRefused = this.placeholderRefusal(absolutePath, newText, "edit_file");
 		if (placeholderRefused) return placeholderRefused;
