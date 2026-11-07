@@ -22,7 +22,7 @@ import {
 	readProjectSettingsFile,
 	setPath,
 } from "./project.js";
-import type { Settings } from "./schema.js";
+import type { RolesSettings, Settings } from "./schema.js";
 
 // Resolved on every call through resolveHome(), which honours EIGHT_HOME and
 // $HOME. Bun fixes os.homedir() at process start, so it ignored the test
@@ -90,6 +90,12 @@ export function loadGlobalSettings(): Settings {
 		const raw = fs.readFileSync(file, "utf-8");
 		const parsed = JSON.parse(raw) as unknown;
 		const merged = deepMerge(DEFAULT_SETTINGS, parsed);
+		// models.roles (#73) has no default, so deepMerge would drop it and the next
+		// saveSettings would erase the person's roles. Carry it through.
+		const roles = (parsed as { models?: { roles?: unknown } } | null)?.models?.roles;
+		if (roles && typeof roles === "object" && !Array.isArray(roles)) {
+			merged.models = { ...merged.models, roles: roles as RolesSettings };
+		}
 		// Force version to current - older files get implicitly upgraded.
 		return { ...merged, version: DEFAULT_SETTINGS.version };
 	} catch {
