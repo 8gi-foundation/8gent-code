@@ -4247,7 +4247,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			const limitLine: string | null = guardStop.line;
 			if (limitLine) {
 				console.log(`[turn-limit] ${limitLine}`);
-				result = { ...result, text: limitLine };
+				// Keep what the model already said: a partial answer beats only the stop line.
+				const partial = typeof result?.text === "string" ? result.text.trim() : "";
+				result = { ...result, text: partial ? `${partial}\n\n${limitLine}` : limitLine };
 			}
 
 			// Cache affinity: remember which backend now holds this session's prompt.

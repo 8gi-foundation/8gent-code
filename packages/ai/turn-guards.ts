@@ -242,6 +242,26 @@ export function turnGrowthForSteps(steps: ReadonlyArray<GuardStep>): number {
 	return start && last ? Math.max(0, last - start) : 0;
 }
 
+/** Tool calls left, at or below which the model is told to answer instead of calling more. */
+export const WRAP_UP_MARGIN = 3;
+
+/**
+ * The note that turns a turn about to hit the tool-call cap into an answer. At `toolCap -
+ * WRAP_UP_MARGIN` calls the next round gets this note and no tools, so the person reads what
+ * was found, not only "Stopped after 48 tool calls". The hard stop (turnStopForSteps) stays
+ * as the backstop for a round of parallel calls that jumps past the margin. Null while the
+ * turn has room, when the cap is off, or when the cap is too small to leave a margin.
+ */
+export function wrapUpNoteForSteps(
+	steps: ReadonlyArray<GuardStep>,
+	limits: TurnLimits,
+): string | null {
+	if (limits.toolCap <= WRAP_UP_MARGIN) return null;
+	const calls = steps.reduce((n, s) => n + (s.toolCalls?.length ?? 0), 0);
+	if (calls < limits.toolCap - WRAP_UP_MARGIN) return null;
+	return `[8gent] ${calls} of ${limits.toolCap} tool calls used this turn. Do not call more tools. Answer now with what you have found so far, say what is still unknown, and offer to continue.`;
+}
+
 export function turnStopForSteps(
 	steps: ReadonlyArray<GuardStep>,
 	limits: TurnLimits,

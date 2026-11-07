@@ -24,7 +24,12 @@ import {
 	getRuntimeParams,
 } from "./tools";
 import { createBudgetDrain, resolveTurnBudgetMs } from "./turn-budget";
-import { type TurnLimits, turnGrowthForSteps, turnStopForSteps } from "./turn-guards";
+import {
+	type TurnLimits,
+	turnGrowthForSteps,
+	turnStopForSteps,
+	wrapUpNoteForSteps,
+} from "./turn-guards";
 
 export interface EightAgentConfig {
 	/**
@@ -293,6 +298,7 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 	const silentThreshold = config.silentCalls ?? 0;
 	const silentPending: string[] = [];
 	let silentFired = false;
+	let wrapUpFired = false;
 	// Carry-on mode: steps before this index were already reported.
 	let silentFrom = 0;
 	const steer = (): string[] => [
@@ -366,6 +372,7 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 			if (stepNumber === 0) budgetDrain.reset();
 			if (stepNumber === 0) {
 				silentFired = false;
+				wrapUpFired = false;
 				silentFrom = 0;
 				if (config.turnStop) config.turnStop.line = null;
 			}
@@ -381,6 +388,15 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 				const note = silentCallsNoteForSteps(steps ?? [], silentThreshold);
 				if (note) {
 					silentFired = true;
+					silentStop = true;
+					silentPending.push(note);
+				}
+			}
+			// Near the tool-call cap: answer now, no tools, so the turn ends in an answer.
+			if (!wrapUpFired && config.turnLimits && stepNumber > 0) {
+				const note = wrapUpNoteForSteps(steps ?? [], config.turnLimits);
+				if (note) {
+					wrapUpFired = true;
 					silentStop = true;
 					silentPending.push(note);
 				}
