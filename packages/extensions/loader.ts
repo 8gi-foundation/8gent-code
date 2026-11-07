@@ -7,7 +7,12 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { PROCESS_MANIFEST, isEnabled, readProcessManifest, startProcessExtension } from "./process";
+import {
+	PROCESS_MANIFEST,
+	parseProcessManifest,
+	readManifestFile,
+	startProcessExtension,
+} from "./process";
 import { createScope, scopeEnabled } from "./scope";
 import type { ExtensionManifest, ExtensionToolDef, LoadedExtension } from "./types";
 
@@ -16,6 +21,8 @@ export interface LoadOptions {
 	fresh?: boolean;
 	/** Max time activate() may take before it is rolled back. Default 5000 ms. */
 	activateTimeoutMs?: number;
+	/** A person can be asked. Default: stdin and stdout are terminals. Unattended starts nothing. */
+	attended?: boolean;
 }
 
 const EXTENSIONS_DIR = path.join(
@@ -40,23 +47,28 @@ function validateManifest(raw: unknown): ExtensionManifest | null {
 /** Load a single extension from a directory */
 export async function loadExtension(dir: string, opts: LoadOptions = {}): Promise<LoadedExtension> {
 	// Preferred shape: a separate process named by manifest.json, off until enabled.
-	const pm = fs.existsSync(path.join(dir, PROCESS_MANIFEST)) ? readProcessManifest(dir) : null;
-	if (pm) {
+	const attended = opts.attended ?? !!(process.stdin.isTTY && process.stdout.isTTY);
+	const proc = readManifestFile(dir, PROCESS_MANIFEST);
+	const pm = proc ? parseProcessManifest(proc.bytes) : null;
+	if (pm && proc) {
 		const base = { dir, module: {}, manifest: { ...pm, entry: pm.command } };
-		if (!isEnabled(dir, PROCESS_MANIFEST)) return { ...base, status: "disabled" };
+		if (!proc.enabled) return { ...base, status: "disabled" };
+		if (!attended) return { ...base, status: "disabled", error: "disabled (unattended)" };
 		try {
-			const ext = await startProcessExtension(dir);
+			const ext = await startProcessExtension(dir, { attended });
 			return { ...base, module: { tools: ext.tools } as never, status: "loaded", close: ext.close };
 		} catch (err) {
 			return { ...base, status: "error", error: `Start failed: ${err}` };
 		}
 	}
-	const manifestPath = path.join(dir, MANIFEST_FILE);
+	// One read: the bytes that were checked against the grant are the bytes parsed.
+	const legacy = readManifestFile(dir, MANIFEST_FILE);
 
 	// Parse manifest
 	let manifest: ExtensionManifest;
 	try {
-		const raw = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+		if (!legacy) throw new Error("not readable");
+		const raw = JSON.parse(legacy.bytes.toString("utf-8"));
 		const validated = validateManifest(raw);
 		if (!validated) {
 			return {
@@ -101,7 +113,9 @@ export async function loadExtension(dir: string, opts: LoadOptions = {}): Promis
 	}
 
 	// In-process loading (agent.ts still calls this on startup) is off until a person enables it.
-	if (!isEnabled(dir, MANIFEST_FILE)) return { manifest, dir, module: {}, status: "disabled" };
+	if (!legacy?.enabled) return { manifest, dir, module: {}, status: "disabled" };
+	if (!attended)
+		return { manifest, dir, module: {}, status: "disabled", error: "disabled (unattended)" };
 
 	try {
 		const mod = await import(opts.fresh ? `${entryPath}?t=${Date.now()}` : entryPath);

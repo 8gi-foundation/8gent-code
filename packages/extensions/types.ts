@@ -43,7 +43,8 @@ export interface LoadedExtension {
 
 export interface ExtensionManager {
 	extensions: LoadedExtension[];
-	loadAll(): Promise<LoadedExtension[]>;
+	/** `attended: false` starts nothing: unattended means no. */
+	loadAll(opts?: { attended?: boolean }): Promise<LoadedExtension[]>;
 	getTools(): Record<string, Function>;
 	/** Run every undo the extension registered, then drop it. Needs EIGHT_EXT_SCOPE=1. */
 	unload(name: string): Promise<{ errors: string[] }>;

@@ -27,10 +27,15 @@ export function createExtensionManager(
 	opts: { dir?: string; activateTimeoutMs?: number } = {},
 ): ExtensionManager {
 	const timeout = { activateTimeoutMs: opts.activateTimeoutMs };
+	// What the last loadAll was told, so a reload starts nothing the load would not have.
+	let attended: boolean | undefined;
 	const manager: ExtensionManager = {
 		extensions: [],
-		async loadAll() {
-			manager.extensions = await loadAllExtensions(opts.dir, timeout);
+		async loadAll(loadOpts = {}) {
+			// A second load must not leave the first load's children running.
+			for (const e of manager.extensions) e.close?.();
+			attended = loadOpts.attended;
+			manager.extensions = await loadAllExtensions(opts.dir, { ...timeout, ...loadOpts });
 			return manager.extensions;
 		},
 		getTools() {
@@ -50,7 +55,7 @@ export function createExtensionManager(
 			const dir = manager.extensions.find((e) => e.manifest.name === name)?.dir;
 			if (!dir) return { errors: [`[ext] ${name}: not loaded`] };
 			const { errors } = await manager.unload(name);
-			const ext = await loadExtension(dir, { ...timeout, fresh: true });
+			const ext = await loadExtension(dir, { ...timeout, attended, fresh: true });
 			manager.extensions.push(ext);
 			return { errors: ext.error ? [...errors, ext.error] : errors };
 		},

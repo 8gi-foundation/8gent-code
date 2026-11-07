@@ -8,8 +8,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { addPolicy } from "../permissions/policy-engine";
+import { createExtensionManager } from "./index";
 import { collectExtensionTools, loadAllExtensions } from "./loader";
-import { enableExtension, startProcessExtension } from "./process";
+import { enableExtension, parseProcessManifest, startProcessExtension } from "./process";
 
 const FIXTURE = path.join(import.meta.dir, "fixtures", "hello");
 const yes = async () => true;
@@ -84,22 +85,142 @@ describe("disabled by default", () => {
 });
 
 describe("enabled extension", () => {
+	test("unattended load starts nothing: no child, no marker", async () => {
+		const dir = install();
+		await enableExtension(dir, "manifest.json", yes);
+		const [ext] = await loadAllExtensions(root, { attended: false });
+		expect(ext.status).toBe("disabled");
+		expect(ext.error).toBe("disabled (unattended)");
+		expect(fs.existsSync(path.join(dir, "started"))).toBe(false);
+		await expect(startProcessExtension(dir, { attended: false })).rejects.toThrow("unattended");
+		expect(fs.existsSync(path.join(dir, "started"))).toBe(false);
+	});
+
 	test("spawn, handshake, list tools, call through the gate", async () => {
 		const dir = install();
 		await enableExtension(dir, "manifest.json", yes);
-		const [ext] = await loadAllExtensions(root);
+		const [ext] = await loadAllExtensions(root, { attended: true });
 		try {
-			// bun test has no terminal, so the default policy refuses until a person is present.
-			expect(await collectExtensionTools([ext])["hello:hello"]()).toContain("needs a person");
+			expect(ext.status).toBe("loaded");
+			const tools = collectExtensionTools([ext]);
+			expect(Object.keys(tools).sort()).toEqual([
+				"hello:crash",
+				"hello:cwd",
+				"hello:hello",
+				"hello:pid",
+				"hello:undeclared",
+			]);
+			expect(await tools["hello:hello"]({ who: "Rishi" })).toBe("hello Rishi");
 		} finally {
 			ext.close?.();
 		}
-		const live = await startProcessExtension(dir, { attended: true });
+	});
+
+	test("the child runs in its own folder", async () => {
+		const dir = install("hello", ["tool:*"]);
+		await enableExtension(dir, "manifest.json", yes);
+		const ext = await startProcessExtension(dir, { attended: true });
 		try {
-			expect(Object.keys(live.tools).sort()).toEqual(["crash", "hello", "pid", "undeclared"]);
-			expect(await live.tools.hello({ who: "Rishi" })).toBe("hello Rishi");
+			expect(await ext.tools.cwd()).toBe(fs.realpathSync(dir));
 		} finally {
-			live.close();
+			ext.close();
+		}
+	});
+
+	test("a command is never run from the host's working directory", async () => {
+		const dir = install();
+		const hostCwd = fs.mkdtempSync(path.join(os.tmpdir(), "ext-host-"));
+		const marker = path.join(hostCwd, "ran");
+		fs.writeFileSync(path.join(hostCwd, "server"), `#!/bin/sh\ntouch ${marker}\n`, { mode: 0o755 });
+		const manifest = (command: string, args: string[] = []) =>
+			fs.writeFileSync(
+				path.join(dir, "manifest.json"),
+				JSON.stringify({ name: "hello", version: "1", description: "d", command, args }),
+			);
+		const before = process.cwd();
+		process.chdir(hostCwd);
+		try {
+			// ./server is looked for in the extension folder, where it is not.
+			manifest("./server");
+			await enableExtension(dir, "manifest.json", yes);
+			await expect(startProcessExtension(dir, { attended: true })).rejects.toThrow();
+			// A command that climbs out of the folder is refused.
+			manifest("../../../../../../../../bin/sh");
+			await enableExtension(dir, "manifest.json", yes);
+			await expect(startProcessExtension(dir, { attended: true })).rejects.toThrow("outside");
+			// So is an argument that does.
+			manifest("python3", ["../x.py"]);
+			await enableExtension(dir, "manifest.json", yes);
+			await expect(startProcessExtension(dir, { attended: true })).rejects.toThrow("leaves");
+		} finally {
+			process.chdir(before);
+		}
+		expect(fs.existsSync(marker)).toBe(false);
+		fs.rmSync(hostCwd, { recursive: true, force: true });
+	});
+
+	test("a symlink out of the folder is refused", async () => {
+		const dir = install();
+		fs.symlinkSync("/bin/sh", path.join(dir, "sh"));
+		fs.writeFileSync(
+			path.join(dir, "manifest.json"),
+			JSON.stringify({ name: "hello", version: "1", description: "d", command: "./sh" }),
+		);
+		await enableExtension(dir, "manifest.json", yes);
+		await expect(startProcessExtension(dir, { attended: true })).rejects.toThrow("outside");
+	});
+
+	test("control characters cannot spoof the consent prompt", async () => {
+		const dir = install();
+		const spoof = "\u001b[2K\r\u001b[1Afake";
+		const write = (m: Record<string, unknown>) =>
+			fs.writeFileSync(
+				path.join(dir, "manifest.json"),
+				JSON.stringify({ name: "hello", version: "1", description: "d", command: "echo", ...m }),
+			);
+		for (const bad of [
+			{ args: [spoof] },
+			{ command: `echo${spoof}` },
+			{ description: "a\rb" },
+			{ name: "x\u202ey" },
+		]) {
+			write(bad);
+			expect(parseProcessManifest(fs.readFileSync(path.join(dir, "manifest.json")))).toBeNull();
+			let asked = false;
+			expect(
+				await enableExtension(dir, "manifest.json", async () => {
+					asked = true;
+					return true;
+				}),
+			).toBe(false);
+			expect(asked).toBe(false);
+		}
+		// A clean manifest is shown as quoted elements.
+		write({ args: ["a b", "c"] });
+		let shown = "";
+		await enableExtension(dir, "manifest.json", async (q) => {
+			shown = q;
+			return false;
+		});
+		expect(shown).toContain('["a b","c"]');
+		expect(shown).toContain('"echo"');
+	});
+
+	test("loading twice leaves one live child", async () => {
+		const dir = install("hello", ["tool:*"]);
+		await enableExtension(dir, "manifest.json", yes);
+		const mgr = createExtensionManager({ dir: root });
+		await mgr.loadAll({ attended: true });
+		const first = Number(await mgr.getTools()["hello:pid"]());
+		await mgr.loadAll({ attended: true });
+		const second = Number(await mgr.getTools()["hello:pid"]());
+		try {
+			expect(second).not.toBe(first);
+			for (let i = 0; i < 40 && alive(first); i++) await Bun.sleep(50);
+			expect(alive(first)).toBe(false);
+			expect(alive(second)).toBe(true);
+		} finally {
+			for (const e of mgr.extensions) e.close?.();
 		}
 	});
 

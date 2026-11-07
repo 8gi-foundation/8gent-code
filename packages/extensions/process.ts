@@ -5,10 +5,12 @@
  * It runs as a child process and speaks the MCP stdio JSON-RPC that
  * packages/mcp/transport.ts already carries. Nothing is imported into the
  * host, so a crash or a hang in the extension stays in the extension.
+ * This is crash isolation, not containment: the child has the person's rights.
  *
  * Off until a person turns it on: enableExtension() asks, default No, and a
  * session with no terminal answers No. The grant is bound to the manifest
- * bytes, so editing the manifest turns the extension off again.
+ * bytes, so editing the manifest turns the extension off again. An unattended
+ * host never starts the child at all.
  */
 
 import { createHash } from "node:crypto";
@@ -32,29 +34,48 @@ export interface ProcessManifest {
 	permissions?: string[];
 }
 
-export function readProcessManifest(dir: string): ProcessManifest | null {
+// C0, DEL and C1 controls, and the bidi overrides and isolates: none may reach a terminal prompt.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point
+const UNSAFE = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/;
+
+const safe = (v: unknown): boolean =>
+	typeof v === "string" ? !UNSAFE.test(v) : Array.isArray(v) ? v.every(safe) : true;
+
+/** Parse manifest bytes; null when a field is missing, mistyped or holds control characters. */
+export function parseProcessManifest(bytes: Buffer): ProcessManifest | null {
 	try {
-		const m = JSON.parse(fs.readFileSync(path.join(dir, PROCESS_MANIFEST), "utf-8"));
-		const ok = ["name", "version", "description", "command"].every(
+		const m = JSON.parse(bytes.toString("utf-8"));
+		const strings = ["name", "version", "description", "command"].every(
 			(k) => typeof m?.[k] === "string" && m[k],
 		);
-		return ok ? (m as ProcessManifest) : null;
+		const lists = [m?.args, m?.permissions].every(
+			(l) => l === undefined || (Array.isArray(l) && l.every((x) => typeof x === "string")),
+		);
+		const clean = Object.values(m).every(safe);
+		return strings && lists && clean ? (m as ProcessManifest) : null;
 	} catch {
 		return null;
 	}
 }
 
-const digestOf = (file: string): string =>
-	createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+const digest = (bytes: Buffer): string => createHash("sha256").update(bytes).digest("hex");
 
-/** True only when a person enabled this exact manifest (shared by both loaders). */
-export function isEnabled(dir: string, manifestFile: string): boolean {
+/** Read a manifest once; `enabled` says whether a person granted exactly these bytes. */
+export function readManifestFile(
+	dir: string,
+	manifestFile: string,
+): { bytes: Buffer; enabled: boolean } | null {
+	let bytes: Buffer;
 	try {
-		const granted = fs.readFileSync(path.join(dir, ENABLED_FILE), "utf-8").trim();
-		return granted === digestOf(path.join(dir, manifestFile));
+		bytes = fs.readFileSync(path.join(dir, manifestFile));
 	} catch {
-		return false;
+		return null;
 	}
+	let enabled = false;
+	try {
+		enabled = fs.readFileSync(path.join(dir, ENABLED_FILE), "utf-8").trim() === digest(bytes);
+	} catch {}
+	return { bytes, enabled };
 }
 
 export async function promptDefaultNo(question: string): Promise<boolean> {
@@ -73,14 +94,17 @@ export async function enableExtension(
 	manifestFile: string = PROCESS_MANIFEST,
 	ask: (q: string) => Promise<boolean> = promptDefaultNo,
 ): Promise<boolean> {
-	const file = path.join(dir, manifestFile);
-	if (!fs.existsSync(file)) return false;
-	const m = manifestFile === PROCESS_MANIFEST ? readProcessManifest(dir) : null;
+	const read = readManifestFile(dir, manifestFile);
+	if (!read) return false;
+	const m = manifestFile === PROCESS_MANIFEST ? parseProcessManifest(read.bytes) : null;
+	if (manifestFile === PROCESS_MANIFEST && !m) return false;
+	// JSON.stringify keeps every argument visible as one quoted element.
 	const what = m
-		? `runs "${[m.command, ...(m.args ?? [])].join(" ")}" as its own process`
+		? `runs the program ${JSON.stringify(m.command)} with arguments ${JSON.stringify(m.args ?? [])} as its own process`
 		: "runs code inside this process";
-	if (!(await ask(`Enable extension "${path.basename(dir)}"? It ${what}.`))) return false;
-	fs.writeFileSync(path.join(dir, ENABLED_FILE), digestOf(file));
+	if (!(await ask(`Enable extension ${JSON.stringify(path.basename(dir))}? It ${what}.`)))
+		return false;
+	fs.writeFileSync(path.join(dir, ENABLED_FILE), digest(read.bytes));
 	return true;
 }
 
@@ -106,22 +130,44 @@ function refusal(m: ProcessManifest, tool: string, attended: boolean): string | 
 	return `[BLOCKED] extension ${m.name}/${tool} was refused by policy: ${gate.reason ?? "no reason given"}. Nothing was sent to it.`;
 }
 
+/**
+ * The program to run. A command with a path separator is the extension's own
+ * file: resolved against its folder, real path inside it. A bare name is
+ * looked up on PATH, never in the host's working directory.
+ */
+function resolveCommand(dir: string, command: string): string {
+	if (!command.includes("/") && !command.includes(path.sep)) return command;
+	const root = fs.realpathSync(dir);
+	const real = fs.realpathSync(path.resolve(dir, command));
+	if (real !== root && !real.startsWith(root + path.sep))
+		throw new Error(`command ${JSON.stringify(command)} is outside the extension folder`);
+	return real;
+}
+
 /** Spawn the child, handshake, list its tools. Throws if the child never answers. */
 export async function startProcessExtension(
 	dir: string,
 	opts: { attended?: boolean } = {},
 ): Promise<ProcessExtension> {
-	// A person is at the keyboard when both ends are terminals; tests may say so.
+	// A person is at the keyboard when both ends are terminals; the host may say otherwise.
 	const attended = opts.attended ?? !!(process.stdin.isTTY && process.stdout.isTTY);
-	const manifest = readProcessManifest(dir);
-	if (!manifest) throw new Error("Invalid manifest");
-	if (!isEnabled(dir, PROCESS_MANIFEST)) throw new Error("disabled");
+	// Unattended means no: the child's code runs at spawn, before any call is gated.
+	if (!attended) throw new Error("disabled (unattended)");
+	const read = readManifestFile(dir, PROCESS_MANIFEST);
+	const manifest = read && parseProcessManifest(read.bytes);
+	if (!read || !manifest) throw new Error("Invalid manifest");
+	if (!read.enabled) throw new Error("disabled");
 
-	// An argument naming a file in the extension's folder is resolved against it.
-	const args = (manifest.args ?? []).map((a) =>
-		fs.existsSync(path.join(dir, a)) ? path.join(dir, a) : a,
+	const args = manifest.args ?? [];
+	if (args.some((a) => a.split(/[\\/]/).includes("..")))
+		throw new Error("an argument leaves the extension folder");
+	// The extension's folder is its working directory, so relative arguments mean its own files.
+	const transport = new StdioTransport(
+		resolveCommand(dir, manifest.command),
+		args,
+		undefined,
+		fs.realpathSync(dir),
 	);
-	const transport = new StdioTransport(manifest.command, args);
 	await transport.start();
 	// The host leaving takes the child with it.
 	const onExit = () => transport.close();

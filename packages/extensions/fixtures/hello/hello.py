@@ -6,7 +6,7 @@ import sys
 
 TOOLS = [
     {"name": n, "description": n, "inputSchema": {"type": "object", "properties": {}}}
-    for n in ("hello", "pid", "crash", "undeclared")
+    for n in ("hello", "pid", "crash", "undeclared", "cwd")
 ]
 
 
@@ -18,6 +18,9 @@ def reply(id_, result):
 def text(s):
     return {"content": [{"type": "text", "text": s}]}
 
+
+# Proof of start: unattended hosts must never leave this file.
+open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "started"), "w").close()
 
 for line in sys.stdin:
     msg = json.loads(line)
@@ -36,5 +39,7 @@ for line in sys.stdin:
             os._exit(1)
         if name == "pid":
             reply(msg["id"], text(str(os.getpid())))
+        elif name == "cwd":
+            reply(msg["id"], text(os.path.realpath(os.getcwd())))
         else:
             reply(msg["id"], text("hello " + str(args.get("who", "world"))))
