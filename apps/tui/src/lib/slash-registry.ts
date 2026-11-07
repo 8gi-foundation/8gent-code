@@ -326,7 +326,9 @@ export function nearestNames(typed: string, names: readonly string[], limit = 3)
 		.filter((n) => !n.startsWith(t) && !n.includes(t))
 		.map((n) => ({ n, d: editDistance(t, n) }))
 		.filter((x) => x.d <= maxDist)
-		.toSorted((a, b) => a.d - b.d)
+		// Equal distance: a name the typed word starts with ("quite" -> "quit", an extra
+		// letter) beats a rearrangement ("quiet").
+		.toSorted((a, b) => a.d - b.d || +!t.startsWith(a.n) - +!t.startsWith(b.n))
 		.map((x) => x.n);
 	return [...prefix, ...sub, ...fuzzy].slice(0, limit);
 }
@@ -358,9 +360,13 @@ export async function unknownSlashAnswer(
 		...registry.entries.map((e) => e.name),
 		...buildBuiltInEntries().map((e) => e.name),
 	];
-	const near = nearestNames(name, known);
-	const hint = near.length ? ` Did you mean ${near.map((n) => `/${n}`).join(", ")}?` : "";
-	return `Unknown command ${name}.${hint} Type /help.`;
+	let near = nearestNames(name, known);
+	// A typo (the best match is neither a prefix nor a substring of what was typed)
+	// gets the one best guess; a partial word keeps its short list.
+	const typed = name.slice(1).toLowerCase();
+	if (near.length > 0 && !near[0].startsWith(typed) && !near[0].includes(typed)) near = near.slice(0, 1);
+	if (near.length === 0) return `Unknown command ${name}. Type /help.`;
+	return `Unknown command ${name}. Did you mean ${near.map((n) => `/${n}`).join(", ")}?`;
 }
 
 export function toGhostSuggestions(registry: SlashRegistry): {
