@@ -9,6 +9,7 @@ import {
 	MODEL_LIST_TIMEOUT_MS,
 	buildProviderOptions,
 	emptyModelIsFinal,
+	keyRejectedNotice,
 	listBelongsToProvider,
 	listModelsWithReason,
 	loadModelListWithin,
@@ -17,6 +18,44 @@ import {
 	providerKeyNotice,
 	registryKeyNotice,
 } from "./provider-truth";
+
+describe("keyRejectedNotice: a key the provider refused stops the switch", () => {
+	test("a 401 on the model list (with recorded models still listed) names the key command", async () => {
+		// The phone case: discovery answered 401, but providers.json still held the models
+		// an earlier discovery recorded, so a model was picked and the first turn failed.
+		const reader = {
+			isKnownProvider: () => true,
+			discoverModels: async () => {
+				throw new Error(
+					"Model discovery failed for https://api.minimax.io/v1/models: 401 invalid api key",
+				);
+			},
+			getProvider: () => ({ models: ["recorded-1"], defaultModel: "recorded-1" }),
+		};
+		const { models, error } = await listModelsWithReason(reader as never, "minimax");
+		expect(models.length).toBeGreaterThan(0);
+		const notice = keyRejectedNotice("MiniMax", "minimax", error);
+		expect(notice).toBe(
+			"MiniMax rejected its key (HTTP 401), so nothing was sent. Run `8gent keys set minimax` with a new key, then restart 8gent, or /provider to pick another.",
+		);
+	});
+
+	test("403 counts; the free alias names the OpenRouter key", () => {
+		expect(
+			keyRejectedNotice("OpenRouter (free models)", "openrouter-free", new Error("x: 403 nope")),
+		).toContain("`8gent keys set openrouter`");
+	});
+
+	test("any other failure, or none, does not stop the switch", () => {
+		expect(keyRejectedNotice("X", "x", undefined)).toBeNull();
+		expect(
+			keyRejectedNotice("X", "x", new Error("Model discovery failed for u: 500 boom")),
+		).toBeNull();
+		expect(
+			keyRejectedNotice("X", "x", new Error("model list request timed out after 15 s")),
+		).toBeNull();
+	});
+});
 
 const cfg = (name: string, o: Record<string, unknown> = {}) => ({
 	name,

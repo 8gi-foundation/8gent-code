@@ -339,6 +339,7 @@ import {
 import {
 	buildProviderOptions,
 	emptyModelIsFinal,
+	keyRejectedNotice,
 	listBelongsToProvider,
 	listModelsWithReason,
 	loadModelListWithin,
@@ -2125,6 +2126,8 @@ export function App({
 		let cancelled = false;
 		const fetchModels = async () => {
 			setModelsLoading(true);
+			// The last provider's list error never speaks for this one.
+			modelListErrorRef.current = undefined;
 			// Bounded as a whole (#4683): some branches below fetch without a signal, and a
 			// request that never answers left the list loading and the reason never shown.
 			const load = async () => {
@@ -4143,11 +4146,20 @@ export function App({
 						currentProvider,
 						Boolean(sessionApiKey(providerToRuntime(currentProvider))),
 					) ?? registryKeyNotice(currentProvider, getProviderManager());
-				if (_keyNotice) {
+				// A key the provider itself refused on its model list stops here too: the
+				// recorded models would otherwise let a turn start and fail with a bare count.
+				const _rejectedNotice =
+					_keyNotice ??
+					keyRejectedNotice(
+						getProviderManager().getProvider(currentProvider)?.displayName || currentProvider,
+						currentProvider,
+						modelListErrorRef.current,
+					);
+				if (_rejectedNotice) {
 					setAgent(null);
 					setAgentReady(false);
-					notReadyReasonRef.current = _keyNotice;
-					notify(workspaceTabs.activeTab?.id || "default", _keyNotice);
+					notReadyReasonRef.current = _rejectedNotice;
+					notify(workspaceTabs.activeTab?.id || "default", _rejectedNotice);
 					return;
 				}
 				// Bounded readiness gate. A local provider whose port accepts TCP

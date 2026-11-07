@@ -12,7 +12,9 @@ import { getProviderManager } from "../../../../packages/providers/index.js";
 import {
 	KEYS_FILE_DISPLAY,
 	OLLAMA_RECOMMENDED,
+	PHONE_LLAMA_RECOMMENDED,
 } from "../../../../packages/self-autonomy/model-recipes.js";
+import { isAndroidHost } from "../../../../packages/voice/termux.js";
 
 /** Providers served by the local engines the status bar counts. "" = not chosen yet. */
 export const LOCAL_ENGINE_PROVIDERS: ReadonlySet<string> = new Set([
@@ -151,7 +153,11 @@ export function fitCompactLine(line: string, room: number): string {
  * via `8gent keys set <provider>` or `8gent keys` (the file `8gent keys status` reads and bin/8gent.ts loads).
  * Shell lines are pasteable as they stand: notes ride in `#` comments.
  */
-export function guidanceCopy(platform: NodeJS.Platform = process.platform): GuidanceCopy {
+export function guidanceCopy(
+	platform: NodeJS.Platform = process.platform,
+	env: Record<string, string | undefined> = process.env,
+): GuidanceCopy {
+	if (isAndroidHost(platform, env)) return phoneGuidanceCopy();
 	const install =
 		platform === "linux"
 			? "curl -fsSL https://ollama.com/install.sh | sh"
@@ -181,6 +187,44 @@ export function guidanceCopy(platform: NodeJS.Platform = process.platform): Guid
 		],
 		compact: [
 			[`Install Ollama (ollama.com), ollama pull ${OLLAMA_RECOMMENDED.pull}, /provider ollama`],
+			["8gent keys set openrouter, restart 8gent", "/provider openrouter, then /model auto:free"],
+		],
+	};
+}
+
+/**
+ * The phone's card (Android, Termux). Ollama is not the phone path: llama.cpp is a
+ * Termux package and runs a small model on the phone itself. Local comes first and
+ * nothing is installed for the person: each line is a command they choose to type.
+ * The hosted path says plainly that messages leave the phone; the per-call cloud
+ * notice still fires on every hosted turn.
+ */
+export function phoneGuidanceCopy(): GuidanceCopy {
+	const r = PHONE_LLAMA_RECOMMENDED;
+	return {
+		label: "NO MODEL",
+		lead: "8gent needs a model to answer. Pick one, or type /provider.",
+		paths: [
+			{
+				n: "1",
+				title: "Run a small model on this phone (free, nothing leaves the phone)",
+				steps: [
+					r.install,
+					withNote(r.serve, `${r.size}, keep it running`),
+					"In 8gent (a second Termux session): /provider llama-server",
+				],
+			},
+			{
+				n: "2",
+				title: "Free hosted models (messages leave the phone), key from https://openrouter.ai/keys",
+				steps: [
+					withNote("8gent keys set openrouter", "hidden prompt, then restart"),
+					"In 8gent: /provider openrouter, then /model auto:free",
+				],
+			},
+		],
+		compact: [
+			[`${r.install}, ${r.serve}, /provider llama-server`],
 			["8gent keys set openrouter, restart 8gent", "/provider openrouter, then /model auto:free"],
 		],
 	};

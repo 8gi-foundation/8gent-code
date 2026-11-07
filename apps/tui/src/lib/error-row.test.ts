@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	type ErrorKind,
 	classifyError,
+	describeProviderFailure,
 	errorLines,
 	errorNotice,
 	guardNotice,
@@ -76,15 +77,98 @@ describe("classifyError: kind, cause and next step from the text", () => {
 		expect(classifyError("Error: fetch failed").cause).toBe("fetch failed");
 	});
 
-	test("all providers exhausted says how many were tried and keeps the first cause", () => {
+	test("all providers exhausted names the first provider, its cause and how many were tried", () => {
 		const r = classifyError(
 			"All providers exhausted (2 attempted):\n  - ollama/qwen: connect ECONNREFUSED 127.0.0.1:11434\n  - openrouter/x: 429",
 		);
 		expect(r.kind).toBe("provider");
-		expect(r.cause).toBe("all providers failed (2 tried)");
-		expect(r.next).toMatch(/\/provider/);
+		expect(r.cause).toBe("ollama: not running (ECONNREFUSED) (2 tried)");
+		expect(r.next).toBe("start the model server, or /provider to pick another");
 	});
 
+	test("the phone case: one hosted provider answering 401 names the key command, not a bare count", () => {
+		const r = classifyError(
+			"All providers exhausted (1 attempted):\n  - minimax/MiniMax-M3.1-Flash: HTTP 401: invalid api key (2049)",
+		);
+		expect(r.cause).toBe("minimax: HTTP 401, key rejected");
+		expect(r.next).toBe(
+			"8gent keys set minimax with a new key, then restart 8gent; or /provider to pick another",
+		);
+		const text = errorLines(r, 60).join("\n");
+		expect(text).not.toContain("all providers failed");
+	});
+
+	test("an empty exhausted list keeps the plain count", () => {
+		const r = classifyError(
+			"All providers exhausted (0 attempted):\n  (no provider errors recorded)",
+		);
+		expect(r.cause).toBe("all providers failed (0 tried)");
+	});
+
+	test("a model id with a colon still parses", () => {
+		const r = classifyError(
+			"All providers exhausted (1 attempted):\n  - openrouter-free/vendor/m:free: HTTP 429: Too Many Requests",
+		);
+		expect(r.cause).toBe("openrouter-free: HTTP 429, rate limited");
+	});
+
+	test("a pinned provider's error is described the same way", () => {
+		const r = classifyError(
+			"minimax/MiniMax-M3 failed: x\nThe provider was chosen explicitly, so no other provider was tried.",
+		);
+		expect(r.kind).toBe("provider");
+		expect(r.cause).toBe("minimax: x");
+	});
+});
+
+describe("describeProviderFailure: one cause, one next step", () => {
+	const cases: Array<[string, string, string, RegExp]> = [
+		[
+			"minimax",
+			"No API key for minimax, so nothing was sent to api.minimax.io. Add your key with `8gent keys set minimax` (MINIMAX_API_KEY), or edit",
+			"minimax: no API key (MINIMAX_API_KEY)",
+			/^8gent keys set minimax, then restart 8gent/,
+		],
+		[
+			"openrouter-free",
+			"HTTP 403: Forbidden",
+			"openrouter-free: HTTP 403, key rejected",
+			/8gent keys set openrouter /,
+		],
+		["groq", "HTTP 402: Payment Required", "groq: HTTP 402, no credit left", /top up/],
+		[
+			"openrouter",
+			"HTTP 404: model x does not exist",
+			"openrouter: HTTP 404, model not found",
+			/^\/model /,
+		],
+		["openrouter", "HTTP 503: upstream", "openrouter: HTTP 503, provider-side error", /send again/],
+		["minimax", "fetch failed", "minimax: network error (fetch failed)", /online/],
+		[
+			"llama-server",
+			"connect ECONNREFUSED 127.0.0.1:8080",
+			"llama-server: not running (ECONNREFUSED)",
+			/start the model server/,
+		],
+		["minimax", "Turn timed out after 120s", "minimax: timed out", /send again/],
+	];
+	for (const [provider, error, cause, next] of cases) {
+		test(cause, () => {
+			const d = describeProviderFailure(provider, error);
+			expect(d.cause).toBe(cause);
+			expect(d.next).toMatch(next);
+		});
+	}
+
+	test("a key echoed in an error body is never shown", () => {
+		const d = describeProviderFailure("x", "weird reply sk-abcdefghijklmnop1234 Bearer abc.def");
+		expect(d.cause).not.toContain("sk-abcdefghijklmnop1234");
+		expect(d.cause).not.toContain("abc.def");
+		expect(d.cause).toContain("[hidden]");
+	});
+});
+
+describe("classifyError fallthrough", () => {
 	test("the cause is one line, at most 70 characters", () => {
 		const r = classifyError(`boom ${"x".repeat(300)}\nsecond line`);
 		expect(r.cause.length).toBeLessThanOrEqual(70);
