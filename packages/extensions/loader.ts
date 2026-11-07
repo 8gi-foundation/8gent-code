@@ -13,6 +13,7 @@ import {
 	parseProcessManifest,
 	readManifestFile,
 	startProcessExtension,
+	startRefusal,
 	unsafeFolderName,
 } from "./process";
 import { createScope, scopeEnabled } from "./scope";
@@ -65,8 +66,10 @@ export async function loadExtension(dir: string, opts: LoadOptions = {}): Promis
 	const pm = proc ? parseProcessManifest(proc.bytes) : null;
 	if (pm && proc) {
 		const base = { dir, module: {}, manifest: { ...pm, entry: pm.command } };
-		if (!proc.enabled) return { ...base, status: "disabled" };
-		if (!attended) return { ...base, status: "disabled", error: "disabled (unattended)" };
+		// Never enabled, program changed since it was, or unattended without an approval for this run.
+		const refused = startRefusal(dir, proc.grant, attended);
+		if (refused === "disabled") return { ...base, status: "disabled" };
+		if (refused) return { ...base, status: "disabled", error: refused };
 		try {
 			const ext = await startProcessExtension(dir, { attended });
 			return { ...base, module: { tools: ext.tools } as never, status: "loaded", close: ext.close };
@@ -126,6 +129,8 @@ export async function loadExtension(dir: string, opts: LoadOptions = {}): Promis
 	}
 
 	// In-process loading (agent.ts still calls this on startup) is off until a person enables it.
+	if (legacy?.grant.state === "changed")
+		return { manifest, dir, module: {}, status: "disabled", error: legacy.grant.message };
 	if (!legacy?.enabled) return { manifest, dir, module: {}, status: "disabled" };
 	if (!attended)
 		return { manifest, dir, module: {}, status: "disabled", error: "disabled (unattended)" };
@@ -197,6 +202,9 @@ export async function loadAllExtensions(
 				console.log(`[ext] Loaded: ${ext.manifest.name}@${ext.manifest.version}`);
 			} else if (ext.status === "error") {
 				console.log(`[ext] Failed: ${ext.manifest.name} - ${ext.error}`);
+			} else if (ext.error && !ext.error.startsWith("disabled (unattended)")) {
+				// A grant that no longer matches says so, with the command to review it.
+				console.log(`[ext] Off: ${ext.manifest.name} - ${ext.error}`);
 			}
 		}
 	}
