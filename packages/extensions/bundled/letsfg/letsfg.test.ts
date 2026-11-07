@@ -1,15 +1,16 @@
 /**
- * LetsFG extension. The service is a mocked fetch: nothing here reaches the network.
- * The last block runs the real child through the host, using only calls that fail
- * validation before any request is built, so a token on the machine is never used.
+ * LetsFG extension (search only). The service is a mocked fetch: nothing here reaches
+ * the network. The last block runs the real child through the host, using only calls
+ * that fail validation before any request is built, so a token on the machine is never used.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { PassThrough } from "node:stream";
 import { enableExtension, startProcessExtension } from "../../process";
-import { type Deps, handle } from "./letsfg";
+import { type Deps, baseFromEnv, handle, serve } from "./letsfg";
 
 const OFFER = {
 	id: "off_1",
@@ -26,7 +27,7 @@ interface Seen {
 	method: string;
 	path: string;
 	auth: string | null;
-	body: any;
+	body: unknown;
 }
 
 function setup(over: Partial<Deps> & { offers?: unknown[]; status?: string[] } = {}) {
@@ -49,62 +50,52 @@ function setup(over: Partial<Deps> & { offers?: unknown[]; status?: string[] } =
 				total_results: 1,
 				offers: over.offers ?? [OFFER],
 			});
-		if (u.pathname.endsWith("/agent-book"))
-			return j({ ok: true, booking_ref: "ref_1", state: "authorised", held: { amount: 120.5 } });
-		if (u.pathname.endsWith("/agent-book/status")) return j({ state: "completed", pnr: "ABC123" });
+		if (u.pathname.endsWith("/agent-book/status"))
+			return j({ state: "completed", pnr: "ABC123", charged_amount: 120.5, secret: "leak" });
 		return new Response("nope", { status: 404 });
 	}) as unknown as typeof fetch;
-	const asked: string[] = [];
 	const d: Deps = {
 		fetch: fetcher,
-		baseUrl: "http://mock.invalid/api",
+		baseUrl: "https://mock.invalid/api",
 		token: () => "tok_test",
-		ask: async (s) => {
-			asked.push(s);
-			return false;
-		},
 		sleep: async () => {},
 		pollMs: 1000,
 		pollEveryMs: 0,
 		...over,
 	};
-	return { d, seen, asked };
+	return { d, seen };
 }
 
+const rpc = (id: number, method: string, params?: unknown) => ({
+	jsonrpc: "2.0",
+	id,
+	method,
+	params,
+});
 const call = async (d: Deps, name: string, args: Record<string, unknown>) => {
-	const r: any = await handle(d, {
-		jsonrpc: "2.0",
-		id: 1,
-		method: "tools/call",
-		params: { name, arguments: args },
-	});
-	return { error: !!r.result.isError, text: r.result.content[0].text as string };
+	const r = (await handle(d, rpc(1, "tools/call", { name, arguments: args }))) as {
+		result: { isError?: boolean; content: { text: string }[] };
+	};
+	return { error: !!r.result.isError, text: r.result.content[0].text };
 };
 
-const BOOK = {
-	search_id: "s1",
-	offer_id: "off_1",
-	contact_email: "a@example.com",
-	passenger: { given_name: "Ada", family_name: "Lovelace" },
-};
+const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/;
+
+const SEARCH = { origin: "DUB", destination: "JFK", date_from: "2026-12-01" };
 
 describe("search", () => {
 	test("posts the search, polls until done, sends the bearer token, says nothing is held", async () => {
 		const { d, seen } = setup({ status: ["searching", "searching", "completed"] });
-		const r = await call(d, "search_flights", {
-			origin: "dub",
-			destination: "jfk",
-			date_from: "2026-12-01",
-		});
+		const r = await call(d, "search_flights", { ...SEARCH, origin: "dub", destination: "jfk" });
 		expect(r.error).toBe(false);
 		const out = JSON.parse(r.text);
 		expect(out.search_id).toBe("s1");
 		expect(out.offers[0]).toMatchObject({ offer_id: "off_1", price: 120.5, currency: "EUR" });
 		expect(out.note).toContain("Nothing is held or bought");
 		expect(seen[0]).toMatchObject({ method: "POST", path: "/api/search", auth: "Bearer tok_test" });
-		expect(seen[0].body).toEqual({ origin: "DUB", destination: "JFK", date_from: "2026-12-01" });
+		expect(seen[0].body).toEqual(SEARCH);
 		expect(seen.filter((s) => s.path.includes("/results/")).length).toBe(3);
-		expect(seen.some((s) => s.path.includes("agent-book"))).toBe(false);
+		expect(seen.some((s) => s.path.endsWith("/agent-book"))).toBe(false);
 	});
 
 	test("bad input fails before any request", async () => {
@@ -120,11 +111,7 @@ describe("search", () => {
 
 	test("no token: a clear message, no request", async () => {
 		const { d, seen } = setup({ token: () => null });
-		const r = await call(d, "search_flights", {
-			origin: "DUB",
-			destination: "JFK",
-			date_from: "2026-12-01",
-		});
+		const r = await call(d, "search_flights", SEARCH);
 		expect(r.error).toBe(true);
 		expect(r.text).toContain("No LetsFG token");
 		expect(seen).toEqual([]);
@@ -132,85 +119,126 @@ describe("search", () => {
 
 	test("the token never appears in any reply", async () => {
 		const { d } = setup({ status: ["searching"], pollMs: 0 });
-		const r = await call(d, "search_flights", {
-			origin: "DUB",
-			destination: "JFK",
-			date_from: "2026-12-01",
+		expect((await call(d, "search_flights", SEARCH)).text).not.toContain("tok_test");
+	});
+
+	test("status lookup returns only state, record locator and charge", async () => {
+		const { d, seen } = setup();
+		const r = await call(d, "get_flight_booking", { booking_ref: "ref_1" });
+		expect(JSON.parse(r.text)).toEqual({
+			state: "completed",
+			pnr: "ABC123",
+			charged_amount: 120.5,
 		});
-		expect(r.text).not.toContain("tok_test");
+		expect(seen[0].path).toBe("/api/agent-book/status");
 	});
 });
 
-describe("booking needs a yes, every time", () => {
-	test("No (or no terminal) sends nothing to the booking endpoint", async () => {
-		const { d, seen, asked } = setup();
-		const r = await call(d, "book_flight", BOOK);
-		expect(r.text).toContain("Not booked");
-		expect(asked.length).toBe(1);
-		expect(seen.some((s) => s.path.includes("agent-book"))).toBe(false);
+describe("read-only: there is no way to book", () => {
+	test("the tool list holds no booking call, and the manifest declares none", async () => {
+		const r = (await handle(setup().d, rpc(1, "tools/list"))) as {
+			result: { tools: { name: string }[] };
+		};
+		expect(r.result.tools.map((t) => t.name).sort()).toEqual([
+			"get_flight_booking",
+			"get_flight_results",
+			"search_flights",
+		]);
+		const m = JSON.parse(fs.readFileSync(path.join(import.meta.dir, "manifest.json"), "utf-8"));
+		expect(m.permissions.join()).not.toContain("book_flight");
 	});
 
-	test("the person sees the item and the price, taken from the service not the caller", async () => {
-		const { d, asked } = setup();
-		await call(d, "book_flight", { ...BOOK, price: 1, currency: "USD" });
-		expect(asked[0]).toContain("Aer Lingus");
-		expect(asked[0]).toContain("DUB-JFK");
-		expect(asked[0]).toContain("120.5 EUR each, 120.50 EUR in total");
-		expect(asked[0]).toContain("held");
-	});
-
-	test("the total counts every traveller", async () => {
-		const { d, asked } = setup();
-		await call(d, "book_flight", { ...BOOK, additional_passengers: [{ given_name: "B" }] });
-		expect(asked[0]).toContain("Travellers: 2");
-		expect(asked[0]).toContain("241.00 EUR in total");
-	});
-
-	test("yes starts one booking; the same offer is not started twice", async () => {
-		const { d, seen } = setup({ ask: async () => true });
-		const r = await call(d, "book_flight", { ...BOOK, offer_id: "off_1", search_id: "s_yes" });
-		expect(r.error).toBe(false);
-		expect(JSON.parse(r.text).booking_ref).toBe("ref_1");
-		const post = seen.find((s) => s.path.endsWith("/agent-book"));
-		expect(post?.body).toMatchObject({
-			search_id: "s_yes",
+	test("calling book_flight sends nothing", async () => {
+		const { d, seen } = setup();
+		const r = await call(d, "book_flight", {
+			search_id: "s1",
 			offer_id: "off_1",
 			contact_email: "a@example.com",
+			passenger: { given_name: "Ada" },
 		});
-		const again = await call(d, "book_flight", { ...BOOK, search_id: "s_yes" });
-		expect(again.error).toBe(true);
-		expect(seen.filter((s) => s.path.endsWith("/agent-book")).length).toBe(1);
+		expect(r.error).toBe(true);
+		expect(seen).toEqual([]);
 	});
 
-	test("an offer that is gone, or has no price, is never offered for a yes", async () => {
-		for (const offers of [
-			[],
-			[{ ...OFFER, price: undefined }],
-			[{ ...OFFER, currency: undefined }],
-		]) {
-			const { d, asked, seen } = setup({ offers });
-			const r = await call(d, "book_flight", BOOK);
-			expect(r.error).toBe(true);
-			expect(asked).toEqual([]);
-			expect(seen.some((s) => s.path.includes("agent-book"))).toBe(false);
-		}
+	test("the source holds no booking request", () => {
+		const src = fs.readFileSync(path.join(import.meta.dir, "letsfg.ts"), "utf-8");
+		expect(src).not.toMatch(/"POST", "\/agent-book"/);
+		expect(src).not.toContain("/dev/tty");
 	});
+});
 
-	test("control characters from the service cannot reach the prompt", async () => {
-		const { d, asked } = setup({
-			offers: [{ ...OFFER, airline: "Evil\u001b[2J‮Air", route: "A\rB" }],
+describe("text from the service", () => {
+	test("bidi marks, separators and zero-width characters are replaced in every field", async () => {
+		const bad =
+			"A\u200eB\u200fC\u061cD\u2028E\u2029F\u200bG\u200cH\u200dI\u2060J\ufeffK\u202eL\u2066M\u001bN";
+		const { d } = setup({
+			offers: [{ ...OFFER, id: bad, airline: bad, route: bad, currency: bad }],
 		});
-		await call(d, "book_flight", BOOK);
-		// biome-ignore lint/suspicious/noControlCharactersInRegex: asserting none remain
-		expect(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f‪-‮]/.test(asked[0])).toBe(false);
+		const r = await call(d, "get_flight_results", { search_id: "s1" });
+		expect(UNSAFE.test(JSON.parse(r.text).offers[0].summary)).toBe(false);
+		const o = JSON.parse(r.text).offers[0];
+		for (const v of [o.offer_id, o.currency, o.summary]) expect(UNSAFE.test(v)).toBe(false);
+	});
+});
+
+describe("service address", () => {
+	test("https only", () => {
+		expect(baseFromEnv({})).toBe("https://letsfg.co/api");
+		expect(baseFromEnv({ LETSFG_BASE_URL: "https://x.example/api/" })).toBe(
+			"https://x.example/api",
+		);
+		for (const bad of [
+			"http://x.example/api",
+			"ftp://x",
+			"file:///etc/passwd",
+			"letsfg.co/api",
+			"javascript:1",
+		])
+			expect(() => baseFromEnv({ LETSFG_BASE_URL: bad })).toThrow();
+	});
+});
+
+describe("messages are handled strictly in order", () => {
+	test("a slow first call finishes before the second starts, and a split line is one message", async () => {
+		const events: string[] = [];
+		const { d } = setup({
+			fetch: (async (url: string) => {
+				const u = new URL(url);
+				const first = u.pathname.includes("/results/slow");
+				events.push(`start ${first ? "slow" : "fast"}`);
+				if (first) await new Promise((r) => setTimeout(r, 40));
+				events.push(`end ${first ? "slow" : "fast"}`);
+				return new Response(JSON.stringify({ status: "completed", offers: [] }), { status: 200 });
+			}) as unknown as typeof fetch,
+		});
+		const input = new PassThrough();
+		const out: string[] = [];
+		const done = serve(d, input, (l) => out.push(l));
+		const a = JSON.stringify(
+			rpc(1, "tools/call", { name: "get_flight_results", arguments: { search_id: "slow" } }),
+		);
+		const b = JSON.stringify(
+			rpc(2, "tools/call", { name: "get_flight_results", arguments: { search_id: "fast" } }),
+		);
+		input.write(`${a}\n${b.slice(0, 20)}`);
+		await new Promise((r) => setTimeout(r, 10));
+		input.write(`${b.slice(20)}\n`);
+		input.end();
+		await done;
+		expect(events).toEqual(["start slow", "end slow", "start fast", "end fast"]);
+		expect(out.map((l) => JSON.parse(l).id)).toEqual([1, 2]);
 	});
 
-	test("status lookup is read-only and needs no yes", async () => {
-		const { d, seen, asked } = setup();
-		const r = await call(d, "get_flight_booking", { booking_ref: "ref_1" });
-		expect(JSON.parse(r.text).pnr).toBe("ABC123");
-		expect(asked).toEqual([]);
-		expect(seen[0].path).toBe("/api/agent-book/status");
+	test("a malformed line is skipped and later messages still answer", async () => {
+		const { d } = setup();
+		const input = new PassThrough();
+		const out: string[] = [];
+		const done = serve(d, input, (l) => out.push(l));
+		input.write(`not json\n${JSON.stringify(rpc(7, "tools/list"))}\n`);
+		input.end();
+		await done;
+		expect(out.length).toBe(1);
+		expect(JSON.parse(out[0]).id).toBe(7);
 	});
 });
 
@@ -223,10 +251,7 @@ describe("through the host, as shipped", () => {
 
 	const dir = () => {
 		const d = path.join(root, "letsfg");
-		fs.cpSync(import.meta.dir, d, {
-			recursive: true,
-			filter: (s) => !s.endsWith(".test.ts"),
-		});
+		fs.cpSync(import.meta.dir, d, { recursive: true, filter: (s) => !s.endsWith(".test.ts") });
 		return d;
 	};
 
@@ -238,19 +263,17 @@ describe("through the host, as shipped", () => {
 		expect(fs.existsSync(path.join(d, ".enabled"))).toBe(false);
 	});
 
-	test("enabled: tools list and a bad call fails before any request", async () => {
+	test("enabled: three read-only tools, a bad call fails before any request", async () => {
 		const d = dir();
 		expect(await enableExtension(d, "manifest.json", async () => true)).toBe(true);
 		const ext = await startProcessExtension(d, { attended: true });
 		try {
 			expect(Object.keys(ext.tools).sort()).toEqual([
-				"book_flight",
 				"get_flight_booking",
 				"get_flight_results",
 				"search_flights",
 			]);
 			expect(await ext.tools.search_flights({ origin: "nope" })).toContain("origin");
-			expect(await ext.tools.book_flight({ search_id: "x" })).toContain("offer_id");
 		} finally {
 			ext.close();
 		}
