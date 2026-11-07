@@ -39,6 +39,7 @@ export const KNOWN_SUBCOMMANDS = [
 	"model-pin",
 	"deck",
 	"bug",
+	"calendar",
 	"update",
 	"upgrade",
 	"permissions",

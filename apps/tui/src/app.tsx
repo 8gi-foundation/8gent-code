@@ -25,6 +25,7 @@ import { resolveOllamaBaseUrl } from "../../../packages/ai/text-tool-endpoint.js
 import { dropOllamaCloudNames } from "../../../packages/core/ollama-cloud.js";
 import { answerFromLine } from "../../../packages/eight/android-setup.js";
 import { sanitizeForDisplay } from "../../../packages/eight/changelog-view.js";
+import { dayBrief, isDayQuestion } from "../../../packages/eight/day-brief.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
 import {
 	type SessionListItem,
@@ -8393,6 +8394,16 @@ export function App({
 						setTimeout(() => setStatus("idle"), 3000);
 					}
 				}
+			} else if (isDayQuestion(expanded)) {
+				// With no model ready, a day question is still answered: from the connected
+				// calendar and local tasks, on this device (#48).
+				const day = await dayBrief();
+				appendToTab(tabId, {
+					id: messageId("assistant-day"),
+					role: "assistant" as const,
+					content: day,
+					timestamp: new Date(),
+				});
 			} else {
 				// No agent is ready for this tab. Say so plainly: nothing ran. This
 				// branch used to print a random canned "Task complete" with invented

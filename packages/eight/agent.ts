@@ -154,6 +154,7 @@ import {
 	loadSlashFacts,
 	selfQuestionNote,
 } from "./self-questions";
+import { dayBrief, isDayQuestion } from "./day-brief";
 import { SMALL_TALK_NOTE, isGreeting, isSmallTalk } from "./small-talk";
 import { replyIsTextToolCall } from "./text-call-fallback";
 import { verifyNudgeFor } from "./verify-gate";
@@ -3063,6 +3064,23 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				return welcome;
 			}
 			this.messageHistory.push({ role: "user", content: harnessNote(SMALL_TALK_NOTE) });
+		}
+
+		// "How does my day look today?" is answered on the device from the person's
+		// connected calendar and local tasks, by code, at zero tokens (#48). The model
+		// has neither, and nothing about the day leaves the device to ask it.
+		if (
+			!smallTalkTurn &&
+			!imageBase64 &&
+			this.agentDepth === 0 &&
+			this.config.agentScope !== "__table__" &&
+			isDayQuestion(textForAgent)
+		) {
+			const day = await dayBrief();
+			this.messageHistory.push({ role: "user", content: textForAgent });
+			this.messageHistory.push({ role: "assistant", content: day });
+			this.sessionWriter.writeUserMessage(textForAgent);
+			return day;
 		}
 
 		// A question about 8gent itself is answered from its own registry, and chat on
