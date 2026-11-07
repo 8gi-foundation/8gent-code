@@ -195,15 +195,22 @@ export interface ProcessExtension {
 }
 
 /** Declared permission first (deny by default), then the policy engine's extension_call rules. */
-function refusal(m: ProcessManifest, tool: string, attended: boolean): string | null {
+function refusal(
+	m: ProcessManifest,
+	tool: string,
+	attended: boolean,
+	runApproved: boolean,
+): string | null {
 	const declared = m.permissions ?? [];
 	if (!declared.includes(`tool:${tool}`) && !declared.includes("tool:*"))
 		return `[BLOCKED] extension ${m.name}/${tool} is not in the permissions its manifest declares. Nothing was sent to it.`;
+	// The policy engine sees the truth: who is at the keyboard, and whether this run was approved.
 	const gate = ToolG8.instance().gate("primary", "extension_call", {
 		server: m.name,
 		tool,
 		action: `${m.name}/${tool}`,
 		attended,
+		run_approved: runApproved,
 	});
 	if (gate.allowed) return null;
 	return `[BLOCKED] extension ${m.name}/${tool} was refused by policy: ${gate.reason ?? "no reason given"}. Nothing was sent to it.`;
@@ -310,9 +317,8 @@ export async function startProcessExtension(
 	const tools: ProcessExtension["tools"] = {};
 	for (const t of listed) {
 		tools[t.name] = async (callArgs = {}) => {
-			// Reaching here means a person is attended or approved this run in advance,
-			// for this program: either way the person answered, so the gate sees attended.
-			const blocked = refusal(manifest, t.name, true);
+			// Unattended reaches here only with a verified approval for this run and program.
+			const blocked = refusal(manifest, t.name, attended, !attended);
 			if (blocked) return blocked;
 			try {
 				const res = (await transport.send("tools/call", {
@@ -341,12 +347,14 @@ export async function startProcessExtension(
 
 const EXTENSIONS_ROOT = () => path.resolve(process.env.HOME ?? "~", ".8gent", "extensions");
 
+const TTL_UNIT: Record<"s" | "m" | "h", number> = { s: 1000, m: 60_000, h: 3_600_000 };
+
 /** "90m", "1h", "45s" or a bare number of minutes. */
 export function parseTtl(v: string | undefined): number | null {
 	if (v === undefined) return DEFAULT_TTL_MS;
 	const m = /^(\d+)(s|m|h)?$/.exec(v.trim());
 	if (!m) return null;
-	const ms = Number(m[1]) * { s: 1000, m: 60_000, h: 3_600_000 }[m[2] ?? "m"];
+	const ms = Number(m[1]) * TTL_UNIT[(m[2] ?? "m") as keyof typeof TTL_UNIT];
 	return ms > 0 && ms <= MAX_TTL_MS ? ms : null;
 }
 
@@ -415,9 +423,14 @@ export async function runExtCli(
 	}
 	const minutes = Math.round(ttl / 60_000);
 	const program = read.grant.fp.program?.path ?? "";
+	// The manifest was validated on read: no control characters reach this line.
+	const declared = (parseProcessManifest(read.bytes)?.permissions ?? [])
+		.filter((p) => p.startsWith("tool:"))
+		.map((p) => (p === "tool:*" ? "every tool it offers" : p.slice(5)));
+	const tools = declared.length ? JSON.stringify(declared) : "none (no tool can be called)";
 	if (
 		!(await ask(
-			`Let extension ${JSON.stringify(name)} start once, with nobody at the keyboard, within ${minutes} min? It runs ${JSON.stringify(program)}.`,
+			`Let extension ${JSON.stringify(name)} start once, with nobody at the keyboard, within ${minutes} min? It runs ${JSON.stringify(program)}, and its tools ${tools} will be called without asking during that run, unless a policy rule blocks them.`,
 		))
 	) {
 		log("not approved");

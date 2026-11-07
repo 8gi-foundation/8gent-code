@@ -115,7 +115,13 @@ Undeclared permissions are denied. User sees a confirmation prompt on first load
   first use at `~/.8gent/keys/extension-approval.key` (0600). The host verifies it before
   every spawn; the first process to present a run id claims it, so the token does not work
   in a second run. Expiry defaults to 1 h, at most 24 h. The key never leaves the device, so
-  a token minted on one machine does not verify on another.
+  a token minted on one machine does not verify on another. The prompt names the declared
+  tools, which are then called without asking during that run. The policy engine still sees
+  `attended: false`, plus `run_approved: true`, so a rule of your own on
+  `attended equals false` keeps blocking approved runs.
+- **Scripts live in the folder.** An argument naming an existing file outside the extension
+  folder (an absolute `/tmp/x.py`) is refused at enable and at spawn: a file someone else can
+  write cannot be bound.
 - **Children end with the host.** On exit and on SIGINT, SIGTERM and SIGHUP every child is
   closed, then the signal is re-raised when nothing else listens. SIGKILL cannot be caught:
   the child then only sees its stdin close.

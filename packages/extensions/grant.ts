@@ -77,16 +77,26 @@ export function resolveProgram(
 	throw new Error(`command ${JSON.stringify(command)} was not found on PATH`);
 }
 
-/** Every argument that names a file inside the folder, with its hash. */
+/**
+ * Every argument that names an existing file, with its hash. A file outside
+ * the folder (an absolute path to /tmp/x.py) is refused: for an interpreter
+ * the script is the program, and a file anyone else can write cannot be bound.
+ */
 function argFiles(dir: string, args: string[]): Record<string, string> {
 	const root = fs.realpathSync(dir);
 	const files: Record<string, string> = {};
 	for (const a of args) {
 		const p = path.resolve(root, a);
-		if (!inside(root, p)) continue;
+		let isFile = false;
 		try {
-			if (fs.statSync(p).isFile()) files[a] = fileSha(p);
+			isFile = fs.statSync(p).isFile();
 		} catch {}
+		if (!isFile) continue;
+		if (!inside(root, p))
+			throw new Error(
+				`argument ${JSON.stringify(a)} names a file outside the extension folder; ship it inside the folder`,
+			);
+		files[a] = fileSha(p);
 	}
 	return files;
 }
