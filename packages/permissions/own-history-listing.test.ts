@@ -101,6 +101,17 @@ describe("8gent's own history, metadata only", () => {
 		expect(r.run).toBe(false);
 	});
 
+	test("a lone & or |& cannot smuggle a read past the listing check (8SO HOLD 7 Nov)", async () => {
+		for (const cmd of [
+			`ls ${s("sessions")} & cat ${s("sessions", "abc.json")}`,
+			`ls ${s("sessions")}&cat ${s("sessions", "abc.json")}`,
+			`ls ${s("sessions")} |& cat ${s("sessions", "abc.json")}`,
+		]) {
+			const r = await gate(cmd);
+			expect(r.run).toBe(false);
+		}
+	});
+
 	test("the browser control token and other private data stay denied, even to ls", async () => {
 		for (const cmd of [`ls -l ${s("browser-control.token")}`, `wc -c ${s("browser-control.token")}`]) {
 			const r = await gate(cmd);

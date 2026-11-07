@@ -547,6 +547,8 @@ const METADATA_COMMANDS = new Set(["ls", "wc", "stat", "du"]);
  */
 export function isMetadataOnly(command: string): boolean {
 	if (/[`$<>(){}\\"'\n\r?[\]]/.test(command)) return false;
+	// A lone & (background job, or |&) starts a second command the split below would not see.
+	if (/&/.test(command.replace(/&&/g, ""))) return false;
 	const segments = command.trim().split(/\s*(?:\|\||&&|;|\|)\s*/);
 	return segments.every((seg) => {
 		const [cmd, ...args] = seg.split(/\s+/).filter(Boolean);
