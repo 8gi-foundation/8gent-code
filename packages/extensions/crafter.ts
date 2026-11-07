@@ -8,8 +8,9 @@ import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { unattended } from "../core/one-yes";
 import { inferenceChat } from "../orchestration/sequential-pipeline";
-import { collectExtensionTools, loadAllExtensions } from "./loader";
+import { collectExtensionTools } from "./loader";
 import type { ExtensionManifest, ExtensionToolDef } from "./types";
 
 const EXTENSIONS_DIR = path.join(os.homedir(), ".8gent", "extensions");
@@ -64,7 +65,9 @@ export async function craftExtension(opts: CraftOptions): Promise<CraftResult> {
 	const installPath = install(manifest, sourceDir, warnings);
 
 	// Hot-reload
-	await loadAllExtensions();
+	// Through the manager, so the host's unattended rule applies and no child is orphaned.
+	const { getExtensionManager } = await import("./index");
+	await getExtensionManager().loadAll({ attended: !unattended() });
 
 	return { manifest, installed: true, path: installPath, warnings };
 }

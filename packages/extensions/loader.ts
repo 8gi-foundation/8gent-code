@@ -7,11 +7,13 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { unattended } from "../core/one-yes";
 import {
 	PROCESS_MANIFEST,
 	parseProcessManifest,
 	readManifestFile,
 	startProcessExtension,
+	unsafeFolderName,
 } from "./process";
 import { createScope, scopeEnabled } from "./scope";
 import type { ExtensionManifest, ExtensionToolDef, LoadedExtension } from "./types";
@@ -47,7 +49,18 @@ function validateManifest(raw: unknown): ExtensionManifest | null {
 /** Load a single extension from a directory */
 export async function loadExtension(dir: string, opts: LoadOptions = {}): Promise<LoadedExtension> {
 	// Preferred shape: a separate process named by manifest.json, off until enabled.
-	const attended = opts.attended ?? !!(process.stdin.isTTY && process.stdout.isTTY);
+	if (unsafeFolderName(dir)) {
+		// The raw name is never echoed: it could rewrite a terminal line.
+		const manifest = { name: "(unsafe folder name)", version: "0.0.0", description: "", entry: "" };
+		return {
+			manifest,
+			dir,
+			module: {},
+			status: "error",
+			error: "Folder name has control characters",
+		};
+	}
+	const attended = opts.attended ?? !unattended();
 	const proc = readManifestFile(dir, PROCESS_MANIFEST);
 	const pm = proc ? parseProcessManifest(proc.bytes) : null;
 	if (pm && proc) {
@@ -166,7 +179,7 @@ export async function loadAllExtensions(
 
 	const entries = fs.readdirSync(root, { withFileTypes: true });
 	const dirs = entries
-		.filter((e) => e.isDirectory())
+		.filter((e) => e.isDirectory() && !unsafeFolderName(e.name))
 		.map((e) => path.join(root, e.name))
 		.filter(
 			(d) =>

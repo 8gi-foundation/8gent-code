@@ -17,6 +17,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline/promises";
+import { unattended } from "../core/one-yes";
 import type { MCPToolSchema } from "../mcp/tool-bridge";
 import { StdioTransport } from "../mcp/transport";
 import { ToolG8 } from "../permissions/toolg8";
@@ -58,6 +59,9 @@ export function parseProcessManifest(bytes: Buffer): ProcessManifest | null {
 	}
 }
 
+/** A folder name that would reorder or rewrite a terminal line is not an extension. */
+export const unsafeFolderName = (dir: string): boolean => UNSAFE.test(path.basename(dir));
+
 const digest = (bytes: Buffer): string => createHash("sha256").update(bytes).digest("hex");
 
 /** Read a manifest once; `enabled` says whether a person granted exactly these bytes. */
@@ -79,7 +83,8 @@ export function readManifestFile(
 }
 
 export async function promptDefaultNo(question: string): Promise<boolean> {
-	if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
+	// CI, EIGHT_HEADLESS, EIGHT_UNATTENDED or no terminal: nobody can answer, so No.
+	if (unattended()) return false;
 	const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 	try {
 		return /^y(es)?$/i.test((await rl.question(`${question} [y/N] `)).trim());
@@ -94,6 +99,7 @@ export async function enableExtension(
 	manifestFile: string = PROCESS_MANIFEST,
 	ask: (q: string) => Promise<boolean> = promptDefaultNo,
 ): Promise<boolean> {
+	if (unsafeFolderName(dir)) return false;
 	const read = readManifestFile(dir, manifestFile);
 	if (!read) return false;
 	const m = manifestFile === PROCESS_MANIFEST ? parseProcessManifest(read.bytes) : null;
@@ -150,7 +156,7 @@ export async function startProcessExtension(
 	opts: { attended?: boolean } = {},
 ): Promise<ProcessExtension> {
 	// A person is at the keyboard when both ends are terminals; the host may say otherwise.
-	const attended = opts.attended ?? !!(process.stdin.isTTY && process.stdout.isTTY);
+	const attended = opts.attended ?? !unattended();
 	// Unattended means no: the child's code runs at spawn, before any call is gated.
 	if (!attended) throw new Error("disabled (unattended)");
 	const read = readManifestFile(dir, PROCESS_MANIFEST);
