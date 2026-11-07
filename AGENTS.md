@@ -552,11 +552,7 @@ apps/tui/src/
 ## Architecture Decisions (binding across all repos)
 
 ### Infrastructure
-- **Primary cloud**: Vercel (Next.js hosting) + Hetzner cax21 (self-hosted daemon/vessels)
-- **Database**: Convex (multi-tenant via `tenantId` field on every table)
-- **Auth**: Clerk (prod + dev)
-- **Billing**: Stripe
-- **Storage**: Hetzner Object Storage
+- Hosting and platform infrastructure are described in the platform repos (control plane, model proxy), not here. This repo covers the daemon protocol and how to self-host.
 
 ### 8gent OS Tenant Model
 - Each user gets `{username}.8gentos.com`
@@ -674,13 +670,7 @@ Async messaging across sessions and agents.
 
 ## Infrastructure
 
-| Component | State |
-|-----------|-------|
-| Vercel | All repos deployed, green |
-| Hetzner cax21 (nbg1) | IP [REDACTED-IP] - greenfield, SSH key setup needed |
-| Convex | Multi-tenant, row-level via tenantId |
-| Clerk | Auth on prod + dev |
-| Stripe | Billing configured |
+See the platform repos (control plane, model proxy). Deployment state is not tracked in this repo.
 
 ---
 

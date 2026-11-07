@@ -103,10 +103,9 @@ results in start order per tool.
   the multi-step adapter does not own them.
 - `/cancel` is new. `/unstick` resets both legacy and multi-step state.
 
-## Deployment (Hetzner)
+## Deployment
 
-The bridge runs alongside the Eight daemon on Hetzner host
-`[REDACTED-IP]`. Secrets live in `/etc/8gent/daemon.env`:
+The bridge runs alongside the Eight daemon on a host you control. Secrets live in `/etc/8gent/daemon.env`:
 
 ```
 TELEGRAM_BOT_TOKEN=...
