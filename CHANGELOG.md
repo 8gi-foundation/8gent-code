@@ -9,6 +9,19 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.45] - 2026-11-07
+
+### Added
+- extensions: out-of-process extensions, off until enabled ([#45](https://github.com/8gi-foundation/8gent-code/pull/45))
+- benchmarks: Harbor adapter for Terminal-Bench 2.1 and the Harness Leaderboard ([#40](https://github.com/8gi-foundation/8gent-code/pull/40))
+
+### Changed
+- product-focused README ([#37](https://github.com/8gi-foundation/8gent-code/pull/37))
+- user and contributor wiki ([#38](https://github.com/8gi-foundation/8gent-code/pull/38))
+
+### Fixed
+- privacy: local by default, web tools ask first, headless denies ([#39](https://github.com/8gi-foundation/8gent-code/pull/39))
+
 ## [0.20.44] - 2026-11-05
 
 ### Added
