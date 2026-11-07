@@ -792,11 +792,53 @@ export function diagnoseAudio(
 const STREAM_ERROR =
 	/EDL|ytdl|youtube-dl|yt-dlp|could not open source|failed to open|unrecognized file format|failed to recognize file format/i;
 
-/** The one plain line for a play that never started; the player's raw EDL text is never shown. */
-export function plainPlayFailure(errors: string[], plat: NodeJS.Platform = PLATFORM): string {
-	if (errors.some((e) => STREAM_ERROR.test(e)))
-		return `Could not play: the stream would not open. Update yt-dlp, then try again: ${installHint(plat)}`;
-	return "Could not play: mpv did not start the track. Run /dj doctor.";
+/** A line that names a cause (an HTTP status, TLS, DNS, a timeout): quoted before a generic "Failed to open". */
+const CAUSE_LINE =
+	/HTTP error|\b[45]\d\d\b|forbidden|tls|ssl|certificate|resolv|timed? ?out|refused|unreachable|network/i;
+
+/**
+ * One captured line, fit to show: the "[module]" prefix and every URL (a signed media URL
+ * carries the phone's IP) are dropped, spaces collapsed, at most 120 characters.
+ */
+export function quotableLine(raw: string): string {
+	return raw
+		.replace(/^\s*\[[^\]]+\]\s*/, "")
+		.replace(/https?:\/\/\S+/g, "<url>")
+		.replace(/\s+/g, " ")
+		.replace(/[.\s]+$/, "")
+		.trim()
+		.slice(0, 120);
+}
+
+/** The captured line most likely to be the cause, or "" when there is none. */
+function causeLine(errors: string[]): string {
+	const pick =
+		errors.find((e) => CAUSE_LINE.test(e)) ?? errors.find((e) => STREAM_ERROR.test(e)) ?? errors[0];
+	return pick ? quotableLine(pick) : "";
+}
+
+export interface PlayFailureContext {
+	/** yt-dlp resolved the page to a media URL, so mpv was handed a direct stream. */
+	resolved?: boolean;
+	/** A warning yt-dlp printed on a resolve that still worked. */
+	ytdlpWarning?: string;
+}
+
+/**
+ * The one plain line for a play that never started. It names what was checked and quotes
+ * what mpv said; it never tells anyone to update or install a tool that is already there
+ * (7 Nov: "Update yt-dlp" on a phone whose yt-dlp had just resolved the stream).
+ */
+export function plainPlayFailure(errors: string[], ctx: PlayFailureContext = {}): string {
+	const said = causeLine(errors);
+	const warned = ctx.ytdlpWarning ? ` yt-dlp warned: "${quotableLine(ctx.ytdlpWarning)}"` : "";
+	if (!said) return `Could not play: mpv did not start the track. Run /dj doctor.${warned}`;
+	const head = ctx.resolved
+		? "yt-dlp found the stream, but mpv could not open it"
+		: errors.some((e) => STREAM_ERROR.test(e))
+			? "mpv could not open the stream"
+			: "mpv did not start the track";
+	return `Could not play: ${head} (cause not checked). mpv said: "${said}"${warned}`;
 }
 
 /** How long a play waits for mpv to say it is playing; tests shorten it. */
@@ -893,7 +935,9 @@ let keyPending = "";
 let keyGen = 0;
 
 /** What resolving a page to a direct audio URL gave: the URL, or why not. */
-export type StreamResolve = { ok: true; url: string } | { ok: false; reason: string };
+export type StreamResolve =
+	| { ok: true; url: string; warning?: string }
+	| { ok: false; reason: string };
 
 /**
  * yt-dlp resolves a page to a direct audio URL, off the event loop. This is the same yt-dlp
@@ -937,8 +981,17 @@ export function resolveStream(
 		child.on?.("close", () => {
 			clearTimeout(timer);
 			const found = out.split(/\r?\n/).find((l) => l.startsWith("http"));
-			if (found) resolve({ ok: true, url: found });
-			else {
+			if (found) {
+				// A resolve that worked can still warn (no JS runtime, a missing format): kept
+				// so a player failure after it can say so.
+				const warning = err
+					.split(/\r?\n/)
+					.filter((l) => /^WARNING:/.test(l.trim()))
+					.pop()
+					?.trim()
+					.replace(/^WARNING:\s*/, "");
+				resolve(warning ? { ok: true, url: found, warning } : { ok: true, url: found });
+			} else {
 				const last =
 					err
 						.split(/\r?\n/)
@@ -1305,6 +1358,7 @@ export class DJ {
 		const isPage = safeYoutubeUrl(url) !== null;
 		if (isPage && !t.ytdlp) return `yt-dlp not installed. Run: ${installHint()}`;
 		let resolved = false;
+		let ytdlpWarning: string | undefined;
 		let errors: string[] = [];
 		for (let attempt = 0; attempt < 2; attempt++) {
 			let source = url;
@@ -1312,8 +1366,9 @@ export class DJ {
 				const r = await resolveStream(t.ytdlp!, url);
 				if (gen !== playGen) return "Stopped.";
 				if (!r.ok)
-					return `Could not play: yt-dlp could not get the stream. Update it, then try again: ${installHint()}`;
+					return `Could not play: yt-dlp could not get the stream (cause not checked). yt-dlp said: "${quotableLine(r.reason)}"`;
 				source = r.url;
+				ytdlpWarning = r.warning;
 				resolved = true;
 			}
 
@@ -1348,7 +1403,8 @@ export class DJ {
 			errors = verdict.errors;
 			const hookBroken = errors.some((e) => STREAM_ERROR.test(e));
 			if (mpvProcess === child) this.killMpv();
-			if (!(isPage && !resolved && hookBroken)) return plainPlayFailure(errors);
+			if (!(isPage && !resolved && hookBroken))
+				return plainPlayFailure(errors, { resolved, ytdlpWarning });
 		}
 
 		currentTrack = { title, url };

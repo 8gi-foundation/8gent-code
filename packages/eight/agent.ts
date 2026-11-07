@@ -4202,11 +4202,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						});
 						failover.markDown(currentEntry.model, currentEntry.provider);
 						if (affinityOn) this.affinityDown.push({ ...currentEntry });
-						// No allowed next hop (hosted off, #3710) ends the chain like exhaustion.
-						const next = tryResolve(failover, currentEntry, channel, this.sessionId);
-						if (next.model === currentEntry.model && next.provider === currentEntry.provider) {
-							break outer; // chain exhausted
-						}
+						// The model's own chain, then (local-first) a local provider before any
+						// hosted hop; null when no allowed hop is left (hosted off, #3710). A model
+						// with no chain of its own used to end the turn after one try.
+						const next = failover.nextAfter(currentEntry, channel, this.sessionId);
+						if (!next) break outer; // chain exhausted
 						// A provider the user named is never left for another (#3746).
 						if (
 							!mayMoveToProvider(this.config.providerPinned, currentEntry.provider, next.provider)

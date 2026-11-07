@@ -36,6 +36,8 @@ const resolves = () => seen.filter((s) => s.cmd === "/stub/yt-dlp" && s.args.inc
 
 /** How the stubbed tools behave in one test. */
 let mpvSays: { stderr?: string; exit?: boolean } = {};
+/** What mpv prints when it is handed the media URL we resolved (the phone path). */
+let mpvSaysDirect: { stderr?: string; exit?: boolean } = {};
 let ytdlpOut = `${MEDIA}\n`;
 let ytdlpErr = "";
 let mpvLoads = true;
@@ -67,6 +69,8 @@ function stubSpawn(cmd: string, args: string[]): ChildProcess {
 			const direct = args.includes("--ytdl=no");
 			if (mpvSays.stderr && !direct) err.emit("data", `${mpvSays.stderr}\n`);
 			if (mpvSays.exit && !direct) c.emit("exit", 1, null);
+			if (mpvSaysDirect.stderr && direct) err.emit("data", `${mpvSaysDirect.stderr}\n`);
+			if (mpvSaysDirect.exit && direct) c.emit("exit", 1, null);
 		}, 20);
 	}
 	return c;
@@ -78,7 +82,14 @@ function peer() {
 		const prop = JSON.parse(line).command?.[1];
 		const ok = (data: unknown) => `${JSON.stringify({ data, error: "success" })}\n`;
 		if (prop === "mpv-version") return ok("mpv 0.40.0");
-		if (prop === "duration" && mpvLoads && (!mpvSays.stderr || lastDirect)) return ok(300);
+		if (
+			prop === "duration" &&
+			mpvLoads &&
+			!mpvSaysDirect.stderr &&
+			!mpvSaysDirect.exit &&
+			(!mpvSays.stderr || lastDirect)
+		)
+			return ok(300);
 		return `${JSON.stringify({ error: "property unavailable" })}\n`;
 	});
 }
@@ -96,6 +107,7 @@ function asTermux(on: boolean) {
 beforeEach(() => {
 	seen.length = 0;
 	mpvSays = {};
+	mpvSaysDirect = {};
 	ytdlpOut = `${MEDIA}\n`;
 	ytdlpErr = "";
 	mpvLoads = true;
@@ -136,8 +148,10 @@ describe("on Android, mpv is handed the media URL", () => {
 		ytdlpOut = "";
 		ytdlpErr = "ERROR: unable to download video data: HTTP Error 403";
 		const result = await new DJ().play("fela kuti trouble sleep");
-		expect(result).toMatch(/^Could not play: yt-dlp could not get the stream\. Update it/);
-		expect(result).not.toMatch(/Now playing|EDL/);
+		expect(result).toBe(
+			'Could not play: yt-dlp could not get the stream (cause not checked). yt-dlp said: "ERROR: unable to download video data: HTTP Error 403"',
+		);
+		expect(result).not.toMatch(/Now playing|EDL|Update|pkg install/);
 		expect(result.split("\n")).toHaveLength(1);
 		expect(mpvSeen()).toHaveLength(0);
 	});
@@ -162,18 +176,19 @@ describe("Now playing waits for mpv", () => {
 		expect(result.split("\n")).toHaveLength(1);
 	});
 
-	test("EDL and ytdl complaints map to one line naming the fix", () => {
+	test("a stream complaint names what mpv said, never an update for tools already installed", () => {
 		for (const raw of [
 			EDL,
 			"[ytdl_hook] youtube-dl failed: not found",
 			"ytdl_hook: yt-dlp failed",
 		]) {
-			const line = plainPlayFailure([raw], "android");
-			expect(line).toBe(
-				"Could not play: the stream would not open. Update yt-dlp, then try again: pkg install mpv python-yt-dlp ffmpeg",
+			const line = plainPlayFailure([raw]);
+			expect(line).toMatch(
+				/^Could not play: mpv could not open the stream \(cause not checked\)\. mpv said: "/,
 			);
+			expect(line).not.toMatch(/Update|pkg install|\[ytdl_hook\]/);
 		}
-		expect(plainPlayFailure([], "darwin")).toBe(
+		expect(plainPlayFailure([])).toBe(
 			"Could not play: mpv did not start the track. Run /dj doctor.",
 		);
 	});
@@ -221,5 +236,41 @@ describe("Now playing waits for mpv", () => {
 		expect(result).toBe("Now playing: Fela Kuti - Trouble Sleep");
 		expect(resolves()).toHaveLength(0);
 		expect(mpvSeen()[0].args.at(-1)).toBe(PAGE);
+	});
+});
+
+describe("phone, 7 Nov: yt-dlp found the stream and mpv could not open it", () => {
+	const HTTP403 = "[ffmpeg] https: HTTP error 403 Forbidden";
+	const OPEN = `[cplayer] Failed to open ${MEDIA}.`;
+
+	test("the line says yt-dlp worked, quotes mpv, and never says update yt-dlp", async () => {
+		asTermux(true);
+		mpvSaysDirect = { stderr: `${HTTP403}\n${OPEN}`, exit: true };
+		const result = await new DJ().play("roots reggae");
+		expect(result).toBe(
+			'Could not play: yt-dlp found the stream, but mpv could not open it (cause not checked). mpv said: "https: HTTP error 403 Forbidden"',
+		);
+		expect(result).not.toMatch(/Update|pkg install|Now playing/);
+		// The signed media URL never reaches the screen.
+		expect(result).not.toContain("googlevideo");
+		expect(result.split("\n")).toHaveLength(1);
+	});
+
+	test("a yt-dlp warning from a resolve that worked is kept for the failure line", async () => {
+		asTermux(true);
+		ytdlpErr = "WARNING: [youtube] No supported JavaScript runtime could be found\n";
+		mpvSaysDirect = { stderr: OPEN, exit: true };
+		const result = await new DJ().play("roots reggae");
+		expect(result).toContain("yt-dlp found the stream, but mpv could not open it");
+		expect(result).toContain('mpv said: "Failed to open <url>"');
+		expect(result).toContain('yt-dlp warned: "No supported JavaScript runtime could be found"');
+	});
+
+	test("mpv printed nothing it could quote: it says so instead of guessing", async () => {
+		asTermux(true);
+		mpvSaysDirect = { exit: true };
+		const result = await new DJ().play("roots reggae");
+		expect(result).toMatch(/^Could not play: /);
+		expect(result).not.toMatch(/Update|pkg install|Now playing/);
 	});
 });

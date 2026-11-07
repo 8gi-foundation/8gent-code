@@ -76,13 +76,33 @@ describe("classifyError: kind, cause and next step from the text", () => {
 		expect(classifyError("Error: fetch failed").cause).toBe("fetch failed");
 	});
 
-	test("all providers exhausted says how many were tried and keeps the first cause", () => {
+	test("all providers exhausted says how many were tried and names each one with its error", () => {
 		const r = classifyError(
 			"All providers exhausted (2 attempted):\n  - ollama/qwen: connect ECONNREFUSED 127.0.0.1:11434\n  - openrouter/x: 429",
 		);
 		expect(r.kind).toBe("provider");
 		expect(r.cause).toBe("all providers failed (2 tried)");
+		expect(r.tried).toEqual([
+			"ollama/qwen: connect ECONNREFUSED 127.0.0.1:11434",
+			"openrouter/x: 429",
+		]);
 		expect(r.next).toMatch(/\/provider/);
+	});
+
+	test("one provider tried (phone, 7 Nov): the drawn row names it and its error", () => {
+		const text = "All providers exhausted (1 attempted):\n  - minimax/MiniMax-M2: invalid api key";
+		const lines = noticeLines(errorNotice(text), 50);
+		expect(lines[0]).toBe("✗ provider: all providers failed (1 tried)");
+		expect(lines).toContain("  minimax/MiniMax-M2: invalid api key");
+		expect(lines.at(-1)).toMatch(/^ {2}next: /);
+		for (const l of lines) expect(l.length).toBeLessThanOrEqual(50);
+	});
+
+	test("no recorded provider error draws no tried line", () => {
+		const r = classifyError(
+			"All providers exhausted (0 attempted):\n  (no provider errors recorded)",
+		);
+		expect(r.tried).toBeUndefined();
 	});
 
 	test("the cause is one line, at most 70 characters", () => {
