@@ -109,6 +109,8 @@ COMMANDS:
   keys [reload|status|open]   Open ~/.8gent/keys.env in your editor for API keys
                               "keys reload" re-reads the file into the running env (default action)
                               "keys status" lists which provider keys are present (no values shown)
+  calendar [connect <src>|off]  Today's calendar and tasks, read on this device; connect an
+                              .ics file or https iCal link (off until you do)
   install <preset>            Interactively install a /spawn preset CLI (claude, codex,
                               hermes, openclaw, pi, 8gent). Runs the install recipe with
                               full stdio so you can answer prompts + complete OAuth.
@@ -281,6 +283,7 @@ const DEPTH_EXEMPT_COMMANDS = new Set([
 	"model-pin",
 	"deck",
 	"bug",
+	"calendar",
 ]);
 
 function depthExempt(args: string[]): boolean {
@@ -707,6 +710,16 @@ async function main() {
 		case "env":
 			await keysCommand(restArgs);
 			break;
+
+		case "calendar": {
+			// `8gent calendar [connect <file.ics | https link> | off]`: today's calendar and
+			// tasks, read on this device (#48). Off until connected; never starts a model loop.
+			const { runCalendarCommand } = await import("../packages/eight/day-brief.ts");
+			const r = await runCalendarCommand(restArgs);
+			(r.code === 0 ? console.log : console.error)(r.text);
+			process.exitCode = r.code;
+			break;
+		}
 
 		case "me": {
 			// #4708: `8gent me import <dir>` copies a memory folder into ~/.8gent/me/.

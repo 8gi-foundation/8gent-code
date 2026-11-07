@@ -132,6 +132,7 @@ import {
 } from "./compaction";
 import { fixCompletedLine } from "./completed-line";
 import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
+import { DAY_BRIEF_PLACEHOLDER, dayBrief, isDayQuestion } from "./day-brief";
 import { recordRanCommand } from "./done-gate";
 import { continueEmptyTurn } from "./empty-turn-continue";
 import { Friction, withFriction } from "./friction";
@@ -2984,6 +2985,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	private plugSessionStarted = false;
+	/** Set by a turn whose reply must not reach plugs (the day brief, #48). */
+	private replyStaysLocal = false;
 
 	/** One turn, with the plug events around it (#5055). A failing plug is skipped, never fatal. */
 	private async runTurn(
@@ -3003,11 +3006,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const text = await host.runInput(userMessage, cwd);
 		await host.fire("turn_start", { text }, cwd);
 		let reply: string | undefined;
+		this.replyStaysLocal = false;
 		try {
 			reply = await this.runTurnCore(text, imageBase64, imageMimeType, imageOriginal);
 			return reply;
 		} finally {
-			await host.fire("turn_end", { text, ...(reply !== undefined ? { reply } : {}) }, cwd);
+			const shareable = reply !== undefined && !this.replyStaysLocal;
+			this.replyStaysLocal = false;
+			await host.fire("turn_end", { text, ...(shareable ? { reply } : {}) }, cwd);
 		}
 	}
 
@@ -3063,6 +3069,27 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				return welcome;
 			}
 			this.messageHistory.push({ role: "user", content: harnessNote(SMALL_TALK_NOTE) });
+		}
+
+		// "How does my day look today?" is answered on the device from the person's
+		// connected calendar and local tasks, by code, at zero tokens (#48). The model
+		// has neither, and nothing about the day leaves the device to ask it.
+		if (
+			!smallTalkTurn &&
+			!imageBase64 &&
+			this.agentDepth === 0 &&
+			this.config.agentScope !== "__table__" &&
+			isDayQuestion(textForAgent)
+		) {
+			const day = await dayBrief();
+			// The day (event titles, places, tasks) never enters the model's history: a
+			// later turn or a compaction would send it to the provider. Nor do plugs see
+			// it in turn_end. The person sees it; the model keeps a placeholder.
+			this.messageHistory.push({ role: "user", content: textForAgent });
+			this.messageHistory.push({ role: "assistant", content: DAY_BRIEF_PLACEHOLDER });
+			this.sessionWriter.writeUserMessage(textForAgent);
+			this.replyStaysLocal = true;
+			return day;
 		}
 
 		// A question about 8gent itself is answered from its own registry, and chat on
