@@ -13,6 +13,7 @@ import { EventEmitter } from "node:events";
 import {
 	DJ,
 	plainPlayFailure,
+	quotableLine,
 	setAudioGraceMs,
 	setDjSpawn,
 	setDjTools,
@@ -272,5 +273,48 @@ describe("phone, 7 Nov: yt-dlp found the stream and mpv could not open it", () =
 		const result = await new DJ().play("roots reggae");
 		expect(result).toMatch(/^Could not play: /);
 		expect(result).not.toMatch(/Update|pkg install|Now playing/);
+	});
+});
+
+describe("a quoted line never shows an address or the home path (8SO hold on #57)", () => {
+	test("any scheme:// URL is dropped, not only http(s)", () => {
+		expect(quotableLine("[ffmpeg] tcp://203.0.113.9:443: Connection refused")).toBe(
+			"<url> Connection refused",
+		);
+		expect(quotableLine("Failed to open rtmp://live.example/x?token=abc.")).toBe(
+			"Failed to open <url>",
+		);
+	});
+
+	test("a bare IPv4 address, with or without a port, is dropped", () => {
+		expect(quotableLine("Connection to 203.0.113.9:443 timed out")).toBe(
+			"Connection to <ip> timed out",
+		);
+		expect(quotableLine("could not reach 198.51.100.7.")).toBe("could not reach <ip>");
+	});
+
+	test("a bare IPv6 address, bracketed or not, is dropped", () => {
+		expect(quotableLine("connect to 2001:db8::1 failed")).toBe("connect to <ip> failed");
+		expect(quotableLine("connect to [2001:db8:85a3::8a2e:370:7334]:443 failed")).toBe(
+			"connect to <ip> failed",
+		);
+	});
+
+	test("times and versions are not mistaken for addresses", () => {
+		expect(quotableLine("stalled at 00:01:23 on mpv 0.41.0")).toBe(
+			"stalled at 00:01:23 on mpv 0.41.0",
+		);
+	});
+
+	test("the Termux home path is shown as ~", () => {
+		expect(
+			quotableLine("Failed to open /data/data/com.termux/files/home/Music/x.mp3", "/nowhere"),
+		).toBe("Failed to open ~/Music/x.mp3");
+	});
+
+	test("$HOME is shown as ~", () => {
+		expect(quotableLine("cannot read /Users/jo/.config/mpv/mpv.conf", "/Users/jo")).toBe(
+			"cannot read ~/.config/mpv/mpv.conf",
+		);
 	});
 });

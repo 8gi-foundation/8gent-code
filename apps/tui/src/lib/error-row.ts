@@ -9,6 +9,8 @@
  * warning, a nudge, the circuit breaker) is one `!` line in the agent's own words.
  */
 
+import { scrub } from "../../../../packages/eight/secret-scanner.js";
+
 export type ErrorKind =
 	| "timeout"
 	| "network"
@@ -91,7 +93,8 @@ export function classifyError(text: string): ErrorRow {
 			cause: `all providers failed (${exhausted[1]} tried)`,
 			next: NEXT.provider,
 		};
-		if (tried.length) row.tried = tried;
+		// A provider can quote part of a rejected key back: every line goes through scrub().
+		if (tried.length) row.tried = tried.map((l) => scrub(l).scrubbed);
 		return row;
 	}
 	let kind: ErrorKind = "error";
@@ -157,7 +160,8 @@ export function errorLines(row: ErrorRow, width: number): string[] {
 		out.push(clip(`✗ ${LABEL[row.kind]}: ${cause}`, width));
 		if (row.retry) out.push(clip(`  retry ${row.retry.n}/${row.retry.of}`, width));
 	}
-	for (const t of row.tried ?? []) out.push(clip(`  ${clean(t).replace(/\s+/g, " ")}`, width));
+	for (const t of row.tried ?? [])
+		out.push(clip(`  ${scrub(clean(t)).scrubbed.replace(/\s+/g, " ")}`, width));
 	if (row.next) out.push(clip(`  next: ${clean(row.next)}`, width));
 	return out;
 }

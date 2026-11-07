@@ -796,14 +796,33 @@ const STREAM_ERROR =
 const CAUSE_LINE =
 	/HTTP error|\b[45]\d\d\b|forbidden|tls|ssl|certificate|resolv|timed? ?out|refused|unreachable|network/i;
 
+/** Termux's home, named even when HOME says otherwise. */
+const TERMUX_HOME = "/data/data/com.termux/files/home";
+
+/** A bare IPv4 or IPv6 address (bracketed, with or without a port) becomes <ip>. */
+function maskAddresses(s: string): string {
+	return s.replace(/\[?[0-9A-Fa-f:.]*[:.][0-9A-Fa-f:.]*\]?(?::\d+)?/g, (m) => {
+		const core = m.replace(/[.:]+$/, "");
+		const tail = m.slice(core.length);
+		const bracketed = /^\[([^\]]+)\](?::\d+)?$/.exec(core);
+		const withPort = /^(.+):(\d+)$/.exec(core);
+		const ip =
+			(bracketed && net.isIP(bracketed[1]) !== 0) ||
+			net.isIP(core) !== 0 ||
+			(withPort !== null && net.isIPv4(withPort[1]));
+		return ip ? `<ip>${tail}` : m;
+	});
+}
+
 /**
- * One captured line, fit to show: the "[module]" prefix and every URL (a signed media URL
- * carries the phone's IP) are dropped, spaces collapsed, at most 120 characters.
+ * One captured line, fit to show. Dropped: the "[module]" prefix, every scheme:// URL (a
+ * signed media URL carries the phone's IP), bare IPv4 and IPv6 addresses, and the home
+ * path, shown as ~. Spaces collapsed, at most 120 characters.
  */
-export function quotableLine(raw: string): string {
-	return raw
-		.replace(/^\s*\[[^\]]+\]\s*/, "")
-		.replace(/https?:\/\/\S+/g, "<url>")
+export function quotableLine(raw: string, home: string = HOME): string {
+	let s = raw.replace(/^\s*\[[^\]]+\]\s*/, "").replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "<url>");
+	for (const h of [TERMUX_HOME, home]) if (h && h.length > 1) s = s.split(h).join("~");
+	return maskAddresses(s)
 		.replace(/\s+/g, " ")
 		.replace(/[.\s]+$/, "")
 		.trim()

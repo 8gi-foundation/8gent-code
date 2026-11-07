@@ -98,6 +98,20 @@ describe("classifyError: kind, cause and next step from the text", () => {
 		for (const l of lines) expect(l.length).toBeLessThanOrEqual(50);
 	});
 
+	test("a provider that quotes the rejected key back never shows it (8SO on #57)", () => {
+		// A made-up key, never a real one: the shape a provider echoes in a 401.
+		const fake = "sk-proj-FAKEtail0000000000000000000000000000";
+		const text = `All providers exhausted (1 attempted):\n  - openai/gpt-x: Incorrect API key provided: ${fake}`;
+		const row = classifyError(text);
+		expect(row.tried?.[0]).toContain("openai/gpt-x: Incorrect API key provided:");
+		expect(row.tried?.[0]).not.toContain("FAKEtail");
+		const drawn = noticeLines(errorNotice(text), 200).join("\n");
+		expect(drawn).not.toContain("FAKEtail");
+		// A row built by hand is scrubbed when drawn, too.
+		const lines = errorLines({ kind: "provider", cause: "x", tried: [`a/b: ${fake}`] }, 200);
+		expect(lines.join("\n")).not.toContain("FAKEtail");
+	});
+
 	test("no recorded provider error draws no tried line", () => {
 		const r = classifyError(
 			"All providers exhausted (0 attempted):\n  (no provider errors recorded)",
