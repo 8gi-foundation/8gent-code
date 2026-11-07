@@ -11,9 +11,18 @@
  *     computed sha256 of the same bytes;
  *   * backfill safety: a manifest that never baked an MP4 (zero turns) has
  *     NO recording key at all - absence, not null, not a placeholder;
- *   * the real path: a full bakeHuddle run (Chrome + ffmpeg, skipped when
- *     either is missing) leaves manifest.json linking exactly the MP4 that
- *     landed in the creative dir.
+ *   * the real path: a full bakeHuddle run (real ffmpeg encode and concat,
+ *     skipped only when ffmpeg is missing) leaves manifest.json linking exactly
+ *     the MP4 that landed in the creative dir.
+ *
+ * The slide capture in that run is a fixed ffmpeg still frame, not headless
+ * Chrome. Chrome made the test depend on where it ran: inside the Claude Code
+ * sandbox Chrome cannot bind its singleton socket and aborts in ~50ms ("slide
+ * capture failed for turn 0"), and under the parallel suite it contends with
+ * the other Chrome-driving tests. local-ci then blamed the failure on PRs that
+ * never touch packages/table (#39, #49, #50, #53). What this file pins is the
+ * linkage, and that needs a real MP4, not a browser. RENDER_LIVE=1 swaps the
+ * real Chrome capture back in, as artifacts.test.ts does for its render.
  */
 
 import { afterAll, describe, expect, it } from "bun:test";
@@ -25,12 +34,14 @@ import { spawnSync } from "node:child_process";
 import {
 	bakeHuddle,
 	findChrome,
+	slideToPng,
 	huddleDir,
 	sha256File,
 	writeRecordingToManifest,
 	THEME_VERSION,
 	type BakedTurn,
 	type HuddleManifest,
+	type SlideCapture,
 } from "../bake";
 
 function manifestOf(huddleId: string, turns: BakedTurn[]): HuddleManifest {
@@ -65,6 +76,22 @@ function turn(index: number): BakedTurn {
 }
 
 const ffmpegPresent = spawnSync("ffmpeg", ["-version"], { encoding: "utf8" }).status === 0;
+
+// A deterministic stand-in for the Chrome screenshot: one 1920x1080 frame of the
+// slide background colour, written by ffmpeg. Same size and format the bake
+// expects from Chrome, so the clip and concat steps run unchanged.
+const stillFrame: SlideCapture = (_htmlPath, pngPath) =>
+	spawnSync(
+		"ffmpeg",
+		["-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=0x100c0b:s=1920x1080", "-frames:v", "1", pngPath],
+		{ encoding: "utf8", timeout: 60_000 },
+	).status === 0 && existsSync(pngPath);
+
+function captureForRun(): SlideCapture | null {
+	if (process.env.RENDER_LIVE !== "1") return stillFrame;
+	const chrome = findChrome();
+	return chrome ? (htmlPath, pngPath) => slideToPng(htmlPath, pngPath, chrome) : null;
+}
 
 // Real huddle dirs this suite creates under ~/.8gent/huddles - removed at the
 // end so a test run leaves no archive rows behind on James's machine.
@@ -128,14 +155,17 @@ describe("backfill safety", () => {
 });
 
 describe("the real path: full bake links exactly the file it produced", () => {
-	// Chrome and ffmpeg are the bake's own preconditions; without either the
-	// bake honestly reports videoError, so there is no linkage to test.
-	it.skipIf(!findChrome() || !ffmpegPresent)(
+	// ffmpeg is the bake's own precondition; without it the bake honestly
+	// reports videoError, so there is no linkage to test. Chrome is only needed
+	// with RENDER_LIVE=1 (see the header).
+	it.skipIf(!ffmpegPresent || captureForRun() === null)(
 		"manifest.json gains recording {file, sha256, bakedAt} matching the creative MP4",
 		() => {
 			const id = `test_rec_real_${process.pid}`;
 			testHuddleIds.push(id);
-			const result = bakeHuddle(manifestOf(id, [turn(0)]), "19990811-000000");
+			const result = bakeHuddle(manifestOf(id, [turn(0)]), "19990811-000000", {
+				capture: captureForRun() as SlideCapture,
+			});
 			expect(result.videoError).toBeUndefined();
 			expect(result.videoPath).not.toBeNull();
 			const videoPath = result.videoPath as string;

@@ -334,7 +334,17 @@ export function slugify(text: string, fallback = "huddle"): string {
  * being swallowed, because a huddle that produced no watchable file is a
  * fact James needs, not one to hide.
  */
-export function bakeHuddle(manifest: HuddleManifest, stamp: string): BakeResult {
+/** Turns one slide's HTML into a PNG at pngPath; true only when the PNG exists. */
+export type SlideCapture = (htmlPath: string, pngPath: string) => boolean;
+
+export interface BakeOptions {
+	/** Slide capture. Default: headless Chrome via slideToPng. A test passes a
+	 *  capture that needs no browser, so the encode and linkage path runs the same
+	 *  in a sandbox (no socket bind, so Chrome aborts) and under parallel load. */
+	capture?: SlideCapture;
+}
+
+export function bakeHuddle(manifest: HuddleManifest, stamp: string, opts: BakeOptions = {}): BakeResult {
 	const dir = ensureHuddleDirs(manifest.huddleId);
 	mkdirSync(CREATIVE_DIR, { recursive: true });
 
@@ -356,10 +366,14 @@ export function bakeHuddle(manifest: HuddleManifest, stamp: string): BakeResult 
 		result.videoError = "no turns to bake";
 		return result;
 	}
-	const chrome = findChrome();
-	if (!chrome) {
-		result.videoError = "no Chrome/Chromium found for slide capture";
-		return result;
+	let capture = opts.capture;
+	if (!capture) {
+		const chrome = findChrome();
+		if (!chrome) {
+			result.videoError = "no Chrome/Chromium found for slide capture";
+			return result;
+		}
+		capture = (htmlPath, pngPath) => slideToPng(htmlPath, pngPath, chrome);
 	}
 
 	// 1. Every slide to a PNG.
@@ -382,7 +396,7 @@ export function bakeHuddle(manifest: HuddleManifest, stamp: string): BakeResult 
 			writeFileSync(htmlPath, html, "utf8");
 		}
 		const png = join(dir, "slides", `slide-${turn.turnId}.png`);
-		if (!slideToPng(htmlPath, png, chrome)) {
+		if (!capture(htmlPath, png)) {
 			result.videoError = `slide capture failed for turn ${turn.index}`;
 			return result;
 		}
