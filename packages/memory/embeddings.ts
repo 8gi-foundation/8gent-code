@@ -14,6 +14,8 @@ import { parallelMap } from "../tools/parallel-map.js";
 export interface EmbeddingProvider {
 	generate(text: string): Promise<Float32Array>;
 	generateBatch(texts: string[]): Promise<Float32Array[]>;
+	/** Embed a search query. Providers that tell queries from documents implement this. */
+	generateQuery?(text: string): Promise<Float32Array>;
 	readonly dimensions: number;
 	readonly model: string;
 	readonly available: boolean;
@@ -118,6 +120,67 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
 	}
 }
 
+// ── llama.cpp Embedding Provider (opt-in, EmbeddingGemma 2) ────────────
+
+/**
+ * Talks to a loopback `llama-server --embedding`. Only ever constructed after
+ * the user has enabled the embedder (see embedder-setup.ts).
+ */
+export class LlamaCppEmbeddingProvider implements EmbeddingProvider {
+	readonly dimensions: number;
+	readonly model: string;
+	private _available = false;
+
+	constructor(
+		private readonly baseUrl: string,
+		opts: { model?: string; dimensions?: number; queryPrefix?: string; docPrefix?: string } = {},
+	) {
+		this.model = opts.model ?? "embeddinggemma-2-q8_0";
+		this.dimensions = opts.dimensions ?? 768;
+		this.queryPrefix = opts.queryPrefix ?? "task: search result | query: ";
+		this.docPrefix = opts.docPrefix ?? "title: none | text: ";
+	}
+	private readonly queryPrefix: string;
+	private readonly docPrefix: string;
+
+	get available(): boolean {
+		return this._available;
+	}
+
+	async checkAvailability(): Promise<boolean> {
+		try {
+			const res = await fetch(`${this.baseUrl}/health`, { signal: AbortSignal.timeout(2000) });
+			this._available = res.ok;
+		} catch {
+			this._available = false;
+		}
+		return this._available;
+	}
+
+	private async embed(inputs: string[]): Promise<Float32Array[]> {
+		const res = await fetch(`${this.baseUrl}/v1/embeddings`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ model: this.model, input: inputs }),
+		});
+		if (!res.ok) throw new Error(`llama.cpp embedding failed: ${res.status} ${res.statusText}`);
+		const data = (await res.json()) as { data: Array<{ index: number; embedding: number[] }> };
+		return data.data.sort((a, b) => a.index - b.index).map((d) => new Float32Array(d.embedding));
+	}
+
+	async generate(text: string): Promise<Float32Array> {
+		return (await this.embed([this.docPrefix + text]))[0];
+	}
+
+	async generateQuery(text: string): Promise<Float32Array> {
+		return (await this.embed([this.queryPrefix + text]))[0];
+	}
+
+	async generateBatch(texts: string[]): Promise<Float32Array[]> {
+		return this.embed(texts.map((t) => this.docPrefix + t));
+	}
+}
+
 // ── Null Embedding Provider (Fallback) ────────────────────────────────
 
 export class NullEmbeddingProvider implements EmbeddingProvider {
@@ -144,6 +207,20 @@ let _provider: EmbeddingProvider | null = null;
  */
 export async function getEmbeddingProvider(): Promise<EmbeddingProvider> {
 	if (_provider) return _provider;
+
+	// Opt-in path: only when the user enabled EmbeddingGemma 2. Absent config = unchanged behaviour.
+	const { readEmbedderConfig, ensureEmbedderServer } = await import("./embedder-setup.js");
+	const cfg = readEmbedderConfig();
+	if (cfg) {
+		const baseUrl = await ensureEmbedderServer(cfg);
+		if (baseUrl) {
+			const gemma = new LlamaCppEmbeddingProvider(baseUrl);
+			if (await gemma.checkAvailability()) {
+				_provider = gemma;
+				return _provider;
+			}
+		}
+	}
 
 	const ollama = new OllamaEmbeddingProvider();
 	const isAvailable = await ollama.checkAvailability();

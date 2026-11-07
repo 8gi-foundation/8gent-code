@@ -168,6 +168,8 @@ MEMORY COMMANDS:
   memory forget <id>          Delete a memory
   memory stats                Show memory statistics
   memory serve                Serve memory read-only over stdio for other tools
+  memory embedder <sub>       Search memory by meaning (status | enable | disable)
+                              Recommended: EmbeddingGemma 2, runs on this machine, asks before downloading
 
 CRON COMMANDS:
   cron list                   List scheduled jobs
@@ -2659,6 +2661,27 @@ async function memoryCommand(args: string[]) {
 	if (sub === "serve") {
 		const { serveStdio } = await import("../packages/memory/serve.ts");
 		process.exit(await serveStdio());
+	}
+
+	if (sub === "embedder") {
+		const setup = await import("../packages/memory/embedder-setup.ts");
+		const action = rest[1] || "status";
+		if (action === "enable") {
+			if (rest[2] && rest[2] !== setup.EMBEDDER.id) {
+				console.error(`Unknown model: ${rest[2]}. Available: ${setup.EMBEDDER.id}`);
+				process.exit(1);
+			}
+			if ((await setup.enableEmbedder()) === "already-enabled") console.log("Search by meaning is already on.");
+		} else if (action === "disable") {
+			setup.disableEmbedder();
+			console.log("Memory search by meaning is off. The downloaded file is kept in ~/.8gent/models.");
+		} else if (action === "status") {
+			console.log(setup.statusLine(!!setup.readEmbedderConfig(), setup.checkLlamaServer()));
+		} else {
+			console.error("Usage: 8gent memory embedder [status|enable|disable]");
+			process.exit(1);
+		}
+		return;
 	}
 
 	const { getMemoryManager } = await import("../packages/memory");
