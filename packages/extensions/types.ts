@@ -33,8 +33,10 @@ export interface LoadedExtension {
 	manifest: ExtensionManifest;
 	dir: string;
 	module: Record<string, Function>;
-	status: "loaded" | "error";
+	status: "loaded" | "error" | "disabled";
 	error?: string;
+	/** Stops the child process of an out-of-process extension. */
+	close?: () => void;
 	/** Present only when EIGHT_EXT_SCOPE=1 and the module exports activate(scope). */
 	scope?: ExtensionScope;
 }

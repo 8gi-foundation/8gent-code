@@ -6,6 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -48,6 +49,13 @@ function writeExt(name: string, version: number, entry = ENTRY(version)): string
 		}),
 	);
 	fs.writeFileSync(path.join(dir, "index.js"), entry);
+	// In-process loading is off until enabled; this fixture is the enabled case.
+	fs.writeFileSync(
+		path.join(dir, ".enabled"),
+		createHash("sha256")
+			.update(fs.readFileSync(path.join(dir, "8gent-extension.json")))
+			.digest("hex"),
+	);
 	return dir;
 }
 

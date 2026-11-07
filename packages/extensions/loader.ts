@@ -7,6 +7,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { PROCESS_MANIFEST, isEnabled, readProcessManifest, startProcessExtension } from "./process";
 import { createScope, scopeEnabled } from "./scope";
 import type { ExtensionManifest, ExtensionToolDef, LoadedExtension } from "./types";
 
@@ -38,6 +39,18 @@ function validateManifest(raw: unknown): ExtensionManifest | null {
 
 /** Load a single extension from a directory */
 export async function loadExtension(dir: string, opts: LoadOptions = {}): Promise<LoadedExtension> {
+	// Preferred shape: a separate process named by manifest.json, off until enabled.
+	const pm = fs.existsSync(path.join(dir, PROCESS_MANIFEST)) ? readProcessManifest(dir) : null;
+	if (pm) {
+		const base = { dir, module: {}, manifest: { ...pm, entry: pm.command } };
+		if (!isEnabled(dir, PROCESS_MANIFEST)) return { ...base, status: "disabled" };
+		try {
+			const ext = await startProcessExtension(dir);
+			return { ...base, module: { tools: ext.tools } as never, status: "loaded", close: ext.close };
+		} catch (err) {
+			return { ...base, status: "error", error: `Start failed: ${err}` };
+		}
+	}
 	const manifestPath = path.join(dir, MANIFEST_FILE);
 
 	// Parse manifest
@@ -86,6 +99,9 @@ export async function loadExtension(dir: string, opts: LoadOptions = {}): Promis
 			error: `Entry not found: ${entryPath}`,
 		};
 	}
+
+	// In-process loading (agent.ts still calls this on startup) is off until a person enables it.
+	if (!isEnabled(dir, MANIFEST_FILE)) return { manifest, dir, module: {}, status: "disabled" };
 
 	try {
 		const mod = await import(opts.fresh ? `${entryPath}?t=${Date.now()}` : entryPath);
@@ -138,7 +154,10 @@ export async function loadAllExtensions(
 	const dirs = entries
 		.filter((e) => e.isDirectory())
 		.map((e) => path.join(root, e.name))
-		.filter((d) => fs.existsSync(path.join(d, MANIFEST_FILE)));
+		.filter(
+			(d) =>
+				fs.existsSync(path.join(d, MANIFEST_FILE)) || fs.existsSync(path.join(d, PROCESS_MANIFEST)),
+		);
 
 	const results = await Promise.allSettled(dirs.map((d) => loadExtension(d, opts)));
 
@@ -149,7 +168,7 @@ export async function loadAllExtensions(
 			const ext = result.value;
 			if (ext.status === "loaded") {
 				console.log(`[ext] Loaded: ${ext.manifest.name}@${ext.manifest.version}`);
-			} else {
+			} else if (ext.status === "error") {
 				console.log(`[ext] Failed: ${ext.manifest.name} - ${ext.error}`);
 			}
 		}
