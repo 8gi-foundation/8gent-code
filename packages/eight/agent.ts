@@ -47,6 +47,7 @@ import { type HookManager, getHookManager } from "../hooks";
 import { type InfiniteRunner, type InfiniteState, createInfiniteRunner } from "../infinite";
 import type { HedgeCandidate } from "../kernel/hedge-executor";
 import { KernelManager } from "../kernel/manager";
+import { resolveOllamaBaseUrl } from "../local-model-server/ollama-host";
 import { getLSPManager } from "../lsp";
 import { extractAutoMemories, getMemoryManager } from "../memory";
 import { meBlockForTurn } from "../memory/me.js";
@@ -91,6 +92,7 @@ import {
 	type FailoverEntry,
 	ModelFailover,
 	NoAllowedProviderError,
+	NoServableProviderError,
 } from "../providers/failover";
 import { decideRoute, readPolicyState, recordCall } from "../providers/locality";
 import { callLocalModelWithReroute, resolveToolCapableModel } from "../providers/model-reroute";
@@ -98,6 +100,7 @@ import { extractBranchName, extractCommitHash } from "../reporting";
 import { type RunLogEntry, appendRun } from "../reporting/runlog";
 import { getVaultOrNull } from "../secrets";
 import { type HeartbeatAgents, getHeartbeatAgents } from "../self-autonomy/heartbeat";
+import { detectLocalServers, preferredModel } from "../self-autonomy/local-servers";
 import { OnboardingManager } from "../self-autonomy/onboarding";
 import type {
 	AgentInfo,
@@ -3963,6 +3966,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			const affinityOn = failover.affinityEnabled;
 			const tried = new Set<string>();
 			const errors: Array<{ provider: string; model: string; error: string }> = [];
+			let noServableLine: string | null = null;
 
 			let currentEntry: FailoverEntry = {
 				model: agentConfig.provider.model,
@@ -4202,8 +4206,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						});
 						failover.markDown(currentEntry.model, currentEntry.provider);
 						if (affinityOn) this.affinityDown.push({ ...currentEntry });
+						// A hop is only worth trying if it can answer: ask loopback which
+						// local runtimes are up before choosing the next one.
+						failover.setLocalServing(await probeLocalServing());
 						// No allowed next hop (hosted off, #3710) ends the chain like exhaustion.
-						const next = tryResolve(failover, currentEntry, channel, this.sessionId);
+						const hopState: HopState = {};
+						const next = tryResolve(failover, currentEntry, channel, this.sessionId, hopState);
+						if (hopState.noServable) {
+							noServableLine = noServableHopLine(currentEntry.model, msg);
+							break outer;
+						}
 						if (next.model === currentEntry.model && next.provider === currentEntry.provider) {
 							break outer; // chain exhausted
 						}
@@ -4236,6 +4248,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				if (this.config.providerPinned && last) {
 					throw pinnedProviderError(last.provider, last.model, last.error);
 				}
+				// Nothing could take over after the first failure: say so plainly.
+				if (noServableLine && errors.length === 1) throw new Error(noServableLine);
 				const summary = errors.map((e) => `  - ${e.provider}/${e.model}: ${e.error}`).join("\n");
 				throw new Error(
 					`All providers exhausted (${errors.length} attempted):\n${summary || "  (no provider errors recorded)"}`,
@@ -5611,15 +5625,63 @@ function isTransientProviderError(msg: string): boolean {
  * serve the model: with hosted providers off (#3710) or an allowlist set,
  * resolve() throws rather than sending the turn to a provider nobody chose.
  */
+/** Set by tryResolve when no hop can be served (no key, no local runtime up). */
+interface HopState {
+	noServable?: boolean;
+}
+
+/**
+ * The local runtimes answering on loopback now, as failover hops. Reads
+ * 127.0.0.1 only (Ollama via OLLAMA host when it is loopback, the rest via
+ * detectLocalServers); never throws, never installs or downloads anything.
+ */
+async function probeLocalServing(): Promise<FailoverEntry[]> {
+	try {
+		const base = resolveOllamaBaseUrl();
+		let ollama: { status: string; host?: string; models?: string[] } | null = null;
+		if (runsOnBox("ollama", base)) {
+			try {
+				const res = await fetch(`${base}/api/tags`, {
+					signal: AbortSignal.timeout(1500),
+					redirect: "manual",
+				});
+				if (res.ok) {
+					const data = (await res.json()) as { models?: Array<{ name: string }> };
+					ollama = { status: "found", host: base, models: (data.models ?? []).map((m) => m.name) };
+				}
+			} catch {
+				/* not running */
+			}
+		}
+		const found = await detectLocalServers({ ollama });
+		return found.map((s) => ({ provider: s.id, model: preferredModel(s) }));
+	} catch {
+		return [];
+	}
+}
+
+/** One plain line for a first failure with nowhere local or keyed to go next. */
+export function noServableHopLine(model: string, errMsg: string): string {
+	const ms = /timed out after (\d+)ms/.exec(errMsg)?.[1];
+	const secs = ms ? String(Math.round(Number(ms) / 1000)) : /after (\d+)s/.exec(errMsg)?.[1];
+	const first = secs ? `${model} gave no reply in ${secs} s.` : `${model} did not answer.`;
+	return `${first} No local model is running and no other provider is ready. Start one with /llama, or choose another with /provider.`;
+}
+
 function tryResolve(
 	failover: ModelFailover,
 	current: FailoverEntry,
 	channel: FailoverChannel,
 	sessionId?: string,
+	state?: HopState,
 ): FailoverEntry {
 	try {
 		return failover.resolve(current.model, channel, sessionId);
 	} catch (err) {
+		if (err instanceof NoServableProviderError) {
+			if (state) state.noServable = true;
+			return current;
+		}
 		if (err instanceof NoAllowedProviderError) return current;
 		throw err;
 	}

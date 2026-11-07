@@ -49,12 +49,14 @@ afterEach(() => {
 describe("EIGHT_PROVIDERS_ALLOW allowlist", () => {
 	test("hosted opted in, no allowlist: still falls back to openrouter", () => {
 		delete process.env.EIGHT_PROVIDERS_ALLOW;
-		const fo = new ModelFailover(defaults(), { allowHosted: true });
+		const fo = new ModelFailover(defaults(), { allowHosted: true, canServe: () => true });
 		expect(fo.resolve("no-such-model")).toEqual({ model: "no-such-model", provider: "openrouter" });
 		expect(
-			walk(new ModelFailover(defaults(), { allowHosted: true }), "eight:latest", "text").some(
-				(e) => e.provider === "openrouter",
-			),
+			walk(
+				new ModelFailover(defaults(), { allowHosted: true, canServe: () => true }),
+				"eight:latest",
+				"text",
+			).some((e) => e.provider === "openrouter"),
 		).toBe(true);
 	});
 
@@ -98,6 +100,7 @@ describe("EIGHT_PROVIDERS_ALLOW allowlist", () => {
 		const fo = new ModelFailover(defaults(), {
 			allow: ["ollama", "openrouter"],
 			allowHosted: true,
+			canServe: () => true,
 		});
 		expect(fo.resolve("no-such-model")).toEqual({ model: "no-such-model", provider: "openrouter" });
 	});
@@ -172,7 +175,9 @@ describe("EIGHT_PROVIDERS_ALLOW allowlist", () => {
 	test("an empty or whitespace-only value means no allowlist", () => {
 		process.env.EIGHT_PROVIDERS_ALLOW = " , ";
 		expect(
-			new ModelFailover(defaults(), { allowHosted: true }).resolve("no-such-model").provider,
+			new ModelFailover(defaults(), { allowHosted: true, canServe: () => true }).resolve(
+				"no-such-model",
+			).provider,
 		).toBe("openrouter");
 	});
 });

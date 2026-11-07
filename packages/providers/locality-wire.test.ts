@@ -360,7 +360,12 @@ describe("failover under the policy", () => {
 		computer: {},
 	});
 	const make = (policy: RoutingPolicy) =>
-		new ModelFailover(chains() as any, { allow: null, allowHosted: true, policy: () => policy });
+		new ModelFailover(chains() as any, {
+			allow: null,
+			allowHosted: true,
+			policy: () => policy,
+			canServe: () => true,
+		});
 
 	test("local-only: when the local provider is down the failover is refused, not sent to the cloud", () => {
 		const fo = make("local-only");

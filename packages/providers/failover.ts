@@ -22,7 +22,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir, release } from "node:os";
 import { join } from "node:path";
+import { resolveProviderKey } from "./key-resolver";
+import { isLocalProvider } from "./local-providers";
 import { type RoutingPolicy, readPolicy } from "./locality";
+import { keyLooksUsable } from "./no-model-message";
 
 /**
  * Apple Foundation Model is preferred at the top of every local chain when
@@ -90,6 +93,18 @@ export class NoAllowedProviderError extends Error {
 				(note ? ` ${note}` : ""),
 		);
 		this.name = "NoAllowedProviderError";
+	}
+}
+
+/**
+ * No hop can serve this model: the unchained fallback has no key and no local
+ * runtime is answering. Callers end the turn with one plain line instead of
+ * trying a provider that cannot work.
+ */
+export class NoServableProviderError extends Error {
+	constructor(readonly model: string) {
+		super(`No provider can serve ${model}: no key is set and no local model is running.`);
+		this.name = "NoServableProviderError";
 	}
 }
 
@@ -195,6 +210,11 @@ export interface ModelFailoverOptions {
 	prefillTokensPerSec?: number;
 	/** Clock for the affinity TTL; injectable for tests. Default Date.now. */
 	now?: () => number;
+	/**
+	 * Can this provider take a turn? A hop that cannot is skipped, never tried.
+	 * Default: a local provider, or a hosted one with a usable key.
+	 */
+	canServe?: (provider: string) => boolean;
 }
 
 /** Most sessions the affinity map holds; the least recently served is evicted past this. */
@@ -236,6 +256,9 @@ export class ModelFailover {
 	 */
 	private affinity = new Map<string, Affinity>();
 	private now: () => number;
+	private canServe: (provider: string) => boolean;
+	/** Local runtimes known to answer on loopback right now (setLocalServing). */
+	private localServing: FailoverEntry[] = [];
 
 	constructor(
 		chains?: Record<FailoverChannel, Record<string, FailoverChain>>,
@@ -249,6 +272,8 @@ export class ModelFailover {
 		this.cacheAffinity = opts.cacheAffinity ?? process.env.EIGHT_CACHE_AFFINITY?.trim() === "1";
 		this.prefillTokensPerSec = opts.prefillTokensPerSec ?? 2000;
 		this.now = opts.now ?? Date.now;
+		this.canServe =
+			opts.canServe ?? ((p) => isLocalProvider(p) || keyLooksUsable(resolveProviderKey(p)));
 		this.policy = opts.policy ?? (() => readPolicy());
 		// No opt-in: the allowlist is the local providers (narrowed further by an explicit one).
 		this.allow = this.hostedBlocked
@@ -257,6 +282,37 @@ export class ModelFailover {
 		const loaded = chains || this.loadChains();
 		this.chainsByChannel = this.allow ? this.filterChains(loaded, this.allow) : loaded;
 		this.noteSkippedApfel(loaded);
+	}
+
+	/**
+	 * Tell the chain which local runtimes answer on loopback. The caller probes
+	 * (127.0.0.1 only); nothing here touches the network.
+	 */
+	setLocalServing(entries: readonly FailoverEntry[]): void {
+		this.localServing = [...entries];
+	}
+
+	/** Running local runtimes this chain may use, in LOCAL_FAILOVER_PROVIDERS order. */
+	private localTail(): FailoverEntry[] {
+		const rank = (p: string) => LOCAL_FAILOVER_PROVIDERS.indexOf(p.toLowerCase());
+		return this.localServing
+			.filter((e) => rank(e.provider) >= 0)
+			.filter((e) => !this.allow || this.allow.includes(e.provider.toLowerCase()))
+			.sort((a, b) => rank(a.provider) - rank(b.provider));
+	}
+
+	/**
+	 * The hops worth trying for a chain: the head as written, later entries only
+	 * when they can be served, and for a chain that reaches a hosted provider the
+	 * running local runtimes as its tail. An all-local chain is left as it is.
+	 */
+	private servableHops(models: readonly FailoverEntry[]): FailoverEntry[] {
+		const kept = models.filter((e, i) => i === 0 || this.canServe(e.provider));
+		if (!models.some((e) => isHostedProvider(e.provider))) return kept;
+		const tail = this.localTail().filter(
+			(t) => !kept.some((k) => k.provider === t.provider && k.model === t.model),
+		);
+		return [...kept, ...tail];
 	}
 
 	/** Why apfel was dropped from these chains, or null when it was not. */
@@ -501,7 +557,21 @@ export class ModelFailover {
 				droppedApfel,
 			);
 		}
-		if (!chain) return { model, provider: "openrouter" };
+		if (!chain) {
+			// An unchained model retries on openrouter only when openrouter can be
+			// served; a running local runtime comes next. Nothing servable: no hop.
+			const hops: FailoverEntry[] = [
+				...(this.canServe("openrouter") && (!this.allow || this.allow.includes("openrouter"))
+					? [{ model, provider: "openrouter" }]
+					: []),
+				...this.localTail(),
+			];
+			const open = hops.find((e) => !this.down.has(this.key(e.model, e.provider)));
+			const pick = open ?? hops[hops.length - 1];
+			if (!pick) throw new NoServableProviderError(model);
+			return pick;
+		}
+		chain = { ...chain, models: this.servableHops(chain.models) } as FailoverChain;
 
 		const head = chain.models[0];
 		// Cache affinity: a warm, healthy backend wins over chain order.
@@ -661,9 +731,9 @@ export class ModelFailover {
 		channel: FailoverChannel = "text",
 	): FailoverEntry | null {
 		const chain = this.chainsByChannel[channel]?.[model];
-		if (!chain) return null;
 		const localOnly = this.policy() === "local-only";
-		for (const entry of chain.models) {
+		const hops = chain ? this.servableHops(chain.models) : this.localTail();
+		for (const entry of hops) {
 			if (entry.model === model && entry.provider === provider) continue;
 			if (localOnly && isHostedProvider(entry.provider)) continue;
 			if (this.down.has(this.key(entry.model, entry.provider))) continue;
