@@ -132,6 +132,7 @@ import {
 } from "./compaction";
 import { fixCompletedLine } from "./completed-line";
 import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
+import { DAY_BRIEF_PLACEHOLDER, dayBrief, isDayQuestion } from "./day-brief";
 import { recordRanCommand } from "./done-gate";
 import { continueEmptyTurn } from "./empty-turn-continue";
 import { Friction, withFriction } from "./friction";
@@ -154,7 +155,6 @@ import {
 	loadSlashFacts,
 	selfQuestionNote,
 } from "./self-questions";
-import { dayBrief, isDayQuestion } from "./day-brief";
 import { SMALL_TALK_NOTE, isGreeting, isSmallTalk } from "./small-talk";
 import { replyIsTextToolCall } from "./text-call-fallback";
 import { verifyNudgeFor } from "./verify-gate";
@@ -2985,6 +2985,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	private plugSessionStarted = false;
+	/** Set by a turn whose reply must not reach plugs (the day brief, #48). */
+	private replyStaysLocal = false;
 
 	/** One turn, with the plug events around it (#5055). A failing plug is skipped, never fatal. */
 	private async runTurn(
@@ -3004,11 +3006,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const text = await host.runInput(userMessage, cwd);
 		await host.fire("turn_start", { text }, cwd);
 		let reply: string | undefined;
+		this.replyStaysLocal = false;
 		try {
 			reply = await this.runTurnCore(text, imageBase64, imageMimeType, imageOriginal);
 			return reply;
 		} finally {
-			await host.fire("turn_end", { text, ...(reply !== undefined ? { reply } : {}) }, cwd);
+			const shareable = reply !== undefined && !this.replyStaysLocal;
+			this.replyStaysLocal = false;
+			await host.fire("turn_end", { text, ...(shareable ? { reply } : {}) }, cwd);
 		}
 	}
 
@@ -3077,9 +3082,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			isDayQuestion(textForAgent)
 		) {
 			const day = await dayBrief();
+			// The day (event titles, places, tasks) never enters the model's history: a
+			// later turn or a compaction would send it to the provider. Nor do plugs see
+			// it in turn_end. The person sees it; the model keeps a placeholder.
 			this.messageHistory.push({ role: "user", content: textForAgent });
-			this.messageHistory.push({ role: "assistant", content: day });
+			this.messageHistory.push({ role: "assistant", content: DAY_BRIEF_PLACEHOLDER });
 			this.sessionWriter.writeUserMessage(textForAgent);
+			this.replyStaysLocal = true;
 			return day;
 		}
 

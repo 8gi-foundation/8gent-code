@@ -16,6 +16,7 @@ describe("agent wiring: a day question is answered on the device", () => {
 	let repo = "";
 	let server: ReturnType<typeof Bun.serve>;
 	let posts = 0;
+	let bodies: string[] = [];
 
 	beforeAll(async () => {
 		home = mkdtempSync(join(tmpdir(), "day-agent-home-"));
@@ -57,6 +58,7 @@ describe("agent wiring: a day question is answered on the device", () => {
 			async fetch(req) {
 				if (req.method !== "POST") return Response.json({ models: [], data: [] });
 				posts++;
+				bodies.push(await req.text());
 				return Response.json({
 					id: "c1",
 					object: "chat.completion",
@@ -100,6 +102,20 @@ describe("agent wiring: a day question is answered on the device", () => {
 		expect(posts).toBe(0);
 		expect(reply).toContain("09:30-10:00  Dentist");
 		expect(reply).toContain("nothing left it");
+	});
+
+	test("the day never reaches the model: the next turn's request has no event title", async () => {
+		const agent = build();
+		const day = await agent.chat("how does my day look today?");
+		expect(day).toContain("Dentist");
+		bodies = [];
+		await agent.chat("thanks, now summarise the readme");
+		expect(bodies.length).toBeGreaterThan(0);
+		for (const b of bodies) {
+			expect(b).not.toContain("Dentist");
+			expect(b).not.toContain("09:30");
+		}
+		expect(bodies.join("")).toContain("Day brief shown on the device");
 	});
 
 	test("any other message still goes to the model", async () => {

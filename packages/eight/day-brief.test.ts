@@ -1,14 +1,20 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	CONNECT_LINE,
+	COUNT_BUDGET,
+	MAX_EVENTS,
 	dayBrief,
 	eventsOn,
+	fetchCalendar,
 	isDayQuestion,
 	parseIcs,
 	parseIcsDate,
+	readCalendarFile,
 	runCalendarCommand,
 	tasksFor,
 } from "./day-brief";
@@ -285,5 +291,153 @@ describe("8gent calendar", () => {
 		const h = home();
 		expect((await runCalendarCommand([], { home: h, env: {}, now: SAT })).text).toContain("Today,");
 		expect((await runCalendarCommand(["what"], { home: h, env: {} })).code).toBe(2);
+	});
+});
+
+describe("8SO hardening (#50 review)", () => {
+	const ok = (body: string) => new Response(body, { status: 200 });
+	const redirect = (to: string) => new Response(null, { status: 302, headers: { location: to } });
+
+	test("a same-host https redirect is followed; another host or plain http is refused", async () => {
+		const seen: string[] = [];
+		const fake = (to: string) => async (u: string, init: RequestInit) => {
+			expect(init.redirect).toBe("manual");
+			seen.push(u);
+			return seen.length === 1 ? redirect(to) : ok("BEGIN:VCALENDAR");
+		};
+		expect(await fetchCalendar("https://cal.example.com/a.ics", fake("/b.ics"))).toBe(
+			"BEGIN:VCALENDAR",
+		);
+		expect(seen).toEqual(["https://cal.example.com/a.ics", "https://cal.example.com/b.ics"]);
+		for (const to of ["https://evil.example.net/x", "http://cal.example.com/b.ics"]) {
+			seen.length = 0;
+			await expect(fetchCalendar("https://cal.example.com/a.ics", fake(to))).rejects.toThrow(
+				"redirected elsewhere",
+			);
+			expect(seen).toHaveLength(1);
+		}
+	});
+
+	test("more than three redirects are refused", async () => {
+		let n = 0;
+		const loop = async () => redirect(`/hop${++n}`);
+		await expect(fetchCalendar("https://cal.example.com/a.ics", loop)).rejects.toThrow("too many");
+		expect(n).toBe(4);
+	});
+
+	test("a 60 MB body is abandoned early, while streaming", async () => {
+		let pulled = 0;
+		const chunk = new Uint8Array(1 << 20); // 1 MB
+		const body = new ReadableStream<Uint8Array>({
+			pull(c) {
+				if (pulled >= 60) return c.close();
+				pulled++;
+				c.enqueue(chunk);
+			},
+		});
+		await expect(
+			fetchCalendar("https://cal.example.com/a.ics", async () => new Response(body)),
+		).rejects.toThrow("larger than 5 MB");
+		expect(pulled).toBeLessThanOrEqual(8);
+	});
+
+	test("a Content-Length over 5 MB is refused before reading", async () => {
+		let pulled = 0;
+		const body = new ReadableStream<Uint8Array>({
+			pull(c) {
+				pulled++;
+				c.enqueue(new Uint8Array(10));
+			},
+		});
+		const res = new Response(body, { headers: { "content-length": String(60_000_000) } });
+		await expect(fetchCalendar("https://cal.example.com/a.ics", async () => res)).rejects.toThrow(
+			"larger than 5 MB",
+		);
+		expect(pulled).toBeLessThanOrEqual(1);
+	});
+
+	test("20,000 COUNT series answer in under 1 s, capped, and the answer says so", async () => {
+		const h = home();
+		mkdirSync(join(h, ".8gent"), { recursive: true });
+		const evs: string[] = [];
+		for (let i = 0; i < 20_000; i++) {
+			evs.push(
+				vevent(
+					`UID:c${i}`,
+					`SUMMARY:S${i}`,
+					"DTSTART:20170101T090000",
+					"RRULE:FREQ=WEEKLY;BYDAY=MO,SA;COUNT=9999",
+				),
+			);
+		}
+		const cal = join(h, "big.ics");
+		writeFileSync(cal, ics(...evs));
+		await runCalendarCommand(["connect", cal], { home: h, env: {} });
+		const t0 = performance.now();
+		const text = await dayBrief({ home: h, env: {}, now: SAT });
+		const ms = performance.now() - t0;
+		expect(ms).toBeLessThan(1000);
+		expect(text).toContain(`more than ${MAX_EVENTS.toLocaleString("en")} events`);
+		expect(text).toContain("too many repeats to check");
+		expect(COUNT_BUDGET).toBeGreaterThan(0);
+	});
+
+	test("simple daily and weekly COUNT series need no walk and stay exact", () => {
+		const weekly = (count: number) =>
+			parseIcs(
+				ics(
+					vevent(
+						"UID:w",
+						"SUMMARY:W",
+						"DTSTART:20261003T100000",
+						`RRULE:FREQ=WEEKLY;COUNT=${count}`,
+					),
+				),
+			);
+		// 3 Oct is occurrence 1; 7 Nov is occurrence 6.
+		expect(eventsOn(weekly(6), SAT)).toHaveLength(1);
+		expect(eventsOn(weekly(5), SAT)).toHaveLength(0);
+	});
+
+	test("an existing 644 calendar.json becomes 600 on connect", async () => {
+		const h = home();
+		mkdirSync(join(h, ".8gent"), { recursive: true });
+		const path = join(h, ".8gent", "calendar.json");
+		writeFileSync(path, "{}");
+		chmodSync(path, 0o644);
+		await runCalendarCommand(["connect", "https://cal.example.com/a.ics"], { home: h, env: {} });
+		expect(statSync(path).mode & 0o777).toBe(0o600);
+	});
+
+	test("a FIFO or an oversized file is refused, never read", () => {
+		const h = home();
+		const fifo = join(h, "pipe.ics");
+		expect(spawnSync("mkfifo", [fifo]).status).toBe(0);
+		expect(() => readCalendarFile(fifo)).toThrow("not a regular file");
+		const big = join(h, "big.ics");
+		writeFileSync(big, "x".repeat(100));
+		expect(() => readCalendarFile(big, 50)).toThrow("larger than 5 MB");
+	});
+
+	test("connect with no link reads it from the hidden prompt", async () => {
+		const h = home();
+		const prompts: string[] = [];
+		const r = await runCalendarCommand(["connect"], {
+			home: h,
+			env: {},
+			readHidden: async (p) => {
+				prompts.push(p);
+				return "https://cal.example.com/private-xyz/basic.ics";
+			},
+		});
+		expect(prompts[0]).toContain("hidden");
+		expect(r.code).toBe(0);
+		expect(r.text).not.toContain("private-xyz");
+		const empty = await runCalendarCommand(["connect"], {
+			home: h,
+			env: {},
+			readHidden: async () => "",
+		});
+		expect(empty.code).toBe(2);
 	});
 });

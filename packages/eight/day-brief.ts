@@ -22,7 +22,16 @@
  * link covers the same calendars) and other repeat rules (those events are skipped).
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { resolveHome } from "../core/home.js";
 
@@ -130,7 +139,18 @@ export function dayKey(d: Date): string {
 }
 
 /** Every VEVENT in an iCal text. Unparseable events are skipped, never fatal. */
-export function parseIcs(text: string): CalendarEvent[] {
+/** Most events read from one calendar: past this the rest are left out, and the answer says so. */
+export const MAX_EVENTS = 5_000;
+
+/** Every VEVENT in an iCal text, as parseIcs, plus whether the MAX_EVENTS cap cut the list. */
+export function parseIcsCapped(text: string): { events: CalendarEvent[]; truncated: boolean } {
+	const events = parseIcs(text, MAX_EVENTS + 1);
+	return events.length > MAX_EVENTS
+		? { events: events.slice(0, MAX_EVENTS), truncated: true }
+		: { events, truncated: false };
+}
+
+export function parseIcs(text: string, limit = Number.POSITIVE_INFINITY): CalendarEvent[] {
 	const lines = text.replace(/\r?\n[ \t]/g, "").split(/\r?\n/);
 	const out: CalendarEvent[] = [];
 	let cur: Partial<CalendarEvent> | null = null;
@@ -153,6 +173,7 @@ export function parseIcs(text: string): CalendarEvent[] {
 		if (line === "END:VEVENT") {
 			if (cur.start) out.push(cur as CalendarEvent);
 			cur = null;
+			if (out.length >= limit) break;
 			continue;
 		}
 		if (depth > 0) continue;
@@ -274,10 +295,38 @@ function fitsPattern(rule: Record<string, string>, start: Date, day: Date): bool
 /** Longest a COUNT is walked, in days: ten years. */
 const COUNT_WALK_DAYS = 3660;
 
+/**
+ * How many days all COUNT walks for one answer may check together. A calendar is input
+ * anyone with an invite can shape: without a shared bound, 20,000 COUNT rules walked ten
+ * years each took 12 s on the TUI thread. Once spent, the remaining COUNT series are
+ * left out and the answer says so.
+ */
+export const COUNT_BUDGET = 200_000;
+
+export interface ExpandBudget {
+	left: number;
+	exhausted: boolean;
+}
+
+export function newBudget(left = COUNT_BUDGET): ExpandBudget {
+	return { left, exhausted: false };
+}
+
+/** The occurrence number (1-based) of `day` in a series with one occurrence per period, or null. */
+function simpleIndex(rule: Record<string, string>, start: Date, day: Date): number | null {
+	const interval = Math.max(1, Number(rule.INTERVAL) || 1);
+	if (rule.FREQ === "DAILY" && !rule.BYDAY) return daysBetween(start, day) / interval + 1;
+	if (rule.FREQ === "WEEKLY" && (!rule.BYDAY || !rule.BYDAY.includes(","))) {
+		return Math.round(daysBetween(mondayOf(start), mondayOf(day)) / 7) / interval + 1;
+	}
+	return null;
+}
+
 export function occursOn(
 	ev: CalendarEvent,
 	day: Date,
 	movedKeys: ReadonlySet<string> = new Set(),
+	budget: ExpandBudget = newBudget(),
 ): boolean {
 	if (ev.cancelled) return false;
 	const dayStart = midnight(day);
@@ -296,9 +345,17 @@ export function occursOn(
 	if (!fitsPattern(ev.rrule, ev.start, dayStart)) return false;
 	const count = Number(ev.rrule.COUNT);
 	if (count > 0) {
+		// One occurrence per day or per week: the index is arithmetic, no walk.
+		const index = simpleIndex(ev.rrule, ev.start, dayStart);
+		if (index !== null) return index <= count;
 		let seen = 0;
 		const first = midnight(ev.start);
 		const span = Math.min(daysBetween(first, dayStart), COUNT_WALK_DAYS);
+		if (budget.left < span + 1) {
+			budget.exhausted = true;
+			return false;
+		}
+		budget.left -= span + 1;
 		for (let i = 0; i <= span; i++) {
 			const d = new Date(first.getFullYear(), first.getMonth(), first.getDate() + i);
 			if (fitsPattern(ev.rrule, ev.start, d)) seen++;
@@ -318,13 +375,17 @@ export interface DayItem {
 }
 
 /** What happens on `day`, all-day items first, then by start time. */
-export function eventsOn(events: CalendarEvent[], day: Date): DayItem[] {
+export function eventsOn(
+	events: CalendarEvent[],
+	day: Date,
+	budget: ExpandBudget = newBudget(),
+): DayItem[] {
 	const moved = new Set(
 		events.filter((e) => e.uid && e.recurrenceId).map((e) => `${e.uid}|${e.recurrenceId}`),
 	);
 	const items: DayItem[] = [];
 	for (const ev of events) {
-		if (!occursOn(ev, day, moved)) continue;
+		if (!occursOn(ev, day, moved, budget)) continue;
 		const item: DayItem = { summary: ev.summary || "(no title)", allDay: ev.allDay };
 		if (ev.location) item.location = ev.location;
 		if (!ev.allDay) {
@@ -392,6 +453,8 @@ export interface DayDeps {
 	env?: Record<string, string | undefined>;
 	now?: Date;
 	fetchText?: (url: string) => Promise<string>;
+	/** The hidden prompt `8gent calendar connect` uses when no link is given. */
+	readHidden?: (prompt: string) => Promise<string>;
 }
 
 const MAX_CALENDAR_BYTES = 5_000_000;
@@ -434,13 +497,73 @@ function expandPath(p: string, home: string): string {
 	return isAbsolute(x) ? x : resolve(x);
 }
 
-async function defaultFetchText(url: string): Promise<string> {
-	const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-	if (!res.ok) throw new Error(`HTTP ${res.status}`);
-	const text = await res.text();
-	if (text.length > MAX_CALENDAR_BYTES) throw new Error("calendar is larger than 5 MB");
-	return text;
+/** Redirects followed, each only to https on the connected link's own host. */
+const MAX_REDIRECTS = 3;
+
+/**
+ * Fetch a calendar link. Redirects are followed by hand, at most three, and only to
+ * https on the same host as the connected link: anything else is refused, so the link
+ * is never sent elsewhere and never downgraded to plain http. The body is read as a
+ * stream and abandoned once it passes 5 MB, so a huge answer cannot fill a phone's memory.
+ */
+export async function fetchCalendar(
+	url: string,
+	fetchImpl: (u: string, init: RequestInit) => Promise<Response> = fetch,
+	maxBytes = MAX_CALENDAR_BYTES,
+): Promise<string> {
+	const host = new URL(url).host;
+	const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+	let current = url;
+	for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+		const res = await fetchImpl(current, { redirect: "manual", signal });
+		if (res.status >= 300 && res.status < 400) {
+			const location = res.headers.get("location");
+			await res.body?.cancel();
+			if (!location) throw new Error(`HTTP ${res.status} with no new address`);
+			const next = new URL(location, current);
+			if (next.protocol !== "https:" || next.host !== host) {
+				throw new Error("calendar link redirected elsewhere; not followed");
+			}
+			current = next.href;
+			continue;
+		}
+		if (!res.ok) {
+			await res.body?.cancel();
+			throw new Error(`HTTP ${res.status}`);
+		}
+		const tooBig = "calendar is larger than 5 MB";
+		if (Number(res.headers.get("content-length")) > maxBytes) {
+			await res.body?.cancel();
+			throw new Error(tooBig);
+		}
+		if (!res.body) return "";
+		const reader = res.body.getReader();
+		const chunks: Uint8Array[] = [];
+		let total = 0;
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			total += value.byteLength;
+			if (total > maxBytes) {
+				await reader.cancel();
+				throw new Error(tooBig);
+			}
+			chunks.push(value);
+		}
+		return new TextDecoder().decode(Buffer.concat(chunks));
+	}
+	throw new Error("calendar link redirected too many times; not followed");
 }
+
+/** A calendar file on the device: a regular file, at most 5 MB. A FIFO or device is refused. */
+export function readCalendarFile(path: string, maxBytes = MAX_CALENDAR_BYTES): string {
+	const st = statSync(path);
+	if (!st.isFile()) throw new Error("not a regular file");
+	if (st.size > maxBytes) throw new Error("calendar is larger than 5 MB");
+	return readFileSync(path, "utf8");
+}
+
+const defaultFetchText = (url: string): Promise<string> => fetchCalendar(url);
 
 // ── The answer ──────────────────────────────────────────────────────────────
 
@@ -465,7 +588,11 @@ function hhmm(min: number): string {
 }
 
 export const CONNECT_LINE =
-	"To connect one (it stays off until you do): 8gent calendar connect <file.ics or https iCal link>";
+	"To connect one (it stays off until you do): 8gent calendar connect, then paste your iCal link";
+
+/** What the model's history keeps of a day turn: the day itself never enters it. */
+export const DAY_BRIEF_PLACEHOLDER =
+	"[Day brief shown on the device; not kept in this conversation.]";
 
 /** The day, in plain lines. Never throws: a source that fails says why in one line. */
 export async function dayBrief(deps: DayDeps = {}): Promise<string> {
@@ -484,7 +611,7 @@ export async function dayBrief(deps: DayDeps = {}): Promise<string> {
 		try {
 			text = isLink(source)
 				? await (deps.fetchText ?? defaultFetchText)(source)
-				: readFileSync(expandPath(source, home), "utf8");
+				: readCalendarFile(expandPath(source, home));
 		} catch (e) {
 			const why = e instanceof Error ? e.message : String(e);
 			const where = isLink(source) ? hostOf(source) : expandPath(source, home);
@@ -493,13 +620,23 @@ export async function dayBrief(deps: DayDeps = {}): Promise<string> {
 			);
 		}
 		if (text !== null) {
-			const items = eventsOn(parseIcs(text), now);
+			const { events, truncated } = parseIcsCapped(text);
+			const budget = newBudget();
+			const items = eventsOn(events, now, budget);
 			if (items.length === 0) lines.push("Nothing on your calendar today.");
 			for (const it of items) {
 				const when = it.allDay
 					? "all day    "
 					: `${hhmm(it.startMin ?? 0)}${it.endMin !== undefined ? `-${hhmm(it.endMin)}` : "      "}`;
 				lines.push(`  ${when}  ${it.summary}${it.location ? ` (${it.location})` : ""}`);
+			}
+			if (truncated) {
+				lines.push(
+					`Your calendar has more than ${MAX_EVENTS.toLocaleString("en")} events; only the first ${MAX_EVENTS.toLocaleString("en")} were read.`,
+				);
+			}
+			if (budget.exhausted) {
+				lines.push("Some repeating events have too many repeats to check, so they are not shown.");
 			}
 		}
 		calendarNote = isLink(source)
@@ -538,8 +675,9 @@ export const CALENDAR_USAGE = [
 	"Usage:",
 	"  8gent calendar                         today's calendar and tasks",
 	"  8gent calendar connect <file.ics>      read an iCal file on this device",
-	"  8gent calendar connect <https link>    read a private iCal link (Google: Settings, your",
-	"                                         calendar, Secret address in iCal format)",
+	"  8gent calendar connect                 paste a private iCal link at a hidden prompt (Google:",
+	"                                         Settings, your calendar, Secret address in iCal format)",
+	"  8gent calendar connect <https link>    the same, with the link on the command line",
 	"  8gent calendar off                     disconnect",
 ].join("\n");
 
@@ -558,8 +696,15 @@ export async function runCalendarCommand(
 		rmSync(path, { force: true });
 		return { code: 0, text: "Calendar disconnected." };
 	}
-	if (sub === "connect" && args[1]) {
-		const raw = args[1].trim();
+	if (sub === "connect") {
+		// No argument: the link is read from a hidden prompt, so a private link never
+		// lands in shell history or the process list (same as `8gent keys set`).
+		let raw = (args[1] ?? "").trim();
+		if (!raw) {
+			const ask = deps.readHidden ?? (await import("../secrets/read-hidden.js")).readHidden;
+			raw = (await ask("Paste your calendar link or file path (hidden): ")).trim();
+			if (!raw) return { code: 2, text: "Nothing pasted; no calendar connected." };
+		}
 		let stored: string;
 		let shown: string;
 		if (/^http:\/\//i.test(raw)) {
@@ -577,7 +722,13 @@ export async function runCalendarCommand(
 			shown = stored;
 		}
 		mkdirSync(join(home, ".8gent"), { recursive: true });
-		writeFileSync(path, `${JSON.stringify({ calendar: stored }, null, 2)}\n`, { mode: 0o600 });
+		// Written beside it and renamed in, then set to 600 every time: a calendar.json
+		// left readable by an older write is closed too.
+		const tmp = `${path}.${process.pid}.tmp`;
+		writeFileSync(tmp, `${JSON.stringify({ calendar: stored }, null, 2)}\n`, { mode: 0o600 });
+		chmodSync(tmp, 0o600);
+		renameSync(tmp, path);
+		chmodSync(path, 0o600);
 		return {
 			code: 0,
 			text: `Calendar connected: ${shown}. Ask "how does my day look today?" in 8gent, or run 8gent calendar.`,
