@@ -15,7 +15,15 @@ async function main() {
 	const opened = app.since(m);
 	// Filter to the one row, then Enter.
 	const f = app.mark();
-	app.feed("minimax");
+	// The picker draws a frame before its key handler is attached, and keys sent in
+	// that gap are dropped. Send the first key until it is drawn, then the rest.
+	const firstKeyDeadline = performance.now() + 15000;
+	while (!app.since(f).includes("Search: m")) {
+		if (performance.now() > firstKeyDeadline) break;
+		app.feed("m");
+		await tick(500);
+	}
+	app.feed("inimax");
 	// Enter only once the picker has drawn the filter. On a starved runner a fixed
 	// pause let Enter land on the unfiltered row the picker opened on, and the
 	// switch line named another provider.
