@@ -858,16 +858,26 @@ export class ProviderManager {
 	private noticedWithheld = new Set<string>();
 
 	getApiKey(name: ProviderName): string | null {
+		return this.resolveApiKey(name, false);
+	}
+
+	/**
+	 * The one key lookup. `peek` answers the same question with no side effect:
+	 * no notice, no rotation (auth-profiles.json is not rewritten and its
+	 * round-robin does not advance), no plain-key bookkeeping. Failover asks
+	 * through `hasCredentials` on every hop, so that path must be a pure read.
+	 */
+	private resolveApiKey(name: ProviderName, peek: boolean): string | null {
 		const withheld = this.keyWithheldReason(name);
 		if (withheld) {
-			if (!this.noticedWithheld.has(withheld)) {
+			if (!peek && !this.noticedWithheld.has(withheld)) {
 				this.noticedWithheld.add(withheld);
 				emitNotice(`Key for ${name} not sent: ${withheld}.`);
 			}
 			return null;
 		}
 		// Try rotated profiles first (round-robin with cooldown awareness)
-		const rotated = this.authRotator.getKey(name);
+		const rotated = peek ? this.authRotator.peekKey(name) : this.authRotator.getKey(name);
 		if (rotated) return rotated;
 
 		// Order: environment, then the key vault, then a plain `apiKey` value in
@@ -886,10 +896,10 @@ export class ProviderManager {
 			// provider. A providers.json that moves the endpoint (or declares a new
 			// provider) cannot spend a key written in clear next to it (#4622).
 			if (!this.atCompiledEndpoint(name)) {
-				this.refusedPlainKeys.add(String(name));
+				if (!peek) this.refusedPlainKeys.add(String(name));
 				return null;
 			}
-			this.plainKeyProviders.add(String(name));
+			if (!peek) this.plainKeyProviders.add(String(name));
 			return config.apiKey;
 		}
 		return null;
@@ -900,12 +910,13 @@ export class ProviderManager {
 	 * runtime, host CLI), or a key resolves from env, vault or providers.json.
 	 * Failover uses it to skip a hop that would fail on a missing key. An unknown
 	 * name answers true, so a name this registry does not know is not skipped.
+	 * A pure read: it peeks, so it never rotates or rewrites auth-profiles.json.
 	 */
 	hasCredentials(name: string): boolean {
 		try {
 			const config = this.getProvider(name as ProviderName);
 			if (!config.apiKeyEnv && !config.apiKeyRef) return true;
-			return this.getApiKey(name as ProviderName) !== null;
+			return this.resolveApiKey(name as ProviderName, true) !== null;
 		} catch {
 			return true;
 		}
