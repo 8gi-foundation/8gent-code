@@ -11,8 +11,8 @@
  *
  * Required env vars for the local Telegram bridge:
  *   - telegram-bot-token              Bot token for the local bridge, as a systemd
- *                                     credential ($CREDENTIALS_DIRECTORY) or a 0600 file named in
- *                                     config.json daemon.tokenFiles. Held in memory only
+ *                                     credential ($CREDENTIALS_DIRECTORY) or the 0600 file
+ *                                     ~/.8gent/secrets/telegram-bot-token. Held in memory only
  *                                     (bot-token.ts). A TELEGRAM_BOT_TOKEN env var still works,
  *                                     is deleted from process.env at start, and logs a warning.
  *   - TELEGRAM_AUTHORIZED_CHAT_IDS    Comma-separated chat_id allowlist.
@@ -222,7 +222,7 @@ export async function main(): Promise<void> {
 		["EIGHT_BOT_TOKEN", "eight-bot-token"],
 	]) {
 		try {
-			loadBotToken({ envVar, credentialName, configPath: CONFIG_PATH });
+			loadBotToken({ envVar, credentialName });
 		} catch (err) {
 			console.error(`[daemon] ${envVar}: ${(err as Error).message}`);
 		}

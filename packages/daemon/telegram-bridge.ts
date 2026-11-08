@@ -85,7 +85,7 @@ import { type SpokenModel, capAtSentence, makeSpokenDraft } from "../voice/spoke
 import { recordTelegramPoll, registerTelegramBridge } from "./bridge-health";
 import { approvalTtlMs, bridgeSecret } from "./channel-approvals";
 import { type BotTokenSpec, loadBotToken } from "./bot-token";
-import { dataDirPath, getDataDir } from "./data-dir";
+import { getDataDir } from "./data-dir";
 import { classifyInput, gateInput } from "./input-gate";
 import { NO_LINK_PREVIEW } from "./notifications";
 import { greetingText, vesselIdentity } from "./telegram-greeting";
@@ -3235,16 +3235,13 @@ function splitIds(raw: string | undefined): string[] {
 
 // ── Local-mode programmatic launcher ─────────────────────────────────
 
-const BOT_CONFIG_PATH = `${dataDirPath()}/config.json`;
 const TELEGRAM_TOKEN_SPEC: BotTokenSpec = {
 	envVar: "TELEGRAM_BOT_TOKEN",
 	credentialName: "telegram-bot-token",
-	configPath: BOT_CONFIG_PATH,
 };
 const EIGHT_TOKEN_SPEC: BotTokenSpec = {
 	envVar: "EIGHT_BOT_TOKEN",
 	credentialName: "eight-bot-token",
-	configPath: BOT_CONFIG_PATH,
 };
 
 /**

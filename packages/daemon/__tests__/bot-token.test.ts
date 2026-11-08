@@ -4,7 +4,7 @@
  * in a subprocess and inspect a child it spawns afterwards.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _resetBotTokens, loadBotToken } from "../bot-token";
@@ -75,16 +75,56 @@ describe("bot token at daemon startup", () => {
 describe("loadBotToken", () => {
 	const spec = { envVar: "TELEGRAM_BOT_TOKEN", credentialName: "telegram-bot-token" };
 
-	test("a 0600 file named in config.json is read; a loose file is refused", () => {
+	function secrets(mode = 0o600) {
 		const { root, data } = sandbox();
-		const f = join(root, "tok");
-		writeFileSync(f, FAKE, { mode: 0o600 });
-		const configPath = join(data, "config.json");
-		writeFileSync(configPath, JSON.stringify({ daemon: { tokenFiles: { "telegram-bot-token": f } } }));
-		expect(loadBotToken({ ...spec, configPath }, {})).toBe(FAKE);
-		_resetBotTokens();
-		chmodSync(f, 0o644);
-		expect(() => loadBotToken({ ...spec, configPath }, {})).toThrow(/0600/);
+		const dir = join(data, "secrets");
+		mkdirSync(dir);
+		const f = join(dir, "telegram-bot-token");
+		writeFileSync(f, FAKE, { mode });
+		chmodSync(f, mode);
+		return { root, data, dir, f, spec: { ...spec, secretsDir: dir } };
+	}
+
+	test("the fixed 0600 secrets file is read", () => {
+		const { spec: sp } = secrets();
+		expect(loadBotToken(sp, {})).toBe(FAKE);
+	});
+
+	test("a 0644 secrets file is refused", () => {
+		const { spec: sp } = secrets(0o644);
+		expect(() => loadBotToken(sp, {})).toThrow(/0600/);
+	});
+
+	test("a secrets file owned by another uid is refused", () => {
+		const { spec: sp } = secrets();
+		expect(() => loadBotToken({ ...sp, uid: (process.getuid?.() ?? 0) + 1 }, {})).toThrow(/owned by uid/);
+	});
+
+	test("a symlink out of the secrets directory is refused", () => {
+		const { root, dir, f, spec: sp } = secrets();
+		const outside = join(root, "id_rsa");
+		writeFileSync(outside, "ssh-key", { mode: 0o600 });
+		rmSync(f);
+		symlinkSync(outside, f);
+		expect(() => loadBotToken(sp, {})).toThrow(/outside/);
+		expect(dir).toBeTruthy();
+	});
+
+	test("a token path in config.json is ignored", () => {
+		const { root, data } = sandbox();
+		const evil = join(root, "evil");
+		writeFileSync(evil, "attacker-token", { mode: 0o600 });
+		writeFileSync(
+			join(data, "config.json"),
+			JSON.stringify({ daemon: { tokenFiles: { "telegram-bot-token": evil } } }),
+		);
+		expect(loadBotToken({ ...spec, secretsDir: join(data, "secrets") }, {})).toBeUndefined();
+		process.env.EIGHT_DATA_DIR = data;
+		try {
+			expect(loadBotToken(spec, {})).toBeUndefined();
+		} finally {
+			delete process.env.EIGHT_DATA_DIR;
+		}
 	});
 
 	test("a credential file wins over the env var, and the env var is still removed", () => {
