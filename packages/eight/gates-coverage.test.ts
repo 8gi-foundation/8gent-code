@@ -472,7 +472,7 @@ const MODEL_CALL_SITES: Array<{ pattern: RegExp; count: number; gate: string }> 
 	},
 	{
 		pattern:
-			/\b(modelFetch|modelFetchAsFetch|generateText|streamText|generateObject|streamObject|WebSocket)\b|node:(http|https|net|tls|dgram)|child_process|\bBun\.(spawn|spawnSync|connect)\b/,
+			/\b(modelFetch|modelFetchAsFetch|generateText|streamText|generateObject|streamObject|WebSocket)\b|node:(http|https|net|tls|dgram)|child_process|\bBun\.(spawn|spawnSync|connect|\$)/,
 		count: 0,
 		gate: "none in agent.ts",
 	},
@@ -935,7 +935,7 @@ describe("every registered tool runs through the gate", () => {
 		{
 			marker:
 				/runGatedCommand\(\s*command: string,\s*timeoutSec: number,\s*env\?: Record<string, string \| undefined>,?\s*\): Promise<string> \{\s*return this\.executor\.runCommand\(command, timeoutSec, env\);/,
-			gate: "KNOWN UNGATED: runGatedCommand, the headless done gate's build and test run, reached only under --yes. Executor policy only: no mode check, hooks or audit row. A second ungated site fails here.",
+			gate: "KNOWN UNGATED (issue 90): runGatedCommand, the headless done gate's build and test run, reached only under --yes. Executor policy only: no mode check, hooks or audit row. A second ungated site fails here.",
 		},
 	];
 	/** Executor members that run nothing. Anything else on this.executor must be a registered run site. */
@@ -958,7 +958,8 @@ describe("every registered tool runs through the gate", () => {
 	function classifyExecutorUses(src: string): { runs: number; unknown: string[] } {
 		let runs = 0;
 		const unknown: string[] = [];
-		const ref = /this\s*(?:\?\.|\.)\s*executor\b|this\s*\[\s*["'`]executor["'`]\s*\]/g;
+		// Any receiver (`this`, `self`, a cast), and any "executor" string (bracket access, Reflect.get).
+		const ref = /(?:\?\.|\.)\s*executor\b|\[\s*["'`]executor["'`]\s*\]/g;
 		for (let m = ref.exec(src); m; m = ref.exec(src)) {
 			const after = src.slice(m.index + m[0].length, m.index + m[0].length + 80);
 			const line = src.slice(src.lastIndexOf("\n", m.index) + 1, src.indexOf("\n", m.index)).trim();
@@ -972,6 +973,10 @@ describe("every registered tool runs through the gate", () => {
 			// An alias, a cast, a bracket access, a .bind or a private member: never a silent pass.
 			unknown.push(line);
 		}
+		// An "executor" string anywhere else (Reflect.get(this, "executor"), a computed key) is a dodge.
+		const literals = src.match(/["'`]executor["'`]/g)?.length ?? 0;
+		const bracketed = src.match(/\[\s*["'`]executor["'`]\s*\]/g)?.length ?? 0;
+		if (literals > bracketed) unknown.push(`${literals - bracketed} "executor" string literal(s)`);
 		// Destructuring the executor off this is an alias too.
 		for (const d of src.match(/\{[^}]*\bexecutor\b[^}]*\}\s*=\s*this\b/g) ?? []) unknown.push(d);
 		return { runs, unknown };
@@ -1050,7 +1055,9 @@ describe("every registered tool runs through the gate", () => {
 			/\b([A-Za-z_$][\w$]*)\s*=\s*ToolExecutor\b/g,
 		])
 			for (const m of src.matchAll(re)) names.add(m[1]);
-		return [...names].some((n) => new RegExp(`new\\s+${n.replace(/\$/g, "\\$")}\\s*\\(`).test(src));
+		return [...names].some((n) =>
+			new RegExp(`new\\s+(?:[\\w$]+\\.)?${n.replace(/\$/g, "\\$")}\\s*\\(`).test(src),
+		);
 	}
 
 	test("T8 registry: every ToolExecutor owner outside tests is registered", () => {
