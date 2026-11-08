@@ -47,10 +47,9 @@ export class AuthRotator {
 		writeFileSync(this.configPath, JSON.stringify(this.profiles, null, 2));
 	}
 
-	/** Return the best available key for a provider via round-robin, skipping cooled-down/failing profiles. */
-	getKey(provider: string): string | null {
-		const now = Date.now();
-		const candidates = this.profiles
+	/** Usable profiles for a provider, best first: priority, then least-recently-used. */
+	private candidates(provider: string, now: number): AuthProfile[] {
+		return this.profiles
 			.filter(
 				(p) =>
 					p.provider === provider &&
@@ -62,13 +61,25 @@ export class AuthRotator {
 				if (a.priority !== b.priority) return a.priority - b.priority;
 				return (a.lastUsed ?? 0) - (b.lastUsed ?? 0);
 			});
+	}
 
-		if (candidates.length === 0) return null;
-
-		const pick = candidates[0];
+	/** Return the best available key for a provider via round-robin, skipping cooled-down/failing profiles. */
+	getKey(provider: string): string | null {
+		const now = Date.now();
+		const pick = this.candidates(provider, now)[0];
+		if (!pick) return null;
 		pick.lastUsed = now;
 		this.save();
 		return pick.apiKey;
+	}
+
+	/**
+	 * The key `getKey` would return next, without taking it: no `lastUsed`
+	 * bump, no write to auth-profiles.json, no change to the round-robin.
+	 * For checks that ask "is there a key" on every hop of every turn.
+	 */
+	peekKey(provider: string): string | null {
+		return this.candidates(provider, Date.now())[0]?.apiKey ?? null;
 	}
 
 	markRateLimited(profileId: string, cooldownMs = DEFAULT_COOLDOWN_MS): void {
