@@ -131,7 +131,7 @@ import {
 	compactHistoryNow,
 	estimateMessageTokens,
 } from "./compaction";
-import { providerConfigForRole } from "./role-model";
+import { smallRoleConfigFor } from "./role-model";
 import { fixCompletedLine } from "./completed-line";
 import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
 import { recordRanCommand } from "./done-gate";
@@ -5089,20 +5089,17 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 	/**
 	 * The `small` role (#73): compaction and summaries run on it when
-	 * models.roles.small is set and its provider has credentials; otherwise the
-	 * session's own config, exactly as before.
+	 * models.roles.small is set, its provider has credentials, and the main
+	 * call's gates let it have the history (routing policy, provider allowlist,
+	 * privacy gate). Otherwise the session's own config, held local after a
+	 * sensitive read exactly as the main call is.
 	 */
 	private smallRoleConfig(session: ProviderConfig): ProviderConfig {
-		try {
-			return providerConfigForRole(
-				"small",
-				readSettingsFileSync()?.models?.roles,
-				session,
-				getProviderManager(),
-			);
-		} catch {
-			return session;
-		}
+		return smallRoleConfigFor(readSettingsFileSync()?.models?.roles, session, getProviderManager(), {
+			policy: readPolicyState(),
+			recentFilePaths: this.recentFilePaths,
+			runsLocal: (cfg) => runsOnBox(cfg.name, cfg.baseURL),
+		});
 	}
 
 	/** One line per role for /status: what main, small and slow run on right now. */
