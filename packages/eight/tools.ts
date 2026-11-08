@@ -2410,14 +2410,14 @@ export class ToolExecutor {
 	 * tools, and their output is scrubbed, filtered and chipped the same way.
 	 */
 	/**
-	 * Per-item gate for run_batch: the owner's refusal checks and start bookkeeping (agent.ts).
+	 * Per-item gate for batch and run_batch: the owner's refusal checks and start bookkeeping (agent.ts).
 	 * refusal is null when the item may run; id and startedAt then name its start event.
 	 */
 	private itemGate?: (
 		tool: string,
 		args: Record<string, unknown>,
 	) => Promise<{ refusal: string | null; id?: string; startedAt?: number }>;
-	/** Per-item end bookkeeping for run_batch: end event, session row, afterTool hooks. */
+	/** Per-item end bookkeeping for batch and run_batch: end event, session row, afterTool hooks. */
 	private itemEnd?: (
 		id: string,
 		tool: string,
@@ -2425,6 +2425,34 @@ export class ToolExecutor {
 		result: string,
 		durationMs: number,
 	) => Promise<void>;
+
+	/**
+	 * One item of batch or run_batch: the owner's refusals and start bookkeeping, then
+	 * execute(), then the end bookkeeping. Fails closed without a gate.
+	 */
+	private async runGatedItem(
+		via: "batch" | "run_batch",
+		tool: string,
+		args: Record<string, unknown>,
+	): Promise<string> {
+		const gate = this.itemGate;
+		if (!gate) return `Error: ${via} has no per-item gate in this session. Nothing was run.`;
+		const s = await gate(tool, args);
+		if (s.refusal != null) return isErrorToolResult(s.refusal) ? s.refusal : `Error: ${s.refusal}`;
+		// Start already fired: the end must fire exactly once, even if execute throws,
+		// and a throwing end hook must not change the item's own status.
+		const t0 = Date.now();
+		let r = "";
+		try {
+			r = await this.execute(tool, args);
+			return r;
+		} catch (e) {
+			r = `Error: ${e instanceof Error ? e.message : String(e)}`;
+			throw e;
+		} finally {
+			if (s.id) await this.itemEnd?.(s.id, tool, args, r, Date.now() - t0)?.catch(() => {});
+		}
+	}
 
 	setItemGate(gate: NonNullable<ToolExecutor["itemGate"]>): void {
 		this.itemGate = gate;
@@ -3160,34 +3188,15 @@ export class ToolExecutor {
 				return vercelGetDeploymentLogs(args.deploymentId as string);
 
 			case "batch":
-				// Each call re-enters execute(): same permission mode, gate and read boundary as alone.
-				return runReadBatch(args.calls, (t, a) => this.execute(t, a));
+				// Each call takes the owner's item gate, then re-enters execute(), as run_batch items do.
+				if (!this.itemGate) return "Error: batch has no per-item gate in this session. Nothing was run.";
+				return runReadBatch(args.calls, (t, a) => this.runGatedItem("batch", t, a));
 
 			case "run_batch":
 				if (!runBatchOn()) return "Error: run_batch is not enabled. Nothing was run.";
 				if (!this.itemGate)
 					return "Error: run_batch has no per-item gate in this session. Nothing was run.";
-				return runBatch(args.items, async (t, a) => {
-					const gate = this.itemGate;
-					if (!gate)
-						return "Error: run_batch has no per-item gate in this session. Nothing was run.";
-					const s = await gate(t, a);
-					if (s.refusal != null)
-						return isErrorToolResult(s.refusal) ? s.refusal : `Error: ${s.refusal}`;
-					// Start already fired: the end must fire exactly once, even if execute throws,
-					// and a throwing end hook must not change the item's own status.
-					const t0 = Date.now();
-					let r = "";
-					try {
-						r = await this.execute(t, a);
-						return r;
-					} catch (e) {
-						r = `Error: ${e instanceof Error ? e.message : String(e)}`;
-						throw e;
-					} finally {
-						if (s.id) await this.itemEnd?.(s.id, t, a, r, Date.now() - t0)?.catch(() => {});
-					}
-				});
+				return runBatch(args.items, (t, a) => this.runGatedItem("run_batch", t, a));
 
 			// MCP tools
 			case "mcp_list_tools":

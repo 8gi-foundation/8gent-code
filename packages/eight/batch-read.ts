@@ -2,9 +2,11 @@
  * batch (#69): up to 8 independent read-only tool calls in one model turn, one
  * combined result with a labelled section per call.
  *
- * Every call goes back through ToolExecutor.execute, so permission mode, the
- * ToolG8 gate, the read boundary and secret scrubbing apply exactly as when the
- * tool is called alone. The allowlist below only decides what may be named at all.
+ * Every call takes the owner's item gate (mode tool set, PreToolUse hooks,
+ * beforeTool/afterTool hooks, privacy gate, session row), then goes back through
+ * ToolExecutor.execute, so permission mode, the ToolG8 gate, the read boundary and
+ * secret scrubbing apply exactly as when the tool is called alone. The allowlist
+ * below only decides what may be named at all.
  */
 
 export const BATCH_MAX_CALLS = 8;
