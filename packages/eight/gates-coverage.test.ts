@@ -13,7 +13,11 @@
  * two fakes: a local session endpoint, and a hosted "openrouter.ai" that the
  * fetch spy routes to. Any other host is refused and, if it was not a GET or
  * HEAD, counted as off-box. local-only allows GET and HEAD by design
- * (LOCAL_ONLY_GAPS), so only other methods count as a call that left.
+ * (LOCAL_ONLY_GAPS), so only other methods count as a call that left. Transports
+ * other than fetch are trapped too (passport-net-trap.ts for node:http, https,
+ * net, tls and dns, plus WebSocket and a spawned curl, wget, nc or ssh): any
+ * use is counted as off-box and refused.
+ *   N0 control: the transport trap records each of those transports
  *   M1 chat(), hosted session, local-first: reaches the hosted fake (positive control)
  *   M2 chat(), hosted session, local-only: refused, nothing leaves
  *   M3 chat(), local session, local-only, text-tool path: nothing leaves
@@ -21,10 +25,11 @@
  *   M5 compactNow() (/compact), local session, local-only: the session summarises, nothing leaves
  *   M6 vision interpreter, local session, local-first: the image reaches the hosted fake (positive control)
  *   M7 vision interpreter under local-only: the process wire guard refuses its POST (backstop holds)
- *   M8 every model call site in agent.ts is in MODEL_CALL_SITES (a new one fails here)
+ *   M8 agent.ts only: every model call reference in agent.ts is in MODEL_CALL_SITES (a new one,
+ *      an alias or a raw transport fails here); helpers in other files are covered by M1 to M7 only
  *   todo: compactNow() on a hosted session under local-only (issue 81)
  *   todo: compactNow() on a hosted session after a .env read (issue 81, no fix PR yet)
- *   todo: vision interpreter takes the routing decision at its call site (no fix PR yet)
+ *   todo: vision interpreter takes the routing decision at its call site (issue 88)
  *   todo: the small role (compaction, summaries) takes both decisions (fixed by PR 80)
  *
  * TOOLS. Every registered tool must run through the gate (refuseToolCall,
@@ -37,10 +42,12 @@
  *   T4 run_batch items: every executor tool reaches the per-item gate
  *   T5 crash-resume replay (runToolForResume): every built-in tool reaches the gate
  *   T6 an allowed batched item is gated before it runs and fires onToolStart (audit)
- *   T7 every executor.execute site in agent.ts is in EXECUTE_SITES (a new one fails here)
- *   T8 every ToolExecutor built outside tests is in EXECUTOR_OWNERS (a new one fails here)
+ *   T7 every reference to this.executor in agent.ts is classified: a run (execute, runCommand)
+ *      must be a registered site with its gate in the marker; an alias or unknown use fails
+ *   T9 pre-fetch (tryRunPreToolRouter): every router strategy's tool reaches the gate, a refusal runs nothing
+ *   T8 every ToolExecutor built outside tests, aliased imports included, is in EXECUTOR_OWNERS
  *   todo: batch tool inner calls take refuseToolCall and noteToolStart (fixed by PR 76)
- *   todo: `8gent mcp` tools/call runs the executor with no mode, hooks or audit (no fix PR yet)
+ *   todo: `8gent mcp-server` tools/call runs the executor with no mode, hooks or audit (issue 89)
  *
  * STORED FILES (the other three of the five, all in unmerged PRs):
  *   todo: a credential presence check writes nothing (fixed by PR 64)
@@ -53,7 +60,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import * as childProcess from "node:child_process";
+import dns from "node:dns";
 import {
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
@@ -61,12 +71,16 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
+import http from "node:http";
+import https from "node:https";
+import net from "node:net";
 import * as os from "node:os";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
+import tls from "node:tls";
 import { rmRetry } from "../../tests/rm-retry";
 import type { RoutingPolicy } from "../providers/locality";
-import { guardFetch } from "../providers/locality-wire";
+import { installLocalityGuard } from "../providers/locality-wire";
 import type { Agent as AgentT } from "./agent";
 import { TOOL_CATEGORIES } from "./tool-registry";
 
@@ -192,8 +206,108 @@ async function withEnv<T>(vars: Record<string, string>, fn: () => Promise<T>): P
 async function traffic(fn: () => Promise<unknown>): Promise<{ who: Who[]; offBox: string[] }> {
 	const s = seen.length;
 	const o = offBox.length;
+	const l = trapLog().length;
 	await fn();
-	return { who: seen.slice(s).map((x) => x.who), offBox: offBox.slice(o) };
+	const trapped = trapLog()
+		.slice(l)
+		.map((name) => `trap ${name}`);
+	return { who: seen.slice(s).map((x) => x.who), offBox: [...offBox.slice(o), ...trapped] };
+}
+
+/** Names passport-net-trap.ts wrote: one line per node:http, https, net, tls or dns use. */
+let netLog = "";
+const trapLog = (): string[] =>
+	netLog && existsSync(netLog) ? readFileSync(netLog, "utf8").split("\n").filter(Boolean) : [];
+
+/** A spawned command that talks to the network on its own. */
+const NET_COMMAND = /(^|[\s/;&|(])(curl|wget|nc|ncat|socat|ssh|scp|telnet)(\s|$)/;
+const spawnText = (args: unknown[]): string =>
+	args
+		.flatMap((a) =>
+			Array.isArray(a)
+				? a
+				: typeof a === "object" && a && "cmd" in a
+					? (a as { cmd: unknown[] }).cmd
+					: [a],
+		)
+		.filter((a) => typeof a === "string")
+		.join(" ");
+
+/** Originals the transport trap replaces, restored in afterAll. */
+const restore: Array<() => void> = [];
+
+/**
+ * Trap every transport that is not fetch. passport-net-trap.ts replaces node:http,
+ * https, net, tls and dns with functions that log and throw; WebSocket and spawned
+ * network commands are trapped here, and recorded straight into offBox.
+ */
+async function installTransportTrap(): Promise<void> {
+	const mods = [
+		[net, ["connect", "createConnection"]],
+		[tls, ["connect"]],
+		[http, ["request", "get"]],
+		[https, ["request", "get"]],
+		[dns, ["lookup"]],
+	] as const;
+	for (const [mod, keys] of mods) {
+		for (const k of keys) {
+			const m = mod as unknown as Record<string, unknown>;
+			const orig = m[k];
+			restore.push(() => {
+				m[k] = orig;
+			});
+		}
+	}
+	const fetchBefore = globalThis.fetch;
+	netLog = join(home, "net-trap.log");
+	process.env.PASSPORT_NET_LOG = netLog;
+	await import("./passport-net-trap");
+	// The trap replaced fetch as well; the fetch spy below is the fetch check.
+	globalThis.fetch = fetchBefore;
+
+	const g = globalThis as unknown as { WebSocket?: unknown };
+	const ws = g.WebSocket;
+	g.WebSocket = class {
+		constructor(url: unknown) {
+			offBox.push(`WebSocket ${String(url)}`);
+			throw new Error("gates-coverage blocks WebSocket");
+		}
+	};
+	restore.push(() => {
+		g.WebSocket = ws;
+	});
+	const cp = childProcess as unknown as Record<string, (...a: unknown[]) => unknown>;
+	for (const k of ["spawn", "spawnSync", "exec", "execSync", "execFile", "execFileSync"]) {
+		const orig = cp[k];
+		const trapped = (...a: unknown[]) => {
+			const text = spawnText(a);
+			if (NET_COMMAND.test(text)) {
+				offBox.push(`spawn ${text.slice(0, 60)}`);
+				throw new Error("gates-coverage blocks a network command");
+			}
+			return orig(...a);
+		};
+		try {
+			cp[k] = trapped;
+			restore.push(() => {
+				cp[k] = orig;
+			});
+		} catch {
+			spyOn(childProcess, k as "spawn").mockImplementation(trapped as never);
+		}
+	}
+	for (const k of ["spawn", "spawnSync"] as const) {
+		const orig = Bun[k].bind(Bun) as (...a: unknown[]) => unknown;
+		const spy = spyOn(Bun, k).mockImplementation(((...a: unknown[]) => {
+			const text = spawnText(a);
+			if (NET_COMMAND.test(text)) {
+				offBox.push(`spawn ${text.slice(0, 60)}`);
+				throw new Error("gates-coverage blocks a network command");
+			}
+			return orig(...a);
+		}) as never);
+		restore.push(() => spy.mockRestore());
+	}
 }
 
 const until = async (ok: () => boolean, ms = 4000): Promise<void> => {
@@ -210,6 +324,7 @@ beforeAll(async () => {
 	sessionPort = fake("session").port ?? 0;
 	const hosted = fake("hosted");
 	realFetch = globalThis.fetch;
+	await installTransportTrap();
 	fetchSpy = spyOn(globalThis, "fetch").mockImplementation(((
 		input: RequestInfo | URL,
 		init?: RequestInit,
@@ -241,6 +356,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
 	fetchSpy?.mockRestore();
+	globalThis.fetch = realFetch;
+	for (const r of restore.reverse()) r();
+	Reflect.deleteProperty(process.env, "PASSPORT_NET_LOG");
 	homeSpy?.mockRestore();
 	for (const s of servers) s.stop(true);
 	(await import("../memory/index")).resetMemoryManager();
@@ -308,49 +426,97 @@ const notOnMain = (): never => {
 // ---------------------------------------------------------------------------
 
 /**
- * Every construct in agent.ts that sends a request to a model, and the decision
- * it passes. A count that changes means a site was added or removed: register
- * it here with the decision it takes and a test above that drives it.
+ * Every reference in agent.ts to something that sends a request to a model, and
+ * the decision it passes. References, not calls: an alias (`const mk =
+ * createEightAgent`) adds one and fails here, as does any fetch form
+ * (`fetch(`, `globalThis.fetch(`, `Bun.fetch(`) or raw transport. agent.ts only:
+ * a model call in another file is covered by the traffic tests (M1 to M7) alone.
+ * A count that changes means a site was added or removed: register it here with
+ * the decision it takes and a test that drives it.
  */
 const MODEL_CALL_SITES: Array<{ pattern: RegExp; count: number; gate: string }> = [
 	{
-		pattern: /createEightAgent\(/,
-		count: 6,
-		gate: "native turn and its retry, verify, output and continue agents: inside chat(), after decideRoute (M1, M2, M4)",
+		pattern: /\bcreateEightAgent\b/,
+		count: 7,
+		gate: "import, then the native turn and its retry, verify, output and continue agents: inside chat(), after decideRoute (M1, M2, M4)",
 	},
 	{
-		pattern: /runTextToolChat\(/,
+		pattern: /\brunTextToolChat\b/,
 		count: 2,
 		gate: "text-tool turn (definition and its one call): inside chat(), after decideRoute (M3)",
 	},
 	{
-		pattern: /createModel\(/,
-		count: 2,
-		gate: "compactIfNeeded (inside a turn, after decideRoute) and compactNow (no decision: issue 81 todo) (M5)",
+		pattern: /\bcreateModel\b/,
+		count: 3,
+		gate: "import, compactIfNeeded (inside a turn, after decideRoute) and compactNow (no decision: issue 81 todo) (M5)",
 	},
 	{
-		pattern: /new VisionInterpreter\(/,
+		pattern: /\bcompactHistory(Now)?\b/,
+		count: 4,
+		gate: "imports, and the two compaction passes above",
+	},
+	{
+		pattern: /\bVisionInterpreter\b/,
+		count: 2,
+		gate: "import, and one use inside chat() that picks its own provider: no decision at the call site (issue 88 todo), wire guard backstop (M6, M7)",
+	},
+	{
+		pattern: /\bcreateClient\b/,
+		count: 3,
+		gate: "import, and isReady / readiness: GET probes only, no prompt is sent",
+	},
+	{
+		pattern: /\bfetch\b/,
 		count: 1,
-		gate: "inside chat(), but picks its own provider: no decision at the call site (todo), wire guard backstop (M6, M7)",
+		gate: 'the words "fetch failed" in an error-message regex; any fetch, globalThis.fetch or Bun.fetch call adds one',
 	},
 	{
-		pattern: /createClient\(/,
-		count: 2,
-		gate: "isReady / readiness: GET probes only, no prompt is sent",
-	},
-	{
-		pattern: /[^\w.]fetch\(|modelFetch\(|generateText\(|streamText\(|generateObject\(/,
+		pattern:
+			/\b(modelFetch|modelFetchAsFetch|generateText|streamText|generateObject|streamObject|WebSocket)\b|node:(http|https|net|tls|dgram)|child_process|\bBun\.(spawn|spawnSync|connect)\b/,
 		count: 0,
 		gate: "none in agent.ts",
 	},
 ];
 
 describe("model calls pass the routing and privacy decisions", () => {
-	test("M8 registry: every model call site in agent.ts is registered", () => {
+	test("M8 registry, agent.ts only: every model call reference in agent.ts is registered", () => {
 		const src = code("packages/eight/agent.ts");
 		const got = MODEL_CALL_SITES.map((s) => `${s.pattern.source} x${count(src, s.pattern)}`);
 		const want = MODEL_CALL_SITES.map((s) => `${s.pattern.source} x${s.count}`);
 		expect(got).toEqual(want);
+	});
+
+	test("N0 control: the transport trap records node:http, https, net, tls, WebSocket and spawned curl", async () => {
+		const tries: Array<() => unknown> = [
+			() => http.request("http://openrouter.ai/api/v1/chat/completions", { method: "POST" }),
+			() => https.request("https://openrouter.ai/api/v1/chat/completions", { method: "POST" }),
+			() => net.connect(443, "openrouter.ai"),
+			() => tls.connect(443, "openrouter.ai"),
+			() => new WebSocket("wss://openrouter.ai/ws"),
+			() => Bun.spawn(["curl", "-X", "POST", "https://openrouter.ai/api/v1/chat/completions"]),
+			() => childProcess.spawn("bash", ["-c", "curl -X POST https://openrouter.ai"]),
+		];
+		const t = await traffic(async () => {
+			for (const go of tries) {
+				try {
+					go();
+				} catch {
+					// every trap throws; the record is what is checked
+				}
+			}
+		});
+		const text = t.offBox.join("\n");
+		for (const want of [
+			"http.request",
+			"https.request",
+			"net.connect",
+			"tls.connect",
+			"WebSocket",
+			"spawn curl",
+			"spawn bash -c curl",
+		])
+			expect(text).toContain(want);
+		expect(t.who).toEqual([]);
 	});
 
 	test("M1 control: a hosted session under local-first reaches the hosted fake", async () => {
@@ -442,16 +608,15 @@ describe("model calls pass the routing and privacy decisions", () => {
 	}, 30000);
 
 	test("M7 backstop: under local-only the process wire guard refuses the vision interpreter's POST", async () => {
+		// The production guard: installLocalityGuard with defaultWireDeps, which reads
+		// settings.json for itself (withPolicy writes local-only there). It wraps the fetch spy.
 		const spied = globalThis.fetch;
-		globalThis.fetch = guardFetch(spied, {
-			state: () => ({ policy: "local-only", localHosts: [] }),
-			nameOf: (hostPort) => hostPort,
-			record: () => null,
-			update: () => {},
-			notify: () => {},
-		});
 		try {
-			const t = await withPolicy("local-only", imageTurn);
+			const t = await withPolicy("local-only", async () => {
+				installLocalityGuard(true);
+				expect(globalThis.fetch).not.toBe(spied);
+				return imageTurn();
+			});
 			expect(t.who).not.toContain("hosted");
 			expect(t.offBox).toEqual([]);
 		} finally {
@@ -460,7 +625,7 @@ describe("model calls pass the routing and privacy decisions", () => {
 	}, 30000);
 
 	test.todo(
-		"the vision interpreter takes the routing decision at its call site: under local-only it sends nothing hosted without the wire guard (no fix PR yet)",
+		"the vision interpreter takes the routing decision at its call site: under local-only it sends nothing hosted without the wire guard (issue 88, no fix PR yet)",
 		async () => {
 			const t = await withPolicy("local-only", imageTurn);
 			expect(t.who).not.toContain("hosted");
@@ -742,34 +907,82 @@ describe("every registered tool runs through the gate", () => {
 	}, 60000);
 
 	/**
-	 * Every place agent.ts runs a tool on the executor, and the gate in front of it.
-	 * A new site fails here until it is registered with its gate and a test.
+	 * Every place agent.ts runs something on the executor, with its gate in the
+	 * marker, so deleting the gate fails here as well as in the behavioural test.
+	 * A new run site fails until it is registered with its gate and a test.
 	 */
-	const EXECUTE_SITES: Array<{ marker: RegExp; gate: string }> = [
+	const RUN_SITES: Array<{ marker: RegExp; gate: string }> = [
 		{
 			marker:
 				/execute: \(args: Record<string, unknown>\) => this\.executor\.execute\(t\.name, args\)/,
-			gate: "native extension tools: wrapped by gateTools with every offered tool (T1, T2)",
+			gate: "native extension tools: wrapped by gateTools with every offered tool (T1, T2; the wrap is asserted below)",
 		},
 		{
-			marker: /result = await this\.executor\.execute\(toolName, args\)/,
+			marker:
+				/const refusal = await this\.refuseToolCall\(toolName, args\);[\s\S]{0,4000}?result = await this\.executor\.execute\(toolName, args\)/,
 			gate: "text-tool run(): refuseToolCall first (T3)",
 		},
 		{
 			marker:
-				/runInReadScope\(this\.readScope, \(\) => this\.executor\.execute\(toolName, args\)\)/,
+				/const refusal = await this\.refuseToolCall\(toolName, args\);\s*if \(refusal\) return refusal;[\s\S]{0,300}?this\.executor\.execute\(toolName, args\)/,
 			gate: "runToolForResume: refuseToolCall first (T5)",
 		},
 		{
-			marker: /const result = await this\.executor\.execute\(dispatch\.tool, dispatch\.args\)/,
-			gate: "pre-fetch: refuseToolCall on the line before",
+			marker:
+				/if \(!dispatch \|\| \(await this\.refuseToolCall\(dispatch\.tool, dispatch\.args\)\)\) return;\s*try \{\s*const result = await this\.executor\.execute\(dispatch\.tool, dispatch\.args\)/,
+			gate: "pre-fetch (tryRunPreToolRouter): refuseToolCall first (T9)",
+		},
+		{
+			marker:
+				/runGatedCommand\(\s*command: string,\s*timeoutSec: number,\s*env\?: Record<string, string \| undefined>,?\s*\): Promise<string> \{\s*return this\.executor\.runCommand\(command, timeoutSec, env\);/,
+			gate: "KNOWN UNGATED: runGatedCommand, the headless done gate's build and test run, reached only under --yes. Executor policy only: no mode check, hooks or audit row. A second ungated site fails here.",
 		},
 	];
+	/** Executor members that run nothing. Anything else on this.executor must be a registered run site. */
+	const NON_RUNNING = new Set([
+		"getWorkingDirectory",
+		"retiredTurnEndNudge",
+		"markLayoutSent",
+		"beginTurn",
+		"takePresendStop",
+		"getToolDefinitions",
+		"setItemGate",
+		"setItemEnd",
+		"setExtensionRunner",
+		"setPlugHooks",
+		"createdFiles",
+	]);
+	const RUNS = new Set(["execute", "runCommand"]);
 
-	test("T7 registry: every executor.execute site in agent.ts is registered", () => {
+	/** Every this.executor reference in agent.ts: runs, and anything that is neither a run nor a known non-run. */
+	function classifyExecutorUses(src: string): { runs: number; unknown: string[] } {
+		let runs = 0;
+		const unknown: string[] = [];
+		const ref = /this\s*(?:\?\.|\.)\s*executor\b|this\s*\[\s*["'`]executor["'`]\s*\]/g;
+		for (let m = ref.exec(src); m; m = ref.exec(src)) {
+			const after = src.slice(m.index + m[0].length, m.index + m[0].length + 80);
+			const line = src.slice(src.lastIndexOf("\n", m.index) + 1, src.indexOf("\n", m.index)).trim();
+			if (/^\s*=\s*new ToolExecutor\(/.test(after)) continue; // the constructor's own assignment
+			const member = after.match(/^\s*(?:\?\.|\.)\s*([A-Za-z_$][\w$]*)/)?.[1];
+			if (member && NON_RUNNING.has(member)) continue;
+			if (member && RUNS.has(member)) {
+				runs++;
+				continue;
+			}
+			// An alias, a cast, a bracket access, a .bind or a private member: never a silent pass.
+			unknown.push(line);
+		}
+		// Destructuring the executor off this is an alias too.
+		for (const d of src.match(/\{[^}]*\bexecutor\b[^}]*\}\s*=\s*this\b/g) ?? []) unknown.push(d);
+		return { runs, unknown };
+	}
+
+	test("T7 registry: every this.executor use in agent.ts is a known non-run or a registered run site", () => {
 		const src = code("packages/eight/agent.ts");
-		expect(count(src, /this\.executor\.execute\(/)).toBe(EXECUTE_SITES.length);
-		for (const s of EXECUTE_SITES)
+		const uses = classifyExecutorUses(src);
+		expect(uses.unknown).toEqual([]);
+		expect(uses.runs).toBe(RUN_SITES.length);
+		for (const s of RUN_SITES)
 			expect({ site: s.gate, found: s.marker.test(src) }).toEqual({ site: s.gate, found: true });
 		// The native gate wraps every offered tool, and the agent hands the SDK that gate.
 		expect(code("packages/ai/agent.ts")).toMatch(
@@ -784,6 +997,34 @@ describe("every registered tool runs through the gate", () => {
 		);
 	});
 
+	test("T9 pre-fetch: every router strategy's tool reaches the gate, and a refusal runs nothing", async () => {
+		const agent = localAgent();
+		const i = instrument(agent);
+		const routed = agent as unknown as {
+			preToolRouter: { classify: () => unknown };
+			tryRunPreToolRouter: (m: string) => Promise<void>;
+		};
+		const want: Record<string, string> = {
+			ast: "search_symbols",
+			grep: "run_command",
+			glob: "list_files",
+			vector: "recall",
+			fileread: "read_file",
+		};
+		for (const strategy of Object.keys(want)) {
+			routed.preToolRouter.classify = () => ({
+				strategy,
+				args: { symbol: "x", pattern: "x", query: "x", path: "a.txt" },
+				confidence: 0.9,
+				reason: "gates-coverage",
+			});
+			await routed.tryRunPreToolRouter("find x");
+		}
+		expect(Object.values(want).filter((t) => !i.gated.includes(t))).toEqual([]);
+		expect(i.executed).toEqual([]);
+		expect(i.started).toEqual([]);
+	});
+
 	/**
 	 * Every ToolExecutor built outside tests, and what gates its calls. A new owner
 	 * fails here until it is registered.
@@ -794,11 +1035,23 @@ describe("every registered tool runs through the gate", () => {
 		"packages/orchestration/index.ts":
 			"harness-run scope test command for a finished child; executor policy only, not a model call",
 		"packages/mcp/server.ts":
-			"`8gent mcp` tools/call: executor policy only, no mode, hooks or audit (todo below)",
+			"`8gent mcp-server` tools/call: executor policy only, no mode, hooks or audit (issue 89 todo below)",
 		"packages/eight/scripts/desktop-act-dry.ts": "dev script, not shipped",
 		"packages/decide/eval/locate-run.ts": "eval harness, not shipped",
 		"packages/ast-index/eval/real-queries.ts": "eval harness, not shipped",
 	};
+
+	/** Builds a ToolExecutor under its own name or an alias (`as X`, `{ ToolExecutor: X }`, `X = ToolExecutor`). */
+	function buildsExecutor(src: string): boolean {
+		const names = new Set(["ToolExecutor"]);
+		for (const re of [
+			/\bToolExecutor\s+as\s+([A-Za-z_$][\w$]*)/g,
+			/\bToolExecutor\s*:\s*([A-Za-z_$][\w$]*)/g,
+			/\b([A-Za-z_$][\w$]*)\s*=\s*ToolExecutor\b/g,
+		])
+			for (const m of src.matchAll(re)) names.add(m[1]);
+		return [...names].some((n) => new RegExp(`new\\s+${n.replace(/\$/g, "\\$")}\\s*\\(`).test(src));
+	}
 
 	test("T8 registry: every ToolExecutor owner outside tests is registered", () => {
 		const owners: string[] = [];
@@ -807,15 +1060,15 @@ describe("every registered tool runs through the gate", () => {
 				if (e === "node_modules" || e.startsWith(".")) continue;
 				const p = join(dir, e);
 				if (statSync(p).isDirectory()) {
-					if (e === "__tests__" || e === "fixtures") continue;
+					if (["__tests__", "fixtures", "tests"].includes(e)) continue;
 					walk(p);
-				} else if (/\.tsx?$/.test(e) && !/\.(test|spec)\.tsx?$/.test(e)) {
-					if (/new ToolExecutor\(/.test(code(relative(REPO_ROOT, p))))
-						owners.push(relative(REPO_ROOT, p));
+				} else if (/\.(tsx?|mts|cts|jsx?|mjs)$/.test(e) && !/\.(test|spec)\.\w+$/.test(e)) {
+					if (buildsExecutor(code(relative(REPO_ROOT, p)))) owners.push(relative(REPO_ROOT, p));
 				}
 			}
 		};
-		for (const d of ["packages", "apps", "bin"]) walk(join(REPO_ROOT, d));
+		// The whole repo, so a script or app outside packages, apps and bin is seen too.
+		walk(REPO_ROOT);
 		expect(owners.sort()).toEqual(Object.keys(EXECUTOR_OWNERS).sort());
 	});
 
@@ -825,7 +1078,7 @@ describe("every registered tool runs through the gate", () => {
 	);
 
 	test.todo(
-		"`8gent mcp` tools/call takes the mode check, PreToolUse hooks and the session audit row (packages/mcp/server.ts, no fix PR yet)",
+		"`8gent mcp-server` tools/call takes the mode check, PreToolUse hooks and the session audit row (issue 89, packages/mcp/server.ts, no fix PR yet)",
 		notOnMain,
 	);
 });
