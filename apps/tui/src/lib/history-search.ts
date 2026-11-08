@@ -6,11 +6,16 @@
  */
 
 import type { Database } from "bun:sqlite";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
 	type SessionHit,
+	forgetIndexedSessions,
 	indexSessions,
 	searchSessionTurns,
 } from "../../../../packages/memory/session-index.js";
+import { MemoryStore } from "../../../../packages/memory/store.js";
 
 export type HistoryArgs =
 	| { kind: "browse" }
@@ -55,4 +60,29 @@ export function formatHits(query: string, hits: SessionHit[]): string {
 	if (hits.length === 0) return `No past sessions match "${query}".`;
 	const lines = hits.map((h, i) => `${i + 1}. ${h.date}  ${h.sessionId}  ${h.snippet}`);
 	return `${hits.length} session${hits.length === 1 ? "" : "s"} match "${query}":\n${lines.join("\n")}\n\n/history open <id> resumes one.`;
+}
+
+/** The agent's global memory file, which also holds the session-turn index. */
+export function historyIndexPath(): string {
+	const dataDir = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
+	return path.join(dataDir, "memory", "memory.db");
+}
+
+/** Open the index (MemoryStore makes the file 0600 and its folder 0700), run `fn`, close. */
+export function withHistoryIndex<T>(fn: (db: Database) => T, dbPath = historyIndexPath()): T {
+	const store = new MemoryStore(dbPath);
+	try {
+		return fn(store.db);
+	} finally {
+		store.close();
+	}
+}
+
+/**
+ * A session was trashed: drop its turns from the index now, not at the next
+ * search. Never creates the file. Returns the number of turns removed.
+ */
+export function forgetTrashedSession(id: string, dbPath = historyIndexPath()): number {
+	if (!fs.existsSync(dbPath)) return 0;
+	return withHistoryIndex((db) => forgetIndexedSessions(db, [id]), dbPath);
 }

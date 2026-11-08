@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { Database } from "bun:sqlite";
-import { type IndexableSession, indexSessions, searchSessionTurns } from "./session-index.js";
+import {
+	type IndexableSession,
+	forgetIndexedSessions,
+	indexSessions,
+	searchSessionTurns,
+} from "./session-index.js";
 
 const sess = (
 	id: string,
@@ -48,5 +53,38 @@ describe("session-index", () => {
 		expect(searchSessionTurns(db, "needle")).toHaveLength(10);
 		expect(searchSessionTurns(db, 'needle" OR (')).toBeArray();
 		expect(searchSessionTurns(db, "   ")).toEqual([]);
+	});
+
+	const rowsFor = (id: string) =>
+		(
+			db.prepare("SELECT COUNT(*) AS c FROM session_turns_fts WHERE session_id = ?").get(id) as {
+				c: number;
+			}
+		).c +
+		(
+			db.prepare("SELECT COUNT(*) AS c FROM session_turns_state WHERE session_id = ?").get(id) as {
+				c: number;
+			}
+		).c;
+
+	it("drops a session that is no longer in the live set (trashed or deleted)", () => {
+		indexSessions(db, [sess("keep0001", ["kept turn marker"]), sess("gone0001", ["trashed turn marker"])]);
+		expect(searchSessionTurns(db, "marker")).toHaveLength(2);
+		// gone0001 was trashed: the next sync lists only keep0001.
+		indexSessions(db, [sess("keep0001", ["kept turn marker"])]);
+		expect(searchSessionTurns(db, "marker").map((h) => h.sessionId)).toEqual(["keep0001"]);
+		expect(rowsFor("gone0001")).toBe(0);
+		expect(rowsFor("keep0001")).toBeGreaterThan(0);
+		// An empty live set empties the index.
+		indexSessions(db, []);
+		expect(rowsFor("keep0001")).toBe(0);
+	});
+
+	it("forgetIndexedSessions removes only the named sessions' turns and state", () => {
+		indexSessions(db, [sess("aaaa0001", ["one", "two"]), sess("bbbb0001", ["three"])]);
+		expect(forgetIndexedSessions(db, ["aaaa0001"])).toBe(2);
+		expect(rowsFor("aaaa0001")).toBe(0);
+		expect(rowsFor("bbbb0001")).toBe(2);
+		expect(forgetIndexedSessions(db, ["nope0001"])).toBe(0);
 	});
 });

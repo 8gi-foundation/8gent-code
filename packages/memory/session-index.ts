@@ -7,7 +7,9 @@
  *
  * Input is plain data (id, date, messages) so this package does not depend on
  * the session store. Indexing is incremental: a session is re-read only when
- * its turn count changed since the last run.
+ * its turn count changed since the last run. The input is the complete set of
+ * live sessions, so a session that is no longer in it (trashed, deleted by
+ * hand) has its turns removed from the index on the same run.
  */
 
 import type { Database } from "bun:sqlite";
@@ -36,9 +38,45 @@ CREATE TABLE IF NOT EXISTS session_turns_state (
   last_active TEXT NOT NULL
 );`;
 
-/** Index new or grown sessions. Returns the number of turns written. */
+function dropStatements(db: Database) {
+	return {
+		turns: db.prepare("DELETE FROM session_turns_fts WHERE session_id = ?"),
+		state: db.prepare("DELETE FROM session_turns_state WHERE session_id = ?"),
+	};
+}
+
+/** Remove these sessions' turns from the index. Returns the number of turns removed. */
+export function forgetIndexedSessions(db: Database, ids: string[]): number {
+	db.exec(SCHEMA);
+	const drop = dropStatements(db);
+	const counted = db.prepare("SELECT COUNT(*) AS c FROM session_turns_fts WHERE session_id = ?");
+	let removed = 0;
+	db.transaction(() => {
+		for (const id of ids) {
+			removed += (counted.get(id) as { c: number }).c;
+			drop.turns.run(id);
+			drop.state.run(id);
+		}
+		// A delete only tombstones FTS5 terms; merging the segments drops them for good.
+		if (removed > 0) db.exec("INSERT INTO session_turns_fts(session_turns_fts) VALUES('optimize')");
+	})();
+	return removed;
+}
+
+/**
+ * Bring the index in line with `sessions`, the complete set of live sessions:
+ * index new or grown ones, drop any indexed session that is no longer listed.
+ * Returns the number of turns written.
+ */
 export function indexSessions(db: Database, sessions: IndexableSession[]): number {
 	db.exec(SCHEMA);
+	const live = new Set(sessions.map((s) => s.id));
+	const gone = (
+		db.prepare("SELECT session_id AS id FROM session_turns_state").all() as Array<{ id: string }>
+	)
+		.map((r) => r.id)
+		.filter((id) => !live.has(id));
+	if (gone.length > 0) forgetIndexedSessions(db, gone);
 	const state = db.prepare("SELECT turn_count FROM session_turns_state WHERE session_id = ?");
 	const drop = db.prepare("DELETE FROM session_turns_fts WHERE session_id = ?");
 	const add = db.prepare("INSERT INTO session_turns_fts (body, session_id, role) VALUES (?, ?, ?)");

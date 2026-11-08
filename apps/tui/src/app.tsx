@@ -527,13 +527,14 @@ import {
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as pathMod from "node:path";
-import { MemoryStore } from "../../../packages/memory/store.js";
 import { bootTrace } from "./lib/boot-trace.js";
 import {
 	HISTORY_USAGE,
+	forgetTrashedSession,
 	formatHits,
 	parseHistoryArgs,
 	runHistorySearch,
+	withHistoryIndex,
 } from "./lib/history-search.js";
 import { createFallbackNoticeGate } from "./lib/fallback-notice-once.js";
 import {
@@ -5504,17 +5505,12 @@ export function App({
 					if (hist.kind === "search") {
 						try {
 							// Same local memory file as the agent's global store; nothing leaves the device.
-							const dataDir = process.env.EIGHT_DATA_DIR || pathMod.join(os.homedir(), ".8gent");
-							const memDir = pathMod.join(dataDir, "memory");
-							fs.mkdirSync(memDir, { recursive: true, mode: 0o700 });
-							const store = new MemoryStore(pathMod.join(memDir, "memory.db"));
-							try {
-								addSystemMessage(
-									formatHits(hist.query, runHistorySearch(store.db, sessionMgr, hist.query)),
-								);
-							} finally {
-								store.db.close();
-							}
+							addSystemMessage(
+								formatHits(
+									hist.query,
+									withHistoryIndex((db) => runHistorySearch(db, sessionMgr, hist.query)),
+								),
+							);
 						} catch (err) {
 							addSystemMessage(`History search failed: ${err instanceof Error ? err.message : String(err)}`);
 						}
@@ -8771,6 +8767,11 @@ export function App({
 						}}
 						onDelete={(id) => {
 							if (trashSession(id)) {
+								try {
+									forgetTrashedSession(id);
+								} catch {
+									// the next /history search prunes it from the index anyway
+								}
 								if (id === activeSessionId) setActiveSessionId(null);
 								addSystemMessage(`Session ${id} moved to the sessions trash folder.`);
 							}
