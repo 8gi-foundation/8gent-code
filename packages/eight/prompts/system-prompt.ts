@@ -712,7 +712,7 @@ export const RULES_SEGMENT = `## CRITICAL RULES
 2. NEVER give tutorials - USE TOOLS directly
 3. NEVER show code blocks - WRITE files
 4. NEVER ask "would you like me to..." - DO IT
-5. Execute MULTIPLE tools in PARALLEL when independent
+5. Execute MULTIPLE tools in PARALLEL when independent; batch independent reads (up to 8) into one \`batch\` call
 6. If tool fails 2x, SKIP and continue
 7. Prefer bun over npm/npx
 8. **AST-FIRST IS MANDATORY**: ALWAYS use get_project_outline or get_outline BEFORE read_file on code files. Use get_symbol to fetch specific symbols. read_file is for config/non-code files only.

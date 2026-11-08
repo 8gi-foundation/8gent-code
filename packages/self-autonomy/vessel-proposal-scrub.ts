@@ -98,6 +98,7 @@ const PROVIDERS = new Set([
 // Copied so this module stays pure; the test asserts the live registry is a
 // subset of this list.
 export const TOOL_NAMES: ReadonlySet<string> = new Set([
+	"batch",
 	"browser_open",
 	"browser_screenshot",
 	"browser_state",

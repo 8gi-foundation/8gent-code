@@ -756,7 +756,7 @@ export class Agent {
 				localRuntime: () => isLocalProvider(this.config.runtime),
 			},
 		);
-		// run_batch items skip the agent loop, so they take the same refusals here (#3502).
+		// batch and run_batch items skip the agent loop, so they take the same refusals here (#3502, #69).
 		this.executor.setItemGate(async (t, a) => {
 			const refusal = await this.refuseToolCall(t, a);
 			if (refusal != null) return { refusal };
@@ -1427,7 +1427,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 	private batchSeq = 0;
 
-	/** What an allowed run_batch item starts with: beforeTool hooks, privacy gate, start event, session row (#3502). */
+	/** What an allowed batch or run_batch item starts with: beforeTool hooks, privacy gate, start event, session row (#3502). */
 	private async noteToolStart(
 		toolName: string,
 		args: Record<string, unknown>,
@@ -1460,7 +1460,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		return { id, startedAt };
 	}
 
-	/** What an allowed run_batch item ends with: session row, end event, afterTool hooks (#3502). */
+	/** What an allowed batch or run_batch item ends with: session row, end event, afterTool hooks (#3502). */
 	private async noteToolEnd(
 		id: string,
 		toolName: string,
@@ -1604,6 +1604,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"get_symbol",
 			"search_symbols",
 			"locate",
+			"batch",
 			// Sight (#3641): a model that can see gets the pixels through
 			// read_image; one that cannot gets a description through describe_image.
 			"read_image",
