@@ -141,13 +141,15 @@ function build(recentFilePaths: string[] = []): AgentT {
  */
 async function compact(agent: AgentT): Promise<Array<"session" | "openrouter">> {
 	const start = seen.length;
-	const env = process.env.NODE_ENV;
-	process.env.NODE_ENV = "production";
+	const env = process.env as Record<string, string | undefined>;
+	const prev = env.NODE_ENV;
+	env.NODE_ENV = "production";
 	try {
 		const r = await agent.compactNow();
 		expect(r?.messagesRemoved ?? 0).toBeGreaterThan(0);
 	} finally {
-		process.env.NODE_ENV = env;
+		if (prev === undefined) Reflect.deleteProperty(env, "NODE_ENV");
+		else env.NODE_ENV = prev;
 	}
 	return seen.slice(start);
 }
