@@ -2053,6 +2053,11 @@ async function runArgv(bin: string, words: ArgvWord[]): Promise<string> {
 	await hookManager.executeHooks("beforeCommand", { command: display, workingDirectory: cwd });
 
 	const { spawn } = await import("node:child_process");
+	const envNames: readonly string[] = bin === "gh" ? [...GIT_ENV_NAMES, ...GH_ENV_NAMES] : GIT_ENV_NAMES;
+	const childEnv = {
+		...(buildChildEnv(process.env, envNames) as NodeJS.ProcessEnv),
+		...ARGV_NON_INTERACTIVE_ENV,
+	};
 	return new Promise((resolve) => {
 		const proc = spawn(file, fileArgs, {
 			cwd,
@@ -2060,10 +2065,7 @@ async function runArgv(bin: string, words: ArgvWord[]): Promise<string> {
 			detached: process.platform !== "win32",
 			shell: false,
 			// Allowlisted (#95). git keeps its identity and agent socket, gh its own credential names.
-			env: {
-				...buildChildEnv(process.env, bin === "gh" ? [...GIT_ENV_NAMES, ...GH_ENV_NAMES] : GIT_ENV_NAMES),
-				...ARGV_NON_INTERACTIVE_ENV,
-			},
+			env: childEnv,
 		});
 		let stdout = "";
 		let stderr = "";
