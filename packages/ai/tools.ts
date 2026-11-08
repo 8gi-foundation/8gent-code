@@ -15,6 +15,7 @@ import type { ToolSet } from "ai";
 import { z } from "zod";
 import { activeShellKind, killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
+import { GH_ENV_NAMES, GIT_ENV_NAMES, buildChildEnv } from "../eight/harness/child-env";
 import { readOnlyChain, readPrefixesFor } from "../eight/read-chain";
 import {
 	OFFICE_TOOLS,
@@ -1862,7 +1863,8 @@ async function runShellCommand(
 			cwd,
 			stdio: ["pipe", "pipe", "pipe"],
 			processGroup: true,
-			env: toolShellEnv(),
+			// An allowlisted env, never the daemon's own: a turn running `env` must not print its secrets (#95).
+			env: toolShellEnv(buildChildEnv() as NodeJS.ProcessEnv),
 		});
 
 		let stdout = "";
@@ -2057,7 +2059,11 @@ async function runArgv(bin: string, words: ArgvWord[]): Promise<string> {
 			stdio: ["ignore", "pipe", "pipe"],
 			detached: process.platform !== "win32",
 			shell: false,
-			env: { ...process.env, ...ARGV_NON_INTERACTIVE_ENV },
+			// Allowlisted (#95). git keeps its identity and agent socket, gh its own credential names.
+			env: {
+				...buildChildEnv(process.env, bin === "gh" ? [...GIT_ENV_NAMES, ...GH_ENV_NAMES] : GIT_ENV_NAMES),
+				...ARGV_NON_INTERACTIVE_ENV,
+			},
 		});
 		let stdout = "";
 		let stderr = "";

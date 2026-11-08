@@ -377,8 +377,7 @@ export const HEADLESS_SAFE_COMMANDS: string[] = [
 	"uname",
 	"whoami",
 	"pwd",
-	"env",
-	"printenv",
+	// env, printenv, set and export -p print the environment: never auto-approved (#95).
 
 	// Build/test (read or idempotent)
 	"tsc --noEmit",
