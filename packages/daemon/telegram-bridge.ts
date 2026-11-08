@@ -84,7 +84,8 @@ import { missingWhisperModelMessage, resolveWhisperModel } from "../voice/model-
 import { type SpokenModel, capAtSentence, makeSpokenDraft } from "../voice/spoken-draft";
 import { recordTelegramPoll, registerTelegramBridge } from "./bridge-health";
 import { approvalTtlMs, bridgeSecret } from "./channel-approvals";
-import { getDataDir } from "./data-dir";
+import { type BotTokenSpec, loadBotToken } from "./bot-token";
+import { dataDirPath, getDataDir } from "./data-dir";
 import { classifyInput, gateInput } from "./input-gate";
 import { NO_LINK_PREVIEW } from "./notifications";
 import { greetingText, vesselIdentity } from "./telegram-greeting";
@@ -3234,11 +3235,23 @@ function splitIds(raw: string | undefined): string[] {
 
 // ── Local-mode programmatic launcher ─────────────────────────────────
 
+const BOT_CONFIG_PATH = `${dataDirPath()}/config.json`;
+const TELEGRAM_TOKEN_SPEC: BotTokenSpec = {
+	envVar: "TELEGRAM_BOT_TOKEN",
+	credentialName: "telegram-bot-token",
+	configPath: BOT_CONFIG_PATH,
+};
+const EIGHT_TOKEN_SPEC: BotTokenSpec = {
+	envVar: "EIGHT_BOT_TOKEN",
+	credentialName: "eight-bot-token",
+	configPath: BOT_CONFIG_PATH,
+};
+
 /**
  * Start the Telegram bridge wired against the local-mode daemon.
  *
  * Reads:
- *   - TELEGRAM_BOT_TOKEN              required
+ *   - telegram-bot-token              required: credential file or TELEGRAM_BOT_TOKEN (see bot-token.ts)
  *   - TELEGRAM_AUTHORIZED_CHAT_IDS    required, comma-separated allowlist
  *
  * Always connects to ws://127.0.0.1:<port> regardless of DAEMON_URL, so a
@@ -3251,7 +3264,7 @@ function splitIds(raw: string | undefined): string[] {
 export async function startLocalTelegramBridge(opts: {
 	port: number;
 }): Promise<TelegramDaemonBridge> {
-	const token = process.env.TELEGRAM_BOT_TOKEN;
+	const token = loadBotToken(TELEGRAM_TOKEN_SPEC);
 	if (!token) {
 		throw new Error("TELEGRAM_BOT_TOKEN is required to start the local Telegram bridge");
 	}
@@ -3296,7 +3309,9 @@ if (import.meta.main) {
 	const botName = (process.env.BOT_NAME || "").toLowerCase();
 	const tokenVar = botName === "eightgent" ? "EIGHT_BOT_TOKEN" : "TELEGRAM_BOT_TOKEN";
 	const chatVar = botName === "eightgent" ? "EIGHT_CHAT_ID" : "TELEGRAM_CHAT_ID";
-	const token = process.env[tokenVar];
+	const token = loadBotToken(
+		botName === "eightgent" ? EIGHT_TOKEN_SPEC : TELEGRAM_TOKEN_SPEC,
+	);
 	const chatId = process.env[chatVar];
 
 	if (!token || !chatId) {
