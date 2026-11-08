@@ -5,11 +5,19 @@
  * once. With no file nothing changes.
  */
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildTextToolCall } from "../ai/text-tool-endpoint";
-import { loadStreamRules, streamGuard, streamRulesPath } from "./stream-rules";
+import { STREAM_GUARD_BUDGET_MS, buildTextToolCall } from "../ai/text-tool-endpoint";
+import {
+	flushText,
+	lastTurn,
+	ledgerPath,
+	setDurableEnabled,
+	setDurableSession,
+} from "../specifications/session/durable-ledger";
+import { SessionWriter } from "../specifications/session/writer";
+import { loadStreamRules, nestedQuantifier, streamGuard, streamRulesPath } from "./stream-rules";
 
 const sse = (o: unknown) => `data: ${JSON.stringify(o)}\n\n`;
 const delta = (content: string) => sse({ choices: [{ index: 0, delta: { content } }] });
@@ -19,7 +27,7 @@ const write = (body: string) => {
 	mkdirSync(join(home, ".8gent"), { recursive: true });
 	writeFileSync(join(home, ".8gent", "stream-rules.json"), body);
 };
-const env = () => ({ HOME: home }) as Record<string, string>;
+const env = () => join(home, ".8gent");
 
 beforeAll(() => {
 	home = mkdtempSync(join(tmpdir(), "stream-rules-"));
@@ -55,6 +63,20 @@ describe("loadStreamRules", () => {
 		expect(loadStreamRules(env())?.map((r) => r.correction)).toEqual(["kept"]);
 		write("{not json");
 		expect(loadStreamRules(env())).toBeNull();
+	});
+
+	it("a nested quantifier, the exponential backtracking shape, drops that rule", () => {
+		expect(nestedQuantifier("(a+)+$")).toBe(true);
+		expect(nestedQuantifier("(?:x*y)*z")).toBe(true);
+		expect(nestedQuantifier("as an (AI|assistant)")).toBe(false);
+		expect(nestedQuantifier("\\(a+\\)+")).toBe(false);
+		write(
+			JSON.stringify([
+				{ pattern: "(a+)+$", correction: "slow", max_retries: 1 },
+				{ pattern: "as an AI", correction: "fast", max_retries: 1 },
+			]),
+		);
+		expect(loadStreamRules(env())?.map((r) => r.correction)).toEqual(["fast"]);
 	});
 });
 
@@ -111,6 +133,72 @@ describe("buildTextToolCall with a stream guard", () => {
 		replies = [["forbidden but unguarded"]];
 		expect(await make(undefined)([{ role: "user", content: "hi" }])).toBe("forbidden but unguarded");
 		expect(bodies.length).toBe(1);
+	});
+
+	it("a long reply against a slow pattern finishes: each delta sees a bounded tail, under a time budget", async () => {
+		bodies.length = 0;
+		// 2,000 deltas, 200,000 characters of a's, and no "b": /a.*a.*a.*b/ fails slowly on every
+		// check (cubic backtracking). Over the whole reply each check would grow, and the stream
+		// would hang; over a bounded tail it costs the same per delta, and the budget caps the total.
+		replies = [Array.from({ length: 2000 }, () => "a".repeat(100))];
+		let calls = 0;
+		let longest = 0;
+		const slow = (t: string) => {
+			calls++;
+			longest = Math.max(longest, t.length);
+			return /a.*a.*a.*b/.test(t) ? "never" : null;
+		};
+		const t0 = performance.now();
+		const out = await make(slow)([{ role: "user", content: "hi" }]);
+		const ms = performance.now() - t0;
+		expect(typeof out === "string" ? out.length : -1).toBe(200_000);
+		expect(bodies.length).toBe(1);
+		expect(longest).toBeLessThanOrEqual(100 + 256);
+		expect(calls).toBeGreaterThan(0);
+		expect(ms).toBeLessThan(5_000);
+		expect(STREAM_GUARD_BUDGET_MS).toBeLessThanOrEqual(100);
+	});
+
+	it("a match late in a long reply is still caught from the tail", async () => {
+		bodies.length = 0;
+		replies = [
+			[...Array.from({ length: 500 }, () => "fine text. "), "and then forbid", "den at the end"],
+			["clean"],
+		];
+		expect(await make(guard)([{ role: "user", content: "hi" }])).toBe("clean");
+		expect(bodies.length).toBe(2);
+	});
+
+	it("the aborted draft never stays in the durable turn; the corrected reply does", async () => {
+		const realHome = process.env.HOME;
+		const dhome = mkdtempSync(join(tmpdir(), "stream-rules-durable-"));
+		process.env.HOME = dhome;
+		try {
+			setDurableEnabled(true);
+			setDurableSession("sr1");
+			new SessionWriter("eight-sr1", join(dhome, "sessions")).writeUserMessage("hi");
+			bodies.length = 0;
+			replies = [["draftmarker one ", "draftmarker two ", "forbidden"], ["correctedmarker reply"]];
+			// Flush on every check, so the draft is on disk before the rule fires (the 250ms timer
+			// could do the same in a slow stream).
+			const flushing = (t: string) => {
+				flushText();
+				return guard(t);
+			};
+			expect(await make(flushing)([{ role: "user", content: "hi" }])).toBe("correctedmarker reply");
+			flushText();
+			const dir = join(dhome, ".8gent", "sessions", "durable");
+			expect(ledgerPath("sr1").startsWith(dir)).toBe(true);
+			const files = readdirSync(dir);
+			expect(files.length).toBeGreaterThan(0);
+			for (const f of files) expect(readFileSync(join(dir, f), "utf8")).not.toContain("draftmarker");
+			expect(lastTurn("sr1")?.partial).toContain("correctedmarker reply");
+		} finally {
+			setDurableEnabled(false);
+			setDurableSession(null);
+			process.env.HOME = realHome;
+			rmSync(dhome, { recursive: true, force: true });
+		}
 	});
 
 	it("a clean reply under a guard is one request", async () => {

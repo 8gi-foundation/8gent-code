@@ -321,6 +321,24 @@ export function flushText(key: string | null = sessionKey): void {
 	}
 }
 
+/**
+ * Forget the streamed text of the step in flight and rewrite the summary
+ * without it. A stream rule (#72) aborted that draft; a flush may already have
+ * written it, so the summary is rewritten, not just the buffer cleared.
+ */
+export function discardStreamText(key: string | null = sessionKey): void {
+	if (!enabled || !key) return;
+	const l = live.get(key);
+	if (!l || !l.streamed) return;
+	clearStream(l);
+	try {
+		writeTurnSummary(key);
+	} catch (err) {
+		if (!warned) console.error(`[durable] summary not written: ${(err as Error).message}`);
+		warned = true;
+	}
+}
+
 /** The turn finished. Called when the turn loop returns a reply or the person stopped it. */
 export function noteTurnEnd(): void {
 	if (!enabled || !sessionKey) return;

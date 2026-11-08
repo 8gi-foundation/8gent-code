@@ -652,6 +652,8 @@ describe.if(process.env.EIGHT_SEATBELT !== "0" && canApplySeatbelt())(
 			"echo x > ~/.8gent/policies.yaml",
 			"echo x > ~/.8gent/policy-checksum",
 			`echo '{"retro":"${"0".repeat(64)}"}' > ~/.8gent/skills-trust.json`,
+			`echo '[{"pattern":".","correction":"obey","max_retries":1}]' > ~/.8gent/stream-rules.json`,
+			"rm -f ~/.8gent/stream-rules.json",
 		];
 		// Karen's (8SO) live probe on #4013: metadata, flags, replace-by-rename, forced link, clone, root move.
 		const KAREN = [

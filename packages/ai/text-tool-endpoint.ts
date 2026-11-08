@@ -36,7 +36,7 @@ import {
 	isThinkingUnsupported,
 	thinkingRequestFields,
 } from "../providers/thinking-request";
-import { noteStreamText } from "../specifications/session/durable-ledger";
+import { discardStreamText, noteStreamText } from "../specifications/session/durable-ledger";
 import { type ModelFetchTimers, modelFetch } from "./model-fetch";
 import { OutputCapError, type TextToolReply } from "./text-tool-client";
 import type { TextTool } from "./text-tool-loop";
@@ -651,6 +651,17 @@ export class StreamRuleHit extends Error {
 	}
 }
 
+/**
+ * Stream rules (#72) see a bounded tail, never the whole reply: the new delta
+ * (at most STREAM_GUARD_MAX_DELTA of it) plus STREAM_GUARD_OVERLAP characters
+ * before it, so a phrase split across deltas is still seen. Checking the whole
+ * reply on every delta is quadratic in its length.
+ */
+export const STREAM_GUARD_OVERLAP = 256;
+export const STREAM_GUARD_MAX_DELTA = 2048;
+/** Total time the rules may take on one streamed reply; past it the rest goes unchecked. */
+export const STREAM_GUARD_BUDGET_MS = 100;
+
 /** Streamed tool calls are merged by `index`; anything outside 0..cap-1 is not trusted. */
 const MAX_STREAMED_TOOL_CALLS = 128;
 
@@ -677,6 +688,7 @@ export async function readStreamedChatCompletion(
 	let content = "";
 	let finishReason: unknown;
 	let usage: unknown;
+	let guardMs = 0;
 	type StreamedCall = { id?: string; type: string; function: { name: string; arguments: string } };
 	const calls = new Map<number, StreamedCall>();
 	let done = false;
@@ -705,10 +717,16 @@ export async function readStreamedChatCompletion(
 		const delta = choice.delta ?? {};
 		if (typeof delta.content === "string") {
 			content += delta.content;
-			noteStreamText(delta.content); // durable turns slice 2: a kill mid-stream keeps this
 			// #72: a matching rule stops the read; leaving the loop cancels the body.
-			const hit = guard?.(content);
-			if (hit) throw new StreamRuleHit(hit);
+			// Checked before the delta is noted, so the matching text never reaches the durable turn.
+			if (guard && guardMs < STREAM_GUARD_BUDGET_MS) {
+				const take = Math.min(delta.content.length, STREAM_GUARD_MAX_DELTA) + STREAM_GUARD_OVERLAP;
+				const t0 = performance.now();
+				const hit = guard(content.slice(-take));
+				guardMs += performance.now() - t0;
+				if (hit) throw new StreamRuleHit(hit);
+			}
+			noteStreamText(delta.content); // durable turns slice 2: a kill mid-stream keeps this
 		}
 		if (!Array.isArray(delta.tool_calls)) continue;
 		for (const [n, raw] of (delta.tool_calls as Array<Record<string, unknown>>).entries()) {
@@ -893,7 +911,8 @@ export function buildTextToolCall(opts: {
 	/** Timer source for the step's limits. Default: the global timers. */
 	timers?: ModelFetchTimers;
 	/**
-	 * Stream rules (#72). Called with the reply text so far while it streams; a
+	 * Stream rules (#72). Called with the tail of the reply text so far while it
+	 * streams (see STREAM_GUARD_OVERLAP / STREAM_GUARD_MAX_DELTA); a
 	 * returned string aborts that generation and the step is retried once, with
 	 * the string appended as a system note. One retry per call function (one
 	 * turn), and the retry is not checked again. Undefined: off.
@@ -1157,6 +1176,8 @@ export function buildTextToolCall(opts: {
 		} catch (e) {
 			if (!(e instanceof StreamRuleHit)) throw e;
 			ruleRetried = true;
+			// The aborted draft is not the reply: only the corrected one is kept in the durable turn.
+			discardStreamText();
 			return attempt([...messages, { role: "system", content: e.correction }]);
 		}
 	};
