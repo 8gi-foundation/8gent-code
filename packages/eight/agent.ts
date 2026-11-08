@@ -91,6 +91,7 @@ import {
 	type FailoverEntry,
 	ModelFailover,
 	NoAllowedProviderError,
+	NoCredentialedProviderError,
 } from "../providers/failover";
 import { decideRoute, readPolicyState, recordCall } from "../providers/locality";
 import { describeRoles } from "../providers/roles";
@@ -758,7 +759,7 @@ export class Agent {
 				localRuntime: () => isLocalProvider(this.config.runtime),
 			},
 		);
-		// run_batch items skip the agent loop, so they take the same refusals here (#3502).
+		// batch and run_batch items skip the agent loop, so they take the same refusals here (#3502, #69).
 		this.executor.setItemGate(async (t, a) => {
 			const refusal = await this.refuseToolCall(t, a);
 			if (refusal != null) return { refusal };
@@ -1429,7 +1430,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 	private batchSeq = 0;
 
-	/** What an allowed run_batch item starts with: beforeTool hooks, privacy gate, start event, session row (#3502). */
+	/** What an allowed batch or run_batch item starts with: beforeTool hooks, privacy gate, start event, session row (#3502). */
 	private async noteToolStart(
 		toolName: string,
 		args: Record<string, unknown>,
@@ -1462,7 +1463,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		return { id, startedAt };
 	}
 
-	/** What an allowed run_batch item ends with: session row, end event, afterTool hooks (#3502). */
+	/** What an allowed batch or run_batch item ends with: session row, end event, afterTool hooks (#3502). */
 	private async noteToolEnd(
 		id: string,
 		toolName: string,
@@ -1606,6 +1607,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"get_symbol",
 			"search_symbols",
 			"locate",
+			"batch",
 			// Sight (#3641): a model that can see gets the pixels through
 			// read_image; one that cannot gets a description through describe_image.
 			"read_image",
@@ -4195,7 +4197,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 						// Any other error -> mark provider down, advance chain, restart
 						console.log(
-							`[agent] ${currentEntry.provider}/${currentEntry.model} failed: ${msg.slice(0, 200)} -> failover`,
+							`[agent] ${currentEntry.provider}/${currentEntry.model} failed: ${msg.slice(0, 200)} -> failover (next: ${nextConfiguredLabel(failover, currentEntry, channel)})`,
 						);
 						errors.push({
 							provider: currentEntry.provider,
@@ -4239,8 +4241,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					throw pinnedProviderError(last.provider, last.model, last.error);
 				}
 				const summary = errors.map((e) => `  - ${e.provider}/${e.model}: ${e.error}`).join("\n");
+				// Say why there was no next hop: providers failover skipped for want of a key.
+				const skipped = failover.skippedForCredentials(askedEntry.model, channel);
+				const skippedNote = skipped.length
+					? `\nNext provider not tried, no API key: ${skipped.join(", ")}. Add one with /apikeys so 8gent can fail over.`
+					: "";
 				throw new Error(
-					`All providers exhausted (${errors.length} attempted):\n${summary || "  (no provider errors recorded)"}`,
+					`All providers exhausted (${errors.length} attempted):\n${summary || "  (no provider errors recorded)"}${skippedNote}`,
 				);
 			}
 
@@ -5170,7 +5177,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 */
 	private turnFailover(): ModelFailover {
 		if (!this.affinityFailover) {
-			const fresh = new ModelFailover();
+			const fresh = new ModelFailover(undefined, {
+				hasCredentials: (p) => getProviderManager().hasCredentials(p),
+			});
 			if (!fresh.affinityEnabled) return fresh;
 			this.affinityFailover = fresh;
 		}
@@ -5625,6 +5634,16 @@ function readSettingsFileSync(): Settings | null {
 	}
 }
 
+/** "provider/model" of the next usable hop, or "none configured"; read-only, for log lines. */
+function nextConfiguredLabel(
+	failover: ModelFailover,
+	current: FailoverEntry,
+	channel: FailoverChannel,
+): string {
+	const next = failover.nextHop(current.model, current.provider, channel);
+	return next ? `${next.provider}/${next.model}` : "none configured";
+}
+
 /** How long the warm backend gets to recover before the turn leaves it (cache affinity). */
 const AFFINITY_GRACE_MS = 2000;
 
@@ -5647,7 +5666,9 @@ function tryResolve(
 	try {
 		return failover.resolve(current.model, channel, sessionId);
 	} catch (err) {
-		if (err instanceof NoAllowedProviderError) return current;
+		if (err instanceof NoAllowedProviderError || err instanceof NoCredentialedProviderError) {
+			return current;
+		}
 		throw err;
 	}
 }
