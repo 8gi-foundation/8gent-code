@@ -91,6 +91,7 @@ import {
 	type FailoverEntry,
 	ModelFailover,
 	NoAllowedProviderError,
+	NoCredentialedProviderError,
 } from "../providers/failover";
 import { decideRoute, readPolicyState, recordCall } from "../providers/locality";
 import { callLocalModelWithReroute, resolveToolCapableModel } from "../providers/model-reroute";
@@ -4194,7 +4195,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 						// Any other error -> mark provider down, advance chain, restart
 						console.log(
-							`[agent] ${currentEntry.provider}/${currentEntry.model} failed: ${msg.slice(0, 200)} -> failover`,
+							`[agent] ${currentEntry.provider}/${currentEntry.model} failed: ${msg.slice(0, 200)} -> failover (next: ${nextConfiguredLabel(failover, currentEntry, channel)})`,
 						);
 						errors.push({
 							provider: currentEntry.provider,
@@ -4238,8 +4239,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					throw pinnedProviderError(last.provider, last.model, last.error);
 				}
 				const summary = errors.map((e) => `  - ${e.provider}/${e.model}: ${e.error}`).join("\n");
+				// Say why there was no next hop: providers failover skipped for want of a key.
+				const skipped = failover.skippedForCredentials(askedEntry.model, channel);
+				const skippedNote = skipped.length
+					? `\nNext provider not tried, no API key: ${skipped.join(", ")}. Add one with /apikeys so 8gent can fail over.`
+					: "";
 				throw new Error(
-					`All providers exhausted (${errors.length} attempted):\n${summary || "  (no provider errors recorded)"}`,
+					`All providers exhausted (${errors.length} attempted):\n${summary || "  (no provider errors recorded)"}${skippedNote}`,
 				);
 			}
 
@@ -5144,7 +5150,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 */
 	private turnFailover(): ModelFailover {
 		if (!this.affinityFailover) {
-			const fresh = new ModelFailover();
+			const fresh = new ModelFailover(undefined, {
+				hasCredentials: (p) => getProviderManager().hasCredentials(p),
+			});
 			if (!fresh.affinityEnabled) return fresh;
 			this.affinityFailover = fresh;
 		}
@@ -5599,6 +5607,16 @@ function readSettingsFileSync(): Settings | null {
 	}
 }
 
+/** "provider/model" of the next usable hop, or "none configured"; read-only, for log lines. */
+function nextConfiguredLabel(
+	failover: ModelFailover,
+	current: FailoverEntry,
+	channel: FailoverChannel,
+): string {
+	const next = failover.nextHop(current.model, current.provider, channel);
+	return next ? `${next.provider}/${next.model}` : "none configured";
+}
+
 /** How long the warm backend gets to recover before the turn leaves it (cache affinity). */
 const AFFINITY_GRACE_MS = 2000;
 
@@ -5621,7 +5639,9 @@ function tryResolve(
 	try {
 		return failover.resolve(current.model, channel, sessionId);
 	} catch (err) {
-		if (err instanceof NoAllowedProviderError) return current;
+		if (err instanceof NoAllowedProviderError || err instanceof NoCredentialedProviderError) {
+			return current;
+		}
 		throw err;
 	}
 }

@@ -94,6 +94,24 @@ export class NoAllowedProviderError extends Error {
 }
 
 /**
+ * Thrown by `resolve()` when a credential check is set and every provider the
+ * chain names (or the openrouter default) has no API key. The turn then ends
+ * with a message naming what was skipped, not a request that cannot succeed.
+ */
+export class NoCredentialedProviderError extends Error {
+	constructor(
+		readonly model: string,
+		readonly channel: FailoverChannel,
+		readonly skipped: readonly string[],
+	) {
+		super(
+			`No provider with credentials can serve model "${model}" (${channel} channel). Skipped, no API key: ${skipped.join(", ") || "none"}.`,
+		);
+		this.name = "NoCredentialedProviderError";
+	}
+}
+
+/**
  * Providers whose inference runs on this machine (or on a box the user points a
  * local runtime at). Everything else is hosted.
  */
@@ -191,6 +209,12 @@ export interface ModelFailoverOptions {
 	 * EIGHT_CACHE_AFFINITY=1; off otherwise.
 	 */
 	cacheAffinity?: boolean;
+	/**
+	 * True when `provider` can be called (a local runtime, or a hosted one with a
+	 * key). When set, failover skips providers that return false instead of
+	 * sending a turn to a request that must fail. Unset: no check (back-compat).
+	 */
+	hasCredentials?: (provider: string) => boolean;
 	/** Estimated prefill speed for the grace-retry decision. Default 2000 tokens/s. */
 	prefillTokensPerSec?: number;
 	/** Clock for the affinity TTL; injectable for tests. Default Date.now. */
@@ -236,6 +260,7 @@ export class ModelFailover {
 	 */
 	private affinity = new Map<string, Affinity>();
 	private now: () => number;
+	private hasCredentials: ((provider: string) => boolean) | null;
 
 	constructor(
 		chains?: Record<FailoverChannel, Record<string, FailoverChain>>,
@@ -249,6 +274,7 @@ export class ModelFailover {
 		this.cacheAffinity = opts.cacheAffinity ?? process.env.EIGHT_CACHE_AFFINITY?.trim() === "1";
 		this.prefillTokensPerSec = opts.prefillTokensPerSec ?? 2000;
 		this.now = opts.now ?? Date.now;
+		this.hasCredentials = opts.hasCredentials ?? null;
 		this.policy = opts.policy ?? (() => readPolicy());
 		// No opt-in: the allowlist is the local providers (narrowed further by an explicit one).
 		this.allow = this.hostedBlocked
@@ -501,9 +527,25 @@ export class ModelFailover {
 				droppedApfel,
 			);
 		}
-		if (!chain) return { model, provider: "openrouter" };
+		if (!chain) {
+			if (this.hasCredentials && !this.hasCredentials("openrouter")) {
+				throw new NoCredentialedProviderError(model, channel, ["openrouter"]);
+			}
+			return { model, provider: "openrouter" };
+		}
 
 		const head = chain.models[0];
+		if (this.hasCredentials) {
+			const usable = chain.models.filter((e) => this.hasCredentials?.(e.provider));
+			if (usable.length === 0) {
+				throw new NoCredentialedProviderError(
+					model,
+					channel,
+					this.skippedForCredentials(model, channel),
+				);
+			}
+			chain = { ...chain, models: usable };
+		}
 		// Cache affinity: a warm, healthy backend wins over chain order.
 		const aff = this.warmAffinity(sessionId, model, channel, chain.models);
 		if (aff && !this.down.has(this.key(aff.entry.model, aff.entry.provider))) return aff.entry;
@@ -666,10 +708,25 @@ export class ModelFailover {
 		for (const entry of chain.models) {
 			if (entry.model === model && entry.provider === provider) continue;
 			if (localOnly && isHostedProvider(entry.provider)) continue;
+			if (this.hasCredentials && !this.hasCredentials(entry.provider)) continue;
 			if (this.down.has(this.key(entry.model, entry.provider))) continue;
 			return entry;
 		}
 		return null;
+	}
+
+	/**
+	 * Providers the chain for `model` names (openrouter when it has none) that
+	 * failover will not use because they have no credentials. Empty when no
+	 * credential check is set. For error messages: it says why a hop was skipped.
+	 */
+	skippedForCredentials(model: string, channel: FailoverChannel = "text"): string[] {
+		const check = this.hasCredentials;
+		if (!check) return [];
+		const names = this.chainsByChannel[channel]?.[model]?.models.map((e) => e.provider) ?? [
+			"openrouter",
+		];
+		return [...new Set(names)].filter((p) => !check(p));
 	}
 
 	markDown(model: string, provider: string): void {
