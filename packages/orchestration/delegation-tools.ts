@@ -100,10 +100,10 @@ async function gateShellChild(
 				!guardedSkipsCard(mode, systemOne, dangerous)
 			) {
 				const allowed = await pm.requestPermission(
-					"Spawn Shell Agent",
+					"Run a background shell task",
 					dangerous
 						? "This command may modify system files or cause data loss."
-						: "8gent wants to run a shell command as a background agent.",
+						: "8gent wants to run a shell command in the background.",
 					command,
 					{ cwd },
 				);
