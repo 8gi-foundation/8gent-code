@@ -222,59 +222,134 @@ function shellChain(command: string): Array<{ seg: string; op: string }> {
 	return out.filter((x) => x.seg !== "");
 }
 
-/** Quoted strings blanked, so a flag-looking word inside a commit message is not read as a flag. */
-function withoutQuoted(s: string): string {
-	return s.replace(/"(?:\\.|[^"\\])*"|'[^']*'/g, '""');
+/** Words of a shell segment with their quotes removed: `'-n'` and `"--dry-run"` are real arguments. */
+function shellWords(s: string): string[] {
+	const words: string[] = [];
+	let cur = "";
+	let has = false;
+	let quote = "";
+	for (let i = 0; i < s.length; i++) {
+		const ch = s[i];
+		if (quote) {
+			if (ch === quote) quote = "";
+			else if (ch === "\\" && quote === '"' && i + 1 < s.length) cur += s[++i];
+			else cur += ch;
+		} else if (ch === "'" || ch === '"') {
+			quote = ch;
+			has = true;
+		} else if (ch === "\\" && i + 1 < s.length) {
+			cur += s[++i];
+			has = true;
+		} else if (/\s/.test(ch)) {
+			if (has || cur) words.push(cur);
+			cur = "";
+			has = false;
+		} else {
+			cur += ch;
+			has = true;
+		}
+	}
+	if (has || cur) words.push(cur);
+	return words;
+}
+
+/** Short options that take a value: the rest of the word, or the next word, is that value (a message, a file). */
+const VALUE_SHORT = "mFCctoSO";
+/** Long options that take a message or file: their value is text, never a flag. */
+const VALUE_LONG = /^--(?:message|file|reuse-message|reedit-message|template|push-option|author|date|cleanup)$/;
+
+/**
+ * True when the arguments mean "nothing was done": --dry-run (or any unambiguous
+ * abbreviation, --dry) and --help/-h on any subcommand, and -n on push, bundled or
+ * not (on commit -n is --no-verify). Only the values of -m, -F and friends are
+ * skipped; a quoted "--dry-run" that is a real argument still counts.
+ */
+function isNoopInvocation(args: string[], sub: string): boolean {
+	for (let i = 0; i < args.length; i++) {
+		const w = args[i];
+		if (w === "--") break;
+		if (w.startsWith("--")) {
+			const name = w.slice(2).split("=")[0];
+			if (VALUE_LONG.test(`--${name}`)) {
+				if (!w.includes("=")) i++;
+				continue;
+			}
+			if (name.length >= 2 && ("dry-run".startsWith(name) || "help".startsWith(name))) return true;
+			continue;
+		}
+		if (/^-[A-Za-z0-9]+$/.test(w)) {
+			for (let k = 1; k < w.length; k++) {
+				const c = w[k];
+				if (VALUE_SHORT.includes(c)) {
+					if (k === w.length - 1) i++;
+					break;
+				}
+				if (c === "h") return true;
+				if (c === "n" && sub === "push") return true;
+			}
+		}
+	}
+	return false;
 }
 
 /**
- * `git [global options] <sub> ...`, with the subcommand in command position.
- * Flags that mean "nothing was done" are refused: --dry-run and --help/-h on
- * any subcommand, and -n on push (on commit -n is --no-verify).
+ * `git [global options] <sub> ...`, with the subcommand in command position,
+ * and arguments that do not make it a no-op.
  */
 function gitSub(seg: string, sub: string): boolean {
 	const m = seg.match(
 		/^(?:(?:env\s+)?(?:\w+=\S*\s+)*)git(?:\s+(?:-[cC]\s+\S+|--[\w-]+(?:=\S+)?))*\s+([\w-]+)\b(.*)$/s,
 	);
 	if (!m || m[1] !== sub) return false;
-	const flags = withoutQuoted(m[2]);
-	if (/(?:^|\s)(?:--dry-run|--help|-h)(?:\s|$)/.test(flags)) return false;
-	if (sub === "push" && /(?:^|\s)-n(?:\s|$)/.test(flags)) return false;
-	return true;
+	return !isNoopInvocation(shellWords(m[2]), sub);
 }
 
 /**
- * A shell command whose exit status is the git subcommand's: the subcommand is
- * in command position and everything after it in the chain is joined by &&, so
- * `git commit -m x; true` and `git commit | tee log` do not count.
+ * A shell command whose exit status is the git subcommand's. The subcommand is
+ * in command position and nothing after it masks its status: it is the last
+ * command, or it is followed by && and then only && or | (`git commit && git
+ * push 2>&1 | tail` exits 0 only if the commit did). `;`, `||`, `|` straight
+ * after it and a trailing `&` (background) do not count.
  */
 function shellGit(command: unknown, sub: string): boolean {
 	if (typeof command !== "string") return false;
 	const chain = shellChain(command);
 	const i = chain.findIndex((c) => gitSub(c.seg, sub));
 	if (i < 0) return false;
-	return chain.slice(i).every((c, k, all) => k === all.length - 1 || c.op === "&&");
+	const rest = chain.slice(i);
+	if (rest.length === 1) return rest[0].op === "";
+	if (rest[0].op !== "&&") return false;
+	return rest
+		.slice(1)
+		.every((c, k, all) => (k === all.length - 1 ? c.op === "" : c.op === "&&" || c.op === "|"));
 }
 
 /** A trailing pager or logger the output is piped through: it hides git's exit status. */
 const PIPE_SINK = /^(?:tail|head|tee|cat|less|more|grep|sed|cut)\b/;
+/** What git prints for a ref it moved: `abc1234..def5678  main -> main`, `* [new branch]`, `* [new tag]`. */
+const PUSHED_REF =
+	/(?:\b[0-9a-f]{7,}\.\.\.?[0-9a-f]{7,}\s+\S+\s+->\s+\S+|^\s*\*\s+\[new (?:branch|tag)\])/m;
+const PUSH_FAILED = /\b(?:error|fatal|rejected|denied|failed)\b/i;
 
 /**
  * `git push origin main 2>&1 | tail -5`: the pipe's status is tail's, so the exit
- * code proves nothing. Accepted when the only thing after git is such a sink and
- * the output shows no failure.
+ * code proves nothing, and silence is not success (`| head -1`, `2>/dev/null`,
+ * `| grep -v error` all hide a failure). Accepted only on positive evidence: the
+ * output holds a ref-update line, and no failure word.
  */
 function shellGitPiped(command: unknown, sub: string, result: string): boolean {
-	// A commit hook's rejection can hide behind a pipe with no recognisable words: push only.
+	// A commit hook's rejection has no ref-update line to look for: push only.
 	if (sub !== "push" || typeof command !== "string") return false;
 	const chain = shellChain(command);
 	const i = chain.findIndex((c) => gitSub(c.seg, sub));
 	if (i < 0 || i === chain.length - 1) return false;
 	const rest = chain.slice(i);
 	const onlySinks = rest.every(
-		(c, k, all) => (k === 0 ? c.op === "|" : k === all.length - 1 || c.op === "|") && (k === 0 || PIPE_SINK.test(c.seg)),
+		(c, k, all) =>
+			(k === 0 ? c.op === "|" : k === all.length - 1 ? c.op === "" : c.op === "|") &&
+			(k === 0 || PIPE_SINK.test(c.seg)),
 	);
-	return onlySinks && !/\b(?:error|fatal|rejected|denied|failed)\b/i.test(result);
+	return onlySinks && PUSHED_REF.test(result) && !PUSH_FAILED.test(result);
 }
 
 /** The dedicated tool, or a shell command passing `shellGit`, that succeeded with exit 0. */
@@ -356,8 +431,10 @@ function clauseClaims(clause: string, says: RegExp): boolean {
 	const before = clause.slice(0, m.index).trim();
 	const nearby = before.split(/\s+/).filter(Boolean).slice(-NEGATION_WINDOW).join(" ");
 	if (GOVERNS.test(nearby)) return false;
+	// "Pushed to main by SSH." is the reply's own claim; only a passive subject can credit someone else.
+	if (OWN_VOICE.test(before)) return true;
 	if (BY_SOMEONE.test(clause)) return false;
-	return OWN_VOICE.test(before) || OWN_PASSIVE.test(`${before} `) || ARTICLE_ONLY.test(before);
+	return OWN_PASSIVE.test(`${before} `) || ARTICLE_ONLY.test(before);
 }
 
 /** The notes for every action the reply reports that the turn's ledger does not back. */

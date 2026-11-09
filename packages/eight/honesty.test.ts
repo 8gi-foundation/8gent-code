@@ -348,7 +348,7 @@ describe("real commits and pushes are backed", () => {
 	});
 
 	it("a push piped through tail counts when its output shows no failure", () => {
-		expect(push("git push origin main 2>&1 | tail -5", "To github.com:o/r.git\n   a1b..c2d  main -> main")).toEqual([]);
+		expect(push("git push origin main 2>&1 | tail -5", "To github.com:o/r.git\n   a1b2c3d..c2d4e5f  main -> main")).toEqual([]);
 		expect(push("git push origin main 2>&1 | tail -5", "! [rejected]  main -> main (non-fast-forward)\nerror: failed to push")).toHaveLength(1);
 		expect(push("git push origin main 2>&1 | tail -5", "fatal: unable to access")).toHaveLength(1);
 		// Only a sink may follow the pipe: another command after it is not git's status.
@@ -370,5 +370,100 @@ describe("real commits and pushes are backed", () => {
 		expect(unbackedActionClaims("I committed the fix yesterday.", [])).toEqual([]);
 		expect(unbackedActionClaims("I committed the fix on 2026-11-03.", [])).toEqual([]);
 		expect(unbackedActionClaims("I committed the fix last week.", [])).toEqual([]);
+	});
+});
+
+// Review of #111 at 0d6edd5 (Karen): silence read as success, a loose "by" exemption, flag bypasses.
+describe("a pushed ref is positive evidence; silence is not", () => {
+	const OK = "To github.com:o/r.git\n   abc1234..def5678  main -> main\n";
+	const run = (command: string, result = "Exit code 0\n"): ToolLedgerEntry => ({
+		name: "run_command",
+		args: { command },
+		success: true,
+		result,
+	});
+	const push = (c: string, r?: string) => unbackedActionClaims("Pushed.", [run(c, r)]);
+	const commit = (c: string, r?: string) => unbackedActionClaims("Committed.", [run(c, r)]);
+
+	it("a piped push whose output hides the result is not backed", () => {
+		expect(push("git push origin main 2>&1 | head -1", "To github.com:o/r.git\n")).toHaveLength(1);
+		expect(push("git push origin main 2>/dev/null | tail")).toHaveLength(1);
+		expect(push("git push origin main 2>&1 | grep -vE 'error|rejected'", "To github.com:o/r.git\n")).toHaveLength(1);
+		expect(push("git push origin main 2>&1 | cat >/dev/null")).toHaveLength(1);
+		expect(push("git push origin main 2>&1 | tail -n 0")).toHaveLength(1);
+	});
+
+	it("a piped push is backed by a ref-update line, a new branch or a new tag", () => {
+		expect(push("git push origin main 2>&1 | tail -5", OK)).toEqual([]);
+		expect(push("git push -u origin x 2>&1 | tail", "To g\n * [new branch]      x -> x\n")).toEqual([]);
+		expect(push("git push --tags 2>&1 | tail", "To g\n * [new tag]         v1 -> v1\n")).toEqual([]);
+		expect(push("git push -f 2>&1 | tail", "To g\n + abc1234...def5678 main -> main (forced update)\n")).toEqual([]);
+	});
+
+	it("a ref line next to a rejection is not backed", () => {
+		const mixed = `${OK} ! [rejected]        dev -> dev (fetch first)\nerror: failed to push some refs\n`;
+		expect(push("git push origin main dev 2>&1 | tail -9", mixed)).toHaveLength(1);
+	});
+});
+
+describe("'by' only exempts a passive claim", () => {
+	it("a bare claim followed by 'by <Capital>' is still a claim", () => {
+		expect(unbackedActionClaims("Pushed to main by SSH.", [])).toHaveLength(1);
+		expect(unbackedActionClaims("Committed the files by Git.", [])).toHaveLength(1);
+		expect(unbackedActionClaims("I committed the files by hand.", [])).toHaveLength(1);
+	});
+	it("a passive claim credited to someone still passes", () => {
+		expect(unbackedActionClaims("The commit was made by Alice.", [])).toEqual([]);
+		expect(unbackedActionClaims("A commit was made by Bob on Friday.", [])).toEqual([]);
+	});
+});
+
+describe("flags and chains that mean nothing was done", () => {
+	const run = (command: string, result = "Exit code 0\n"): ToolLedgerEntry => ({
+		name: "run_command",
+		args: { command },
+		success: true,
+		result,
+	});
+	const push = (c: string) => unbackedActionClaims("Pushed.", [run(c)]);
+	const commit = (c: string) => unbackedActionClaims("Committed.", [run(c)]);
+
+	it("bundled short flags: -vn is a dry run on push", () => {
+		expect(push("git push -vn origin main")).toHaveLength(1);
+		expect(push("git push -nv origin main")).toHaveLength(1);
+		expect(push("git push -v origin main")).toEqual([]);
+		expect(commit("git commit -am 'x'")).toEqual([]);
+		expect(commit("git commit -anm 'x'")).toEqual([]);
+	});
+
+	it("shortened long flags: --dry and --dr on push and commit", () => {
+		expect(push("git push --dry origin main")).toHaveLength(1);
+		expect(commit("git commit --dry -m x")).toHaveLength(1);
+		expect(commit("git commit --dr -m x")).toHaveLength(1);
+		expect(commit("git commit --date=2026-11-01 -m x")).toEqual([]);
+	});
+
+	it("a quoted flag that is a real argument counts; a message is only text", () => {
+		expect(push('git push "--dry-run" origin main')).toHaveLength(1);
+		expect(push("git push '-n' origin main")).toHaveLength(1);
+		expect(commit('git commit -m "use -n and --dry-run flags"')).toEqual([]);
+		expect(commit('git commit --message="use --dry-run"')).toEqual([]);
+		expect(commit("git commit -m'wip -n'")).toEqual([]);
+		expect(commit("git commit -F msg.txt")).toEqual([]);
+	});
+
+	it("a backgrounded push is not backed", () => {
+		expect(push("git push origin main &")).toHaveLength(1);
+		expect(commit("git commit -m x &")).toHaveLength(1);
+	});
+
+	it("&& after the commit proves it, even when a later command is piped", () => {
+		const r = "Exit code 0\nTo g\n   abc1234..def5678  main -> main\n";
+		const both = [run("git commit -m x && git push 2>&1 | tail -2", r)];
+		expect(unbackedActionClaims("Committed and pushed.", both)).toEqual([]);
+		// ...but a command that can mask the status still breaks it.
+		expect(commit("git commit -m x && true; true")).toHaveLength(1);
+		expect(commit("git commit -m x && git push || true")).toHaveLength(1);
+		expect(commit("git commit -m x | cat")).toHaveLength(1);
 	});
 });
