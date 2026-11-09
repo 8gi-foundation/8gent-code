@@ -23,7 +23,10 @@ export type PagingAction = { page: 1 | -1 } | { step: number };
  * keys. Shift+arrows step one message; plain arrows belong to the input.
  * `page` is +1 back (up) and -1 forward (down); see `pageMessages` for how far.
  */
-export function pagingAction(key: PagingKey, opts: { approvalPending: boolean }): PagingAction | null {
+export function pagingAction(
+	key: PagingKey,
+	opts: { approvalPending: boolean },
+): PagingAction | null {
 	if (key.pageUp && (key.shift || !opts.approvalPending)) return { page: 1 };
 	if (key.pageDown && (key.shift || !opts.approvalPending)) return { page: -1 };
 	if (key.shift && key.upArrow) return { step: 1 };
