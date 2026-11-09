@@ -111,7 +111,10 @@ export function visibleSessions(
 		if (s.scope === "cwd" && normalizeCwd(x.cwd) !== here) return false;
 		if (s.namedOnly && !x.name) return false;
 		if (!q) return true;
-		return [x.name ?? "", x.id, x.cwd, x.model ?? ""].join(" ").toLowerCase().includes(q);
+		return [x.name ?? "", x.title ?? "", x.id, x.cwd, x.model ?? ""]
+			.join(" ")
+			.toLowerCase()
+			.includes(q);
 	});
 	const byRecent = (a: SessionListItem, b: SessionListItem) =>
 		Date.parse(b.lastActiveAt) - Date.parse(a.lastActiveAt) || a.id.localeCompare(b.id);
@@ -292,7 +295,7 @@ export function SessionPickerView({
 				shown.map((s, i) => {
 					const isActive = start + i === state.active;
 					// Names and folders come from files: no escape sequence reaches the terminal.
-					const label = cleanName(s.name ?? `untitled ${s.id}`);
+					const label = cleanName(s.name ?? s.title ?? `untitled ${s.id}`);
 					return (
 						<Box key={s.id}>
 							<Text color={isActive ? t.orange : t.textTertiary}>{isActive ? "◆ " : "○ "}</Text>
