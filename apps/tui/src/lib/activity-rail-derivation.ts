@@ -39,7 +39,8 @@ export function deriveTools(
 ): ActivityRailToolStatus[] {
 	const ended = new Map<string, Pick<Message, "toolSuccess" | "toolTrail">>();
 	for (const m of messages) {
-		if (m?.role === "tool" && m.id.startsWith("tool-end-")) ended.set(m.id.slice("tool-end-".length), m);
+		if (m?.role === "tool" && m.id.startsWith("tool-end-"))
+			ended.set(m.id.slice("tool-end-".length), m);
 	}
 	const tools: ActivityRailToolStatus[] = [];
 	for (let i = messages.length - 1; i >= 0 && tools.length < limit; i--) {
@@ -61,7 +62,10 @@ export function deriveTools(
  * Calls the model has issued this turn that are waiting behind the active
  * one. Zero whenever no turn is live, so it always drains.
  */
-export function queuedToolCount(tools: ReadonlyArray<ActivityRailToolStatus>, isProcessing: boolean): number {
+export function queuedToolCount(
+	tools: ReadonlyArray<ActivityRailToolStatus>,
+	isProcessing: boolean,
+): number {
 	if (!isProcessing) return 0;
 	return Math.max(0, tools.filter((tl) => tl.state === "running").length - 1);
 }
@@ -90,6 +94,21 @@ export interface ProviderSnapshot {
 	primary: { name: string; latencyMs?: number; asked?: string } | null;
 	fallback: { name: string; latencyMs?: number } | null;
 	offline: { name: string; latencyMs?: number } | null;
+}
+
+/**
+ * The rail's snapshot for the route in use. A route that cannot answer right now
+ * (readiness "none": engine down, key refused) is an offline row, not the live
+ * primary: the NOW strip says NO MODEL, so the rail must not show a filled dot
+ * beside the same model (pilot break, banner vs PROVIDERS).
+ */
+export function routeSnapshot(opts: {
+	canAnswer: boolean;
+	route: { name: string; asked?: string };
+	fallback: ProviderSnapshot["fallback"];
+}): ProviderSnapshot {
+	if (opts.canAnswer) return { primary: opts.route, fallback: opts.fallback, offline: null };
+	return { primary: null, fallback: opts.fallback, offline: { name: opts.route.name } };
 }
 
 export function deriveProviders(snap: ProviderSnapshot): ActivityRailProviderRow[] {
@@ -203,7 +222,13 @@ export function deriveActiveTasks(
 		return active.map((s) => ({ id: s.id, label: plainInline(s.text), progress, detail }));
 	}
 	if (done === 0 && !isProcessing) {
-		return [{ id: "plan-tally", label: `${total} ${total === 1 ? "step" : "steps"} planned`, tone: "quiet" }];
+		return [
+			{
+				id: "plan-tally",
+				label: `${total} ${total === 1 ? "step" : "steps"} planned`,
+				tone: "quiet",
+			},
+		];
 	}
 	return [{ id: "plan-tally", label: `${done} of ${total} steps done`, progress, detail }];
 }
