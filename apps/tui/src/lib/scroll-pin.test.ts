@@ -1,32 +1,55 @@
 import { describe, expect, test } from "bun:test";
-import { PAGE_MESSAGES, offsetAfterNewMessages, pagingDelta } from "./scroll-pin.js";
+import { offsetAfterNewMessages, pageMessages, pagingAction } from "./scroll-pin.js";
 
-describe("pagingDelta (break 9)", () => {
+describe("pagingAction (break 9)", () => {
 	test("plain PgUp and PgDn page the chat in every layout", () => {
-		expect(pagingDelta({ pageUp: true }, { approvalPending: false })).toBe(PAGE_MESSAGES);
-		expect(pagingDelta({ pageDown: true }, { approvalPending: false })).toBe(-PAGE_MESSAGES);
-	});
-
-	test("PgDn is the exact inverse of PgUp", () => {
-		const up = pagingDelta({ pageUp: true }, { approvalPending: false }) as number;
-		const down = pagingDelta({ pageDown: true }, { approvalPending: false }) as number;
-		expect(up + down).toBe(0);
+		expect(pagingAction({ pageUp: true }, { approvalPending: false })).toEqual({ page: 1 });
+		expect(pagingAction({ pageDown: true }, { approvalPending: false })).toEqual({ page: -1 });
 	});
 
 	test("a pending approval card owns plain PgUp and PgDn", () => {
-		expect(pagingDelta({ pageUp: true }, { approvalPending: true })).toBeNull();
-		expect(pagingDelta({ pageDown: true }, { approvalPending: true })).toBeNull();
+		expect(pagingAction({ pageUp: true }, { approvalPending: true })).toBeNull();
+		expect(pagingAction({ pageDown: true }, { approvalPending: true })).toBeNull();
 	});
 
 	test("shift paging still works while a card is pending", () => {
-		expect(pagingDelta({ pageUp: true, shift: true }, { approvalPending: true })).toBe(PAGE_MESSAGES);
+		expect(pagingAction({ pageUp: true, shift: true }, { approvalPending: true })).toEqual({
+			page: 1,
+		});
 	});
 
 	test("shift+arrows step one message; plain arrows are the input's", () => {
-		expect(pagingDelta({ shift: true, upArrow: true }, { approvalPending: false })).toBe(1);
-		expect(pagingDelta({ shift: true, downArrow: true }, { approvalPending: false })).toBe(-1);
-		expect(pagingDelta({ upArrow: true }, { approvalPending: false })).toBeNull();
-		expect(pagingDelta({ downArrow: true }, { approvalPending: false })).toBeNull();
+		expect(pagingAction({ shift: true, upArrow: true }, { approvalPending: false })).toEqual({
+			step: 1,
+		});
+		expect(pagingAction({ shift: true, downArrow: true }, { approvalPending: false })).toEqual({
+			step: -1,
+		});
+		expect(pagingAction({ upArrow: true }, { approvalPending: false })).toBeNull();
+		expect(pagingAction({ downArrow: true }, { approvalPending: false })).toBeNull();
+	});
+});
+
+describe("pageMessages: a page is rows, not a message count", () => {
+	test("small messages: a page moves as many as fit the page rows", () => {
+		const rows = Array(40).fill(2);
+		expect(pageMessages({ rows, offset: 0, dir: 1, pageRows: 10 })).toBe(5);
+		expect(pageMessages({ rows, offset: 10, dir: -1, pageRows: 10 })).toBe(-5);
+	});
+
+	test("one 44-line message moves alone, not with four more behind it", () => {
+		const rows = [3, 3, 3, 3, 44, 3];
+		// Bottom of the window is the 44-line message (offset 1): it pages as one.
+		expect(pageMessages({ rows, offset: 1, dir: 1, pageRows: 18 })).toBe(1);
+	});
+
+	test("always moves at least one message, even when it is taller than a page", () => {
+		expect(pageMessages({ rows: [100, 100], offset: 0, dir: 1, pageRows: 10 })).toBe(1);
+	});
+
+	test("does not run off the ends of the list", () => {
+		expect(pageMessages({ rows: [2, 2], offset: 0, dir: 1, pageRows: 50 })).toBe(2);
+		expect(pageMessages({ rows: [2, 2], offset: 0, dir: -1, pageRows: 50 })).toBe(-1);
 	});
 });
 

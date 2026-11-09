@@ -50,7 +50,7 @@ import {
 import { type MarkStream, holdLivingMark } from "../lib/living-mark.js";
 import { motionEnabled } from "../lib/motion.js";
 import { wrapNotice } from "../lib/notice-wrap.js";
-import { offsetAfterNewMessages, pagingDelta } from "../lib/scroll-pin.js";
+import { offsetAfterNewMessages, pageMessages, pagingAction } from "../lib/scroll-pin.js";
 import { drawsColour, glyphs } from "../lib/term-caps.js";
 import { useToolOutputVersion } from "../lib/tool-output-state.js";
 import { type ChatItem, type ToolTrailEntry, buildChatItems } from "../lib/tool-trail.js";
@@ -168,6 +168,8 @@ interface MessageListProps {
 	touchHints?: boolean;
 	/** An approval card is up: plain PgUp/PgDn page the card, not the chat. */
 	approvalPending?: boolean;
+	/** Bumped on every submit, slash commands included: the view returns to the live edge. */
+	snapSeq?: number;
 	/**
 	 * Fold the running turn's steps behind one status row (#5170). False (the
 	 * default) draws every step as a row, as before.
@@ -315,6 +317,7 @@ export function MessageList({
 	onToggleCompaction,
 	touchHints = false,
 	approvalPending = false,
+	snapSeq = 0,
 	foldTrace = false,
 	traceOpen = false,
 	onToggleTrace,
@@ -463,8 +466,18 @@ export function MessageList({
 	// Keyboard: shift+arrows (plain arrows are owned by the input field).
 	useInput(
 		(_input, key) => {
-			const delta = pagingDelta(key, { approvalPending: Boolean(approvalPending) });
-			if (delta !== null) scrollBy(delta);
+			const action = pagingAction(key, { approvalPending: Boolean(approvalPending) });
+			if (!action) return;
+			if ("step" in action) scrollBy(action.step);
+			else
+				scrollBy(
+					pageMessages({
+						rows: rowEstimates,
+						offset: scrollOffsetRef.current,
+						dir: action.page,
+						pageRows: Math.max(1, resolvedRowBudget - 2),
+					}),
+				);
 		},
 		{ isActive: scrollEnabled },
 	);
@@ -477,6 +490,15 @@ export function MessageList({
 		onWheelUp: () => scrollBy(+1),
 		onWheelDown: () => scrollBy(-1),
 	});
+
+	// A submit of any kind (a slash command adds no user message) returns to the live edge.
+	const lastSnapRef = useRef(snapSeq);
+	useEffect(() => {
+		if (snapSeq === lastSnapRef.current) return;
+		lastSnapRef.current = snapSeq;
+		autoScrollRef.current = true;
+		setScrollOffset(0);
+	}, [snapSeq]);
 
 	// Auto-pin: new messages while pinned snap to bottom. If the user is
 	// scrolled up, we BUMP scrollOffset so their view stays locked on the same
@@ -530,7 +552,7 @@ export function MessageList({
 					<Text color={t.muted} dimColor>
 						{touchHints
 							? `↑ ${hiddenAbove} earlier${canScrollUp ? "  [PgUp]" : ""}`
-							: `↑ ${hiddenAbove} earlier ${hiddenAbove === 1 ? "line" : "lines"}${canScrollUp ? "  shift+↑" : ""}`}
+							: `↑ ${hiddenAbove} earlier ${hiddenAbove === 1 ? "line" : "lines"}${canScrollUp ? "  PgUp" : ""}`}
 					</Text>
 				</Box>
 			)}
@@ -591,7 +613,7 @@ export function MessageList({
 					<Text color={t.muted} dimColor>
 						{touchHints
 							? `↓ ${clampedOffset} below  [PgDn]`
-							: `↓ ${clampedOffset} below  shift+↓ or scroll down to follow`}
+							: `↓ ${clampedOffset} below  PgDn to follow`}
 					</Text>
 				</Box>
 			)}

@@ -62,7 +62,7 @@ afterEach(() => {
 function mount() {
 	const stdin = new FakeStdin();
 	const stdout = makeStdout();
-	const el = (messages: Message[]) => (
+	const el = (messages: Message[], snapSeq = 0) => (
 		<MessageList
 			messages={messages}
 			animateTyping={false}
@@ -70,6 +70,7 @@ function mount() {
 			turnRunning={false}
 			rowBudget={8}
 			contentWidth={44}
+			snapSeq={snapSeq}
 		/>
 	);
 	instance = render(el(base), {
@@ -81,7 +82,12 @@ function mount() {
 		patchConsole: false,
 	});
 	const frame = () => stripAnsi(stdout.last);
-	return { stdin, frame, el, rerender: (m: Message[]) => instance?.rerender(el(m)) };
+	return {
+		stdin,
+		frame,
+		el,
+		rerender: (m: Message[], snapSeq = 0) => instance?.rerender(el(m, snapSeq)),
+	};
 }
 
 describe("MessageList scroll position", () => {
@@ -122,5 +128,71 @@ describe("MessageList scroll position", () => {
 		]);
 		await tick();
 		expect(m.frame()).not.toContain("late reply");
+	});
+
+	test("a slash command adds no message, but a submit still snaps (design fix)", async () => {
+		const m = mount();
+		await tick();
+		m.stdin.feed(PAGE_UP);
+		await tick();
+		expect(m.frame()).not.toContain("line-40");
+		// Same messages, snapSeq bumped by the submit path: the view returns to the edge.
+		m.rerender(base, 1);
+		await tick();
+		expect(m.frame()).toContain("line-40");
+	});
+
+	test("hints name PgUp and PgDn in the roomy layout (design fix)", async () => {
+		const m = mount();
+		await tick();
+		m.stdin.feed(PAGE_UP);
+		await tick();
+		expect(m.frame()).toContain("PgDn to follow");
+		expect(m.frame()).not.toContain("shift+");
+	});
+
+	test("paging over one tall message leaves no blank window (design fix)", async () => {
+		const tall: Message[] = [
+			...Array.from({ length: 6 }, (_, i) => ({
+				id: `s${i}`,
+				role: "assistant" as const,
+				content: `short-${i}`,
+				timestamp: new Date("2026-10-24T15:00:00Z"),
+			})),
+			{
+				id: "tall",
+				role: "assistant" as const,
+				content: Array.from({ length: 44 }, (_, i) => `tall-${i}`).join("\n"),
+				timestamp: new Date("2026-10-24T15:00:00Z"),
+			},
+			{ id: "end", role: "assistant" as const, content: "the-end", timestamp: new Date() },
+		];
+		const stdin = new FakeStdin();
+		const stdout = makeStdout();
+		instance = render(
+			<MessageList
+				messages={tall}
+				animateTyping={false}
+				showAnimations={false}
+				turnRunning={false}
+				rowBudget={20}
+				contentWidth={44}
+			/>,
+			{
+				stdin: stdin as unknown as NodeJS.ReadStream,
+				stdout: stdout as unknown as NodeJS.WriteStream,
+				stderr: makeStdout() as unknown as NodeJS.WriteStream,
+				debug: false,
+				exitOnCtrlC: false,
+				patchConsole: false,
+			},
+		);
+		await tick();
+		stdin.feed(PAGE_UP);
+		await tick();
+		const lines = stripAnsi(stdout.last).split("\n");
+		const filled = lines.filter((l) => /(short|tall)-\d+/.test(l)).length;
+		// Most of the 20-row window shows text, not blank rows.
+		expect(filled).toBeGreaterThanOrEqual(10);
 	});
 });

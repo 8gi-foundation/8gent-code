@@ -7784,6 +7784,7 @@ export function App({
 	// tab. With per-tab agents, each tab id has its own queue + Agent + ESC
 	// scope so concurrent submissions across Orchestrator / Engineer / QA do
 	// not block one another.
+	const [snapSeq, setSnapSeq] = useState(0);
 	const handleSubmit = async (
 		rawInput: string,
 		submitTabId?: string,
@@ -7808,6 +7809,10 @@ export function App({
 
 		// During setup an empty Enter is an answer: it takes the default.
 		if (!input && !attached && !showOnboarding) return;
+
+		// Any submit, slash commands included, returns the chat to the live edge.
+		// A slash command adds no user message, so the list cannot infer it.
+		setSnapSeq((n) => n + 1);
 
 		// (gh auth LLM intercept removed — now handled as a deterministic gate in the UI)
 
@@ -9319,6 +9324,7 @@ export function App({
 										onToggleCompaction={toggleCompaction}
 										touchHints={keysUp}
 										approvalPending={isApprovalPending}
+										snapSeq={snapSeq}
 									/>
 								)}
 							</Box>
