@@ -177,10 +177,12 @@ const exitedNonZero = (e: ToolLedgerEntry) => /^Exit code (?!0\b)/.test(e.result
 
 // ── Repo state ───────────────────────────────────────────────────────────────
 //
-// The command text answers one question only: was a commit or push ATTEMPTED.
-// Whether it SUCCEEDED is read from the repository, never from output text or
-// from how the shell line is parsed (four rounds of review found a new trick
-// each time: pipes, flags, brace expansion, grep file options).
+// Whether a commit or push HAPPENED is read from the repository, never from
+// output text or from how the shell line is parsed (eight rounds of review
+// found a new trick each time: pipes, flags, brace expansion, grep file
+// options, aliases, scripts, variables). In the turn's own directory the HEAD
+// reflog alone decides. The command text is used for one thing only: to add
+// other directories to check (`-C <dir>`, a leading `cd <dir>`).
 
 /** What the repo looked like at one instant. All local reads; nothing touches the network. */
 export interface RepoSnapshot {
@@ -398,6 +400,18 @@ function judge(
 	return { backed: false, why: unconfirmed ? "directory" : empty ? "reflog" : undefined };
 }
 
+/**
+ * Accepted limits, stated so nobody reads "backed" as more than it is:
+ * - The reflog says a commit landed on HEAD in this worktree during the turn.
+ *   It does not say who made it. A hook, an editor or a background job that
+ *   commits here during the turn backs a "Committed." claim. The commit is
+ *   real and on HEAD, so the claim is true of the repo, just not of the model.
+ * - The reflog is a plain file. A line written by hand, or by
+ *   `git update-ref -m "commit: x" HEAD HEAD`, reads as a commit. The gate
+ *   catches a model that says more than it did; it is not a defence against
+ *   one that forges the repository's own record.
+ * - A sibling worktree has its own HEAD reflog, so a commit there backs nothing here.
+ */
 function commitEvidence(ledger: readonly ToolLedgerEntry[], repo: RepoDelta): Evidence {
 	return judge(ledger, repo, COMMIT_CMD, (dir) => {
 		const entries = entriesSince(dir, "HEAD", repo);
