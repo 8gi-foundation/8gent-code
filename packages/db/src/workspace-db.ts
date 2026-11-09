@@ -107,22 +107,36 @@ export interface WorkspaceDbOptions {
 // ── Path resolution ───────────────────────────────────────────────────
 
 /**
- * Ignore rules written next to the DB. Only the DB and its WAL/SHM sidecars:
- * projects may commit other `.8gent/` files (vision-router reads config.json).
+ * Ignore rules written next to the DB: the DB, its WAL/SHM sidecars, and this
+ * file itself. Without the last line the file is the only untracked thing in
+ * `.8gent/`, so `git status` still listed the folder in every repo 8gent ran in.
+ * Projects may commit other `.8gent/` files (vision-router reads config.json).
  */
 const DOT_DIR_GITIGNORE =
+	"# Written by 8gent: the workspace state DB and its WAL/SHM files are local.\nstate.db*\n.gitignore\n";
+
+/** What earlier versions wrote. Only this exact text is upgraded; anything else is the project's. */
+const LEGACY_DOT_DIR_GITIGNORE =
 	"# Written by 8gent: the workspace state DB and its WAL/SHM files are local.\nstate.db*\n";
 
 /**
  * Write `.8gent/.gitignore` if there is none, so `git add .` never stages the
- * DB (#3302). An existing file is the project's and is never touched.
+ * DB (#3302). An existing file is the project's and is never touched, except
+ * our own earlier text, which gains the self-ignore line.
  * Best effort: a read-only checkout must not stop the DB from opening.
  */
 function ensureDotDirGitignore(dotDir: string): void {
+	const file = path.join(dotDir, ".gitignore");
 	try {
-		fs.writeFileSync(path.join(dotDir, ".gitignore"), DOT_DIR_GITIGNORE, { flag: "wx" });
+		fs.writeFileSync(file, DOT_DIR_GITIGNORE, { flag: "wx" });
 	} catch {
-		// EEXIST (project owns it) or unwritable: leave it.
+		try {
+			if (fs.readFileSync(file, "utf-8") === LEGACY_DOT_DIR_GITIGNORE) {
+				fs.writeFileSync(file, DOT_DIR_GITIGNORE);
+			}
+		} catch {
+			// Unreadable or unwritable: leave it.
+		}
 	}
 }
 

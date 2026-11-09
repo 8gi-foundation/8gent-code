@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { formatSessionTime, hudTokens, msUntilSessionTimeChanges } from "./format.js";
+import { formatSessionTime, hudContextTokens, hudTokens, msUntilSessionTimeChanges } from "./format.js";
 
 describe("formatSessionTime", () => {
 	test("under 60s reports whole seconds", () => {
@@ -85,5 +85,21 @@ describe("hudTokens (audit 2026-09-30, #7)", () => {
 		expect(hudTokens(842)).toBe("842 tok");
 		expect(hudTokens(6400)).toBe("6.4K tok");
 		expect(hudTokens(179_000)).toBe("179K tok");
+	});
+});
+
+describe("hudContextTokens", () => {
+	test("is the last request, not the sum of every step (header vs footer)", () => {
+		// Five steps each re-send ~15.6k of history: the running sum is 78k,
+		// the window holds 16.7k. The strip must say 17K, as the footer's 16.7k.
+		const steps = [15_600, 15_600, 15_600, 15_600, 15_600];
+		const runningSum = steps.reduce((a, b) => a + b, 0);
+		expect(hudTokens(runningSum)).toBe("78K tok");
+		expect(hudContextTokens(16_700)).toBe("17K tok");
+	});
+	test("is empty until something is measured", () => {
+		expect(hudContextTokens(0)).toBe("");
+		expect(hudContextTokens(null)).toBe("");
+		expect(hudContextTokens(undefined)).toBe("");
 	});
 });

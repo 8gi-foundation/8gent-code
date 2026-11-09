@@ -49,6 +49,7 @@ import {
 } from "../lib/inline-markdown.js";
 import { type MarkStream, holdLivingMark } from "../lib/living-mark.js";
 import { motionEnabled } from "../lib/motion.js";
+import { isDiffText } from "../lib/session-changes.js";
 import { wrapNotice } from "../lib/notice-wrap.js";
 import { drawsColour, glyphs } from "../lib/term-caps.js";
 import { useToolOutputVersion } from "../lib/tool-output-state.js";
@@ -1127,6 +1128,23 @@ function InlineSpans({
 
 function SystemMessageText({ content }: { content: string }) {
 	// System messages are structured (commands, help) — never bionic them
+	if (isDiffText(content) && content.includes("\n")) {
+		// A diff from SessionChanges: removed rows red, added rows green.
+		return (
+			<Box flexDirection="column">
+				{content.split("\n").map((line, i) => {
+					const colour = line.startsWith("+") ? t.green : line.startsWith("-") ? t.red : undefined;
+					return colour ? (
+						<Text key={i} color={colour}>
+							{line}
+						</Text>
+					) : (
+						<MutedText key={i}>{line}</MutedText>
+					);
+				})}
+			</Box>
+		);
+	}
 	return <MutedText>{content}</MutedText>;
 }
 
