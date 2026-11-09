@@ -212,3 +212,100 @@ describe("action claims need a matching successful call", () => {
 		}
 	});
 });
+
+// Security review of #111 (Karen): claims that slipped past the first version, with an empty ledger.
+describe("claims are not hidden by a later clause or a loose shell match", () => {
+	const claimed = (text: string, ledger: ToolLedgerEntry[] = []) => unbackedActionClaims(text, ledger);
+
+	it("flags each of Karen's sentences with an empty ledger", () => {
+		for (const text of [
+			"Committed both files, no errors.",
+			"I committed and pushed the changes, you can open a PR now.",
+			"Pushed to main, nothing left to do.",
+			"Ran the tests and everything is green; committed before lunch.",
+		]) {
+			expect(claimed(text).length).toBeGreaterThan(0);
+		}
+		expect(claimed("I committed and pushed the changes, you can open a PR now.")).toEqual([
+			"No commit was made: no git commit succeeded this turn.",
+			"Nothing was pushed: no git push succeeded this turn.",
+		]);
+		expect(claimed("Ran the tests and everything is green; committed before lunch.")).toEqual([
+			"No commit was made: no git commit succeeded this turn.",
+			"No tests were run: no test command ran this turn.",
+		]);
+	});
+
+	it("a negation counts only when it governs the verb", () => {
+		expect(claimed("Committed, but not pushed.")).toEqual([
+			"No commit was made: no git commit succeeded this turn.",
+		]);
+		expect(claimed("I have not committed the files.")).toEqual([]);
+		expect(claimed("The files are ready to be committed.")).toEqual([]);
+		expect(claimed("If I committed now it would fail.")).toEqual([]);
+	});
+
+	const run = (command: string, result = "Exit code 0"): ToolLedgerEntry => ({
+		name: "run_command",
+		args: { command },
+		success: true,
+		result,
+	});
+
+	it("shell commands that merely mention git commit do not back a commit claim", () => {
+		for (const command of [
+			"echo git commit -m x",
+			"git log --grep commit",
+			"git commit -m x; true",
+			"git commit -m x || true",
+			"git commit -m x | tee out.log",
+			"git commit --dry-run -m x",
+			"git status # git commit",
+		]) {
+			expect(claimed("Committed both files.", [run(command)])).toHaveLength(1);
+		}
+	});
+
+	it("real commit shapes back the claim", () => {
+		for (const command of [
+			"git commit -m x",
+			"git add -A && git commit -m 'add sub'",
+			'git commit -m "a; b && c"',
+			"git -C /tmp/repo commit -m x",
+			"git commit -m x && git log -1",
+			"cd repo && git commit -F - <<'EOF'\nadd sub\n\nline; two\nEOF",
+		]) {
+			expect(claimed("Committed both files.", [run(command)])).toEqual([]);
+		}
+	});
+
+	it("git push --dry-run does not back a push claim; a real push does", () => {
+		expect(claimed("Pushed to main.", [run("git push --dry-run origin main")])).toHaveLength(1);
+		expect(claimed("Pushed to main.", [run("git push origin main")])).toEqual([]);
+		expect(claimed("Pushed to main.", [run("git push origin main; true")])).toHaveLength(1);
+	});
+
+	it("reports about other people, past dates or log output are not claims", () => {
+		for (const text of [
+			"The last commit was made by Alice on Monday.",
+			"Alice committed the login fix yesterday.",
+			"I committed the login fix yesterday.",
+			"> abc1234 Alice committed the fix",
+			"Bob pushed the branch last week.",
+		]) {
+			expect(claimed(text)).toEqual([]);
+		}
+	});
+
+	it("make test and other test runners count as a test run", () => {
+		for (const command of ["make test", "make -j4 check", "cd app && make test", "./gradlew test", "cargo test", "dotnet test"]) {
+			expect(claimed("Ran the tests.", [run(command)])).toEqual([]);
+		}
+		expect(claimed("Ran the tests.", [run('echo "make test"')])).toHaveLength(1);
+	});
+
+	it("a turn with no tool call and no claim is untouched", () => {
+		const out = enforceAgenticHonesty({ content: "Alice committed the login fix yesterday.", ledger: [] });
+		expect(out).toEqual({ content: "Alice committed the login fix yesterday.", violated: false });
+	});
+});

@@ -162,7 +162,7 @@ type ActionClaimKind = "commit" | "push" | "tests";
 
 interface ActionClaim {
 	kind: ActionClaimKind;
-	/** Past-tense report of the action, one sentence. */
+	/** Past-tense report of the action. */
 	says: RegExp;
 	/** The turn's ledger holds a successful call of exactly this action. */
 	backed: (ledger: readonly ToolLedgerEntry[]) => boolean;
@@ -170,20 +170,77 @@ interface ActionClaim {
 	note: string;
 }
 
-// A sentence that is a plan, a condition, a refusal or a question is not a report.
-const NOT_A_REPORT =
-	/\?\s*$|\b(?:not|never|no|nothing|unable|cannot|failed|without|yet|would|will|should|could|can|if|once|before|until|need|needs|want|wants|please|let me|ready to|be committed|be pushed|get committed)\b|n't\b/i;
-
 const exitedNonZero = (e: ToolLedgerEntry) => /^Exit code (?!0\b)/.test(e.result ?? "");
 
-/** A shell command run this turn that matches `re` and exited 0, or the named dedicated tool. */
-function shellOrTool(tool: string, re: RegExp, doneOnNoop?: RegExp) {
+// ── Shell evidence ───────────────────────────────────────────────────────────
+
+/** Split a shell line into [segment, operator-that-follows] pairs, honouring quotes. */
+function shellChain(command: string): Array<{ seg: string; op: string }> {
+	// A heredoc body is text, not commands.
+	const text = command.replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n[ \t]*\2[ \t]*(?=\n|$)/g, "");
+	const out: Array<{ seg: string; op: string }> = [];
+	let cur = "";
+	let quote = "";
+	for (let i = 0; i < text.length; i++) {
+		const ch = text[i];
+		if (quote) {
+			cur += ch;
+			if (ch === "\\" && quote === '"' && i + 1 < text.length) cur += text[++i];
+			else if (ch === quote) quote = "";
+			continue;
+		}
+		if (ch === "\\" && i + 1 < text.length) {
+			cur += ch + text[++i];
+			continue;
+		}
+		if (ch === "'" || ch === '"') {
+			quote = ch;
+			cur += ch;
+			continue;
+		}
+		const two = text.slice(i, i + 2);
+		if (two === "&&" || two === "||") {
+			out.push({ seg: cur.trim(), op: two });
+			cur = "";
+			i++;
+		} else if (ch === ";" || ch === "|" || ch === "\n" || ch === "&") {
+			out.push({ seg: cur.trim(), op: ch === "\n" ? ";" : ch });
+			cur = "";
+		} else cur += ch;
+	}
+	out.push({ seg: cur.trim(), op: "" });
+	return out.filter((x) => x.seg !== "");
+}
+
+/** `git [global options] <sub> ...`, with the subcommand in the command position. */
+function gitSub(seg: string, sub: string): boolean {
+	const m = seg.match(
+		/^(?:(?:env\s+)?(?:\w+=\S*\s+)*)git(?:\s+(?:-[cC]\s+\S+|--[\w-]+(?:=\S+)?))*\s+([\w-]+)\b(.*)$/s,
+	);
+	if (!m || m[1] !== sub) return false;
+	return !/(?:^|\s)(?:--dry-run|-n|--help|-h)(?:\s|$)/.test(m[2]);
+}
+
+/**
+ * A shell command whose exit status is the git subcommand's: the subcommand is
+ * in command position and everything after it in the chain is joined by &&, so
+ * `git commit -m x; true` and `git commit | tee log` do not count.
+ */
+function shellGit(command: unknown, sub: string): boolean {
+	if (typeof command !== "string") return false;
+	const chain = shellChain(command);
+	const i = chain.findIndex((c) => gitSub(c.seg, sub));
+	if (i < 0) return false;
+	return chain.slice(i).every((c, k, all) => k === all.length - 1 || c.op === "&&");
+}
+
+/** The dedicated tool, or a shell command passing `shellGit`, that succeeded with exit 0. */
+function gitBacked(tool: string, sub: string, noop?: RegExp) {
 	return (ledger: readonly ToolLedgerEntry[]): boolean =>
 		ledger.some((e) => {
 			if (!e.success || exitedNonZero(e)) return false;
-			if (doneOnNoop?.test(e.result ?? "")) return false;
-			if (e.name === tool) return true;
-			return e.name === "run_command" && typeof e.args?.command === "string" && re.test(e.args.command);
+			if (noop?.test(e.result ?? "")) return false;
+			return e.name === tool || (e.name === "run_command" && shellGit(e.args?.command, sub));
 		});
 }
 
@@ -191,13 +248,13 @@ const ACTION_CLAIMS: readonly ActionClaim[] = [
 	{
 		kind: "commit",
 		says: /\b(?:committed|(?:created|made)\s+(?:the\s+|a\s+|that\s+)?commit|commit\s+(?:is\s+|was\s+)?(?:created|made|done|complete))\b/i,
-		backed: shellOrTool("git_commit", /\bgit\b[^;&|]*\bcommit\b/, /nothing (?:added )?to commit|no changes added/i),
+		backed: gitBacked("git_commit", "commit", /nothing (?:added )?to commit|no changes added/i),
 		note: "No commit was made: no git commit succeeded this turn.",
 	},
 	{
 		kind: "push",
 		says: /\b(?:pushed|push\s+(?:is\s+|was\s+)?(?:done|complete|succeeded))\b/i,
-		backed: shellOrTool("git_push", /\bgit\b[^;&|]*\bpush\b/),
+		backed: gitBacked("git_push", "push"),
 		note: "Nothing was pushed: no git push succeeded this turn.",
 	},
 	{
@@ -208,22 +265,55 @@ const ACTION_CLAIMS: readonly ActionClaim[] = [
 	},
 ];
 
-/** A reply sentence, split the way a reader would: lines, then sentence ends. */
-function replySentences(text: string): string[] {
+// ── Reading a reply ──────────────────────────────────────────────────────────
+
+/** Clauses of a reply: lines, sentence ends, commas, semicolons, "but". Code blocks and quotes dropped. */
+function replyClauses(text: string): string[] {
 	return text
 		.replace(/```[\s\S]*?```/g, " ")
 		.split(/\n+/)
+		.filter((line) => !/^\s*>/.test(line))
 		.flatMap((line) => line.split(/(?<=[.!?:])\s+/))
-		.map((s) => s.trim())
+		.filter((sentence) => !/\?\s*$/.test(sentence))
+		.flatMap((sentence) => sentence.split(/\s*[,;]\s*|\s+(?:but|however|although|though)\s+/i))
+		.map((c) => c.trim())
 		.filter(Boolean);
+}
+
+// A negation, a modal or a subordinator within a few words before the verb means the clause
+// is not reporting the action ("did not push", "ready to be committed", "if I committed").
+const GOVERNS =
+	/\b(?:not|never|no|nothing|cannot|unable|failed|without|yet|won't|can't|didn't|couldn't|wasn't|haven't|hasn't|hadn't|isn't|aren't|don't|will|would|should|could|can|may|might|must|if|once|until|unless|whether|need|needs|want|wants|please|ready|let|to|before|after|when)\b|n't\b/i;
+const NEGATION_WINDOW = 3;
+
+// Who is speaking: nobody ("Committed both files") or the reply's own voice ("I committed").
+// "Alice committed ..." and "The last commit was made by ..." report someone else.
+const OWN_VOICE =
+	/^(?:(?:ok(?:ay)?|done|great|sure|yes|alright|good|all set|and|then|so|now|also|just|both|successfully|i|we|i've|we've|i have|we have|committed|pushed|ran|executed)\b[\s,:.!-]*)*$/i;
+// "The changes have been committed": the thing acted on, then a passive auxiliary.
+const OWN_PASSIVE =
+	/^(?:(?:all|both|the|these|your|my|our)\s+)*(?:changes?|files?|edits?|work|everything|it|they)\s+(?:(?:has|have|had|is|are|was|were|now|all|been|successfully|just)\s+)*$/i;
+// A report about the past or about a log, not about this turn.
+const NOT_THIS_TURN =
+	/\b(?:yesterday|earlier|previously|ago|last\s+(?:week|month|year|night|time)|(?:on\s+)?(?:mon|tues|wednes|thurs|fri|satur|sun)day|\d{4}-\d{2}-\d{2}|in\s+the\s+previous|originally)\b/i;
+
+/** Does this clause, spoken in the reply's own voice, report the action this turn? */
+function clauseClaims(clause: string, says: RegExp): boolean {
+	const m = says.exec(clause);
+	if (!m) return false;
+	if (NOT_THIS_TURN.test(clause)) return false;
+	const before = clause.slice(0, m.index).trim();
+	const nearby = before.split(/\s+/).filter(Boolean).slice(-NEGATION_WINDOW).join(" ");
+	if (GOVERNS.test(nearby)) return false;
+	return OWN_VOICE.test(before) || OWN_PASSIVE.test(`${before} `);
 }
 
 /** The notes for every action the reply reports that the turn's ledger does not back. */
 export function unbackedActionClaims(content: string, ledger: readonly ToolLedgerEntry[]): string[] {
 	if (!content) return [];
-	const sentences = replySentences(content).filter((s) => !NOT_A_REPORT.test(s));
+	const clauses = replyClauses(content);
 	return ACTION_CLAIMS.filter(
-		(c) => sentences.some((s) => c.says.test(s)) && !c.backed(ledger),
+		(c) => clauses.some((cl) => clauseClaims(cl, c.says)) && !c.backed(ledger),
 	).map((c) => c.note);
 }
 
