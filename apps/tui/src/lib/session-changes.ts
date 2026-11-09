@@ -139,7 +139,8 @@ export function diffBody(
  * escape and control byte, then the C1 and format characters cleanOutput keeps.
  */
 export function safeForScreen(text: string): string {
-	return sanitizeForTerminal(cleanOutput(text).text);
+	// Ink drops the last character of a row that holds a tab, so a tab is two spaces.
+	return sanitizeForTerminal(cleanOutput(text).text).replace(/\t/g, "  ");
 }
 
 function readOrNull(abs: string): string | null {
@@ -226,4 +227,39 @@ export class SessionChanges {
 /** True for a message body made by SessionChanges, so the chat can colour its rows. */
 export function isDiffText(content: string): boolean {
 	return content.startsWith("diff ");
+}
+
+/** Columns the +/- mark takes at the left of a diff row. */
+export const DIFF_MARK_COLS = 2;
+
+export interface DiffRow {
+	kind: "header" | "hunk" | "add" | "del" | "ctx";
+	/** "+", "-" or "" (the mark drawn in its own column). */
+	mark: string;
+	/** The row without its mark. For a header: "diff path", with `added` and `removed` the "+N" and "-M". */
+	text: string;
+	added?: string;
+	removed?: string;
+}
+
+/** A SessionChanges text as rows, so the chat can draw the mark in its own column. */
+export function diffRows(content: string): DiffRow[] {
+	return content.split("\n").map((line): DiffRow => {
+		const head = line.match(/^(diff .*?)\s+(\+\d+)\s+(-\d+)$/);
+		if (head) return { kind: "header", mark: "", text: head[1], added: head[2], removed: head[3] };
+		if (line.startsWith("@@")) return { kind: "hunk", mark: "", text: line };
+		if (line.startsWith("+")) return { kind: "add", mark: "+", text: line.slice(1) };
+		if (line.startsWith("-")) return { kind: "del", mark: "-", text: line.slice(1) };
+		return { kind: "ctx", mark: "", text: line.startsWith(" ") ? line.slice(1) : line };
+	});
+}
+
+/** Terminal rows a diff text takes at `width` columns, with the mark column beside the text. */
+export function diffRowCount(content: string, width: number): number {
+	return diffRows(content).reduce((n, r) => {
+		const avail = Math.max(1, width - DIFF_MARK_COLS);
+		const len =
+			r.kind === "header" ? r.text.length + 1 + (r.added?.length ?? 0) + 1 + (r.removed?.length ?? 0) : r.text.length;
+		return n + Math.max(1, Math.ceil(len / avail));
+	}, 0);
 }

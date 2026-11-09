@@ -49,7 +49,7 @@ import {
 } from "../lib/inline-markdown.js";
 import { type MarkStream, holdLivingMark } from "../lib/living-mark.js";
 import { motionEnabled } from "../lib/motion.js";
-import { isDiffText } from "../lib/session-changes.js";
+import { DIFF_MARK_COLS, diffRowCount, diffRows, isDiffText } from "../lib/session-changes.js";
 import { wrapNotice } from "../lib/notice-wrap.js";
 import { drawsColour, glyphs } from "../lib/term-caps.js";
 import { useToolOutputVersion } from "../lib/tool-output-state.js";
@@ -255,6 +255,11 @@ function estimateMessageRows(
 	if (message.role === "tool") return trailRows > 0 ? trailRows + 1 : 0;
 	const w = Math.max(1, wrapWidth);
 	if (message.compaction) return compactionRows(message.compaction, w);
+	if (message.role === "system" && isDiffText(message.content) && message.content.includes("\n")) {
+		// Rows as DiffText draws them (mark column beside the text), inside the
+		// padded, ruled block every multi-line system message gets.
+		return diffRowCount(message.content, Math.max(1, w - 1)) + 2 + 1;
+	}
 	if (message.role === "system") {
 		if (!message.content.includes("\n") && message.content.length > Math.max(20, wrapWidth - 10)) {
 			return wrapNotice(message.content, w - 2).length + (wrapWidth >= 60 ? 2 : 0) + 1;
@@ -1126,25 +1131,51 @@ function InlineSpans({
 	);
 }
 
+/**
+ * A diff from SessionChanges. The +/- mark sits in its own two-column Box with
+ * the text beside it, so a wrapped row keeps its text clear of the mark. The
+ * header is the first thing read: bold primary text, +N green, -N red.
+ */
+function DiffText({ content }: { content: string }) {
+	return (
+		<Box flexDirection="column">
+			{diffRows(content).map((row, i) => {
+				if (row.kind === "header") {
+					return (
+						<Text key={i} wrap="wrap">
+							<Text bold color={t.textPrimary}>
+								{row.text}
+							</Text>
+							<Text color={t.green}> {row.added}</Text>
+							<Text color={t.red}> {row.removed}</Text>
+						</Text>
+					);
+				}
+				const colour = row.kind === "add" ? t.green : row.kind === "del" ? t.red : undefined;
+				return (
+					<Box key={i} flexDirection="row">
+						<Box width={DIFF_MARK_COLS} flexShrink={0}>
+							{colour ? <Text color={colour}>{row.mark}</Text> : <Text> </Text>}
+						</Box>
+						<Box flexGrow={1} flexShrink={1}>
+							{colour ? (
+								<Text color={colour} wrap="wrap">
+									{row.text}
+								</Text>
+							) : (
+								<MutedText>{row.text}</MutedText>
+							)}
+						</Box>
+					</Box>
+				);
+			})}
+		</Box>
+	);
+}
+
 function SystemMessageText({ content }: { content: string }) {
 	// System messages are structured (commands, help) — never bionic them
-	if (isDiffText(content) && content.includes("\n")) {
-		// A diff from SessionChanges: removed rows red, added rows green.
-		return (
-			<Box flexDirection="column">
-				{content.split("\n").map((line, i) => {
-					const colour = line.startsWith("+") ? t.green : line.startsWith("-") ? t.red : undefined;
-					return colour ? (
-						<Text key={i} color={colour}>
-							{line}
-						</Text>
-					) : (
-						<MutedText key={i}>{line}</MutedText>
-					);
-				})}
-			</Box>
-		);
-	}
+	if (isDiffText(content) && content.includes("\n")) return <DiffText content={content} />;
 	return <MutedText>{content}</MutedText>;
 }
 
