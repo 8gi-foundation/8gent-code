@@ -537,6 +537,17 @@ describe("savedChoiceIsPinned", () => {
 		).toBe(true);
 	});
 
+	test("a cloud provider with no key is not pinned, even with a saved model (8SO)", () => {
+		expect(
+			savedChoiceIsPinned({
+				savedProvider: "openrouter",
+				savedModel: "m",
+				savedHostedWithKey: false,
+				currentProvider: "openrouter",
+			}),
+		).toBe(false);
+	});
+
 	test("a different provider in use is not the saved choice", () => {
 		expect(savedChoiceIsPinned({ ...base, currentProvider: "lmstudio" })).toBe(false);
 	});

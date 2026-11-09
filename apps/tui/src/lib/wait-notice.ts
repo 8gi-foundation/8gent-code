@@ -1,7 +1,7 @@
 /**
  * The plain line shown when the model has gone quiet (pilot break 12).
  *
- * With a second session on the same Ollama, the model answers one request at a
+ * With a second session on the same local server, the model answers one request at a
  * time, so the later one sat on a spinner for about four minutes with nothing
  * saying why. The harness already tells the TUI after 45 s of silence
  * (onStall), but that text only reached a view nobody has open. This turns the

@@ -422,9 +422,10 @@ export function startupModelSeed(opts: {
  * instead of taking its role-registry default (pilot break 10).
  *
  * #4720 pinned only a saved HOSTED provider with a key. A saved local choice
- * lost to the Orchestrator role default (qwen3.6:27b) at every launch, so a
- * /model pick was forgotten on relaunch and the cold 27B loaded each day. A
- * saved model for the provider now in use is the person's choice and wins.
+ * lost to the Orchestrator role default at every launch, so a /model pick was
+ * forgotten on relaunch and the role's cold model loaded each day. A
+ * saved model for the provider now in use is the person's choice and wins, unless
+ * that provider is a cloud one with no key.
  * `savedModel` is what was on disk at launch, never a detected default.
  */
 export function savedChoiceIsPinned(opts: {
@@ -434,7 +435,11 @@ export function savedChoiceIsPinned(opts: {
 	currentProvider: string;
 }): boolean {
 	if (!opts.savedProvider || opts.currentProvider !== opts.savedProvider) return false;
-	return opts.savedHostedWithKey || opts.savedModel.trim().length > 0;
+	if (opts.savedHostedWithKey) return true;
+	// A cloud provider with no key cannot answer: its saved model is not a choice
+	// that may displace the role default (8SO on #123).
+	if (isHostedChatProvider(opts.savedProvider)) return false;
+	return opts.savedModel.trim().length > 0;
 }
 
 /**

@@ -533,7 +533,8 @@ export class Agent {
 			displayLabel: `${provider}/${model}`,
 			requestMs: resolveRequestTimeoutMs(),
 			stallMs: resolveStallMs(),
-			onStall: (silentSeconds: number | null) => this.events.onStall?.({ silentSeconds, provider, model }),
+			onStall: (silentSeconds: number | null) =>
+				this.events.onStall?.({ silentSeconds, provider, model }),
 		};
 	}
 	private loopDetector: ToolLoopDetector;

@@ -39,7 +39,8 @@ export function deriveTools(
 ): ActivityRailToolStatus[] {
 	const ended = new Map<string, Pick<Message, "toolSuccess" | "toolTrail">>();
 	for (const m of messages) {
-		if (m?.role === "tool" && m.id.startsWith("tool-end-")) ended.set(m.id.slice("tool-end-".length), m);
+		if (m?.role === "tool" && m.id.startsWith("tool-end-"))
+			ended.set(m.id.slice("tool-end-".length), m);
 	}
 	const tools: ActivityRailToolStatus[] = [];
 	for (let i = messages.length - 1; i >= 0 && tools.length < limit; i--) {
@@ -61,7 +62,10 @@ export function deriveTools(
  * Calls the model has issued this turn that are waiting behind the active
  * one. Zero whenever no turn is live, so it always drains.
  */
-export function queuedToolCount(tools: ReadonlyArray<ActivityRailToolStatus>, isProcessing: boolean): number {
+export function queuedToolCount(
+	tools: ReadonlyArray<ActivityRailToolStatus>,
+	isProcessing: boolean,
+): number {
 	if (!isProcessing) return 0;
 	return Math.max(0, tools.filter((tl) => tl.state === "running").length - 1);
 }
@@ -218,7 +222,13 @@ export function deriveActiveTasks(
 		return active.map((s) => ({ id: s.id, label: plainInline(s.text), progress, detail }));
 	}
 	if (done === 0 && !isProcessing) {
-		return [{ id: "plan-tally", label: `${total} ${total === 1 ? "step" : "steps"} planned`, tone: "quiet" }];
+		return [
+			{
+				id: "plan-tally",
+				label: `${total} ${total === 1 ? "step" : "steps"} planned`,
+				tone: "quiet",
+			},
+		];
 	}
 	return [{ id: "plan-tally", label: `${done} of ${total} steps done`, progress, detail }];
 }

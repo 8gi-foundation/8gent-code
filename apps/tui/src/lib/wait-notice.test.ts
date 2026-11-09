@@ -5,7 +5,9 @@ describe("waitNotice", () => {
 	test("names the busy model and the wait, in plain words", () => {
 		const line = waitNotice("qwen3.8:27b-mlx", 45);
 		expect(line).toContain("qwen3.8:27b-mlx");
-		expect(line).toBe("qwen3.8:27b-mlx has not answered for 45 s. It may be busy. Esc stops the turn.");
+		expect(line).toBe(
+			"qwen3.8:27b-mlx has not answered for 45 s. It may be busy. Esc stops the turn.",
+		);
 		expect(line).not.toMatch(/—/);
 	});
 

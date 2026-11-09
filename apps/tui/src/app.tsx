@@ -3879,7 +3879,8 @@ export function App({
 			onStall: ({ silentSeconds, model }) => {
 				// Say which model is quiet, once per quiet spell (break 12).
 				const waitLine = waitNoticeGateRef.current(tabId, { silentSeconds, model });
-				if (waitLine) appendToTabLatest.current(tabId, {
+				if (waitLine)
+					appendToTabLatest.current(tabId, {
 						id: messageId("wait"),
 						role: "system",
 						content: waitLine,
