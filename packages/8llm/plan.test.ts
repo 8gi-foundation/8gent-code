@@ -79,10 +79,9 @@ test("hostile: tensor offset outside the data section is refused", () => {
   expect(() => readHeader(tmp(Buffer.concat([h, Buffer.alloc(64)])))).toThrow("outside data section");
 });
 
-test("hostile: header running past end of file never yields a negative size", () => {
-  expect(() => readHeader(tmp(hdr(1, [], [info("blk.0.a", 0)])))).not.toThrow();
-  const sizes = readHeader(tmp(hdr(1, [], [info("blk.0.a", 0)]))).tensors.map((t) => t.bytes);
-  expect(sizes.every((b) => b >= 0)).toBe(true);
+test("hostile: data section starting past end of file is refused, sizes never negative", () => {
+  expect(() => readHeader(tmp(hdr(1, [], [info("blk.0.a", 0)])))).toThrow("past end of file");
+  expect(readHeader(fixture()).tensors.every((t) => t.bytes >= 0)).toBe(true);
 });
 
 test("hostile: unknown array element type is refused", () => {
