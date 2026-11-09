@@ -127,17 +127,15 @@ export async function measureRead(path: string, limit = 2 * GB): Promise<number 
     const { dlopen, FFIType } = await import("bun:ffi");
     const mac = platform() === "darwin", arm = process.arch === "arm64";
     const I = FFIType.i32, L = FFIType.i64;
-    const lib = dlopen(mac ? "libSystem.B.dylib" : "libc.so.6", mac
-      ? { fcntl: { args: arm ? [I, I, L, L, L, L, L, L, L] : [I, I, I], returns: I } }
-      : { posix_fadvise: { args: [I, L, L, I], returns: I } });
     const get = mac ? dlopen("libSystem.B.dylib", { fcntl: { args: [I, I], returns: I } }) : null;
     fd = openSync(path, "r");
     const total = Math.min(statSync(path).size, limit);
     if (mac) {
+      const lib = dlopen("libSystem.B.dylib", { fcntl: { args: arm ? [I, I, L, L, L, L, L, L, L] : [I, I, I], returns: I } });
       const set = arm ? (lib.symbols.fcntl as any)(fd, 48, 0, 0, 0, 0, 0, 0, 1) : (lib.symbols.fcntl as any)(fd, 48, 1);
       // F_GETFL (3) reports FNOCACHE (0x40000) once the flag has really been set.
       if (set !== 0 || (get!.symbols.fcntl(fd, 3) & 0x40000) === 0) return null;
-    } else if (lib.symbols.posix_fadvise!(fd, 0, total, 4) !== 0) return null; // POSIX_FADV_DONTNEED
+    } else if (dlopen("libc.so.6", { posix_fadvise: { args: [I, L, L, I], returns: I } }).symbols.posix_fadvise(fd, 0, total, 4) !== 0) return null; // POSIX_FADV_DONTNEED
     const buf = Buffer.alloc(8 << 20);
     const t0 = performance.now();
     let done = 0;
