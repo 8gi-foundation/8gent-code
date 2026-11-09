@@ -254,12 +254,66 @@ export function diffRows(content: string): DiffRow[] {
 	});
 }
 
-/** Terminal rows a diff text takes at `width` columns, with the mark column beside the text. */
-export function diffRowCount(content: string, width: number): number {
-	return diffRows(content).reduce((n, r) => {
-		const avail = Math.max(1, width - DIFF_MARK_COLS);
-		const len =
-			r.kind === "header" ? r.text.length + 1 + (r.added?.length ?? 0) + 1 + (r.removed?.length ?? 0) : r.text.length;
-		return n + Math.max(1, Math.ceil(len / avail));
-	}, 0);
+/** The text width of a diff row inside a wrap width: one cell of padding, then the mark column. */
+export function diffTextWidth(wrapWidth: number): number {
+	return Math.max(1, wrapWidth - 1 - DIFF_MARK_COLS);
+}
+
+/**
+ * Wrap one diff line to `width` cells ourselves, so every row starts in the same
+ * column. Ink wraps with trim:false, so a space at a break began the next row
+ * and read as indentation. Here the single space at each break is dropped, a
+ * token longer than the width is hard-broken, and the line's own leading
+ * indentation stays on the first row only.
+ */
+export function wrapDiffText(text: string, width: number, breakOnSpace = true): string[] {
+	const w = Math.max(1, width);
+	const indent = (text.match(/^ */) ?? [""])[0].length;
+	const rows: string[] = [];
+	let rest = text;
+	let first = true;
+	while (rest.length > w) {
+		const cut = breakOnSpace ? rest.lastIndexOf(" ", w) : -1;
+		if (cut > (first ? indent : 0)) {
+			rows.push(rest.slice(0, cut));
+			rest = rest.slice(cut + 1);
+		} else {
+			rows.push(rest.slice(0, w));
+			rest = rest.slice(w);
+		}
+		first = false;
+	}
+	if (rest !== "" || rows.length === 0) rows.push(rest);
+	return rows;
+}
+
+/** One screen row of a laid-out diff. `first` is false on a continuation row, which has no mark. */
+export interface DiffScreenRow extends DiffRow {
+	first: boolean;
+}
+
+/**
+ * Every screen row a diff takes at `wrapWidth`. The chat draws these and counts
+ * these, so the row estimate equals what is drawn. A header's "+N -M" sits
+ * beside the first row of its path and keeps its width however long the path is.
+ */
+export function diffLayout(content: string, wrapWidth: number): DiffScreenRow[] {
+	const out: DiffScreenRow[] = [];
+	for (const row of diffRows(content)) {
+		if (row.kind === "header") {
+			const stats = ` ${row.added} ${row.removed}`.length;
+			// A path is one token: break it at the width, never at the space after "diff".
+			const lines = wrapDiffText(row.text, Math.max(1, wrapWidth - 1 - stats), false);
+			lines.forEach((text, k) => out.push({ ...row, text, first: k === 0 }));
+		} else {
+			const lines = wrapDiffText(row.text, diffTextWidth(wrapWidth));
+			lines.forEach((text, k) => out.push({ ...row, text, mark: k === 0 ? row.mark : "", first: k === 0 }));
+		}
+	}
+	return out;
+}
+
+/** Terminal rows a diff text takes at `wrapWidth`. */
+export function diffRowCount(content: string, wrapWidth: number): number {
+	return diffLayout(content, wrapWidth).length;
 }

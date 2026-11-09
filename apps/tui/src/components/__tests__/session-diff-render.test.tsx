@@ -7,7 +7,8 @@
 import { describe, expect, test } from "bun:test";
 import { renderToString } from "ink";
 import type { Message } from "../../app.js";
-import { diffRows, safeForScreen } from "../../lib/session-changes.js";
+import { diffRowCount, diffRows, safeForScreen, wrapDiffText } from "../../lib/session-changes.js";
+import { bubbleWidths } from "../../lib/chat-layout.js";
 import { MessageList, estimateMessageRowsForTest } from "../message-list.js";
 
 const at = new Date("2026-11-09T12:00:00Z");
@@ -56,35 +57,46 @@ describe("a wrapped row keeps its text clear of the mark", () => {
 	const long = `${"word ".repeat(30)}end`;
 	const text = ["diff a.ts  +1 -1", "@@ -1,1 +1,1 @@", `-${long}`, `+${long}`].join("\n");
 
-	for (const cols of [40, 52]) {
-		test(`at ${cols} columns only the first row carries the mark and the rest align under the text`, () => {
+	for (const cols of [40, 52, 160]) {
+		test(`at ${cols} columns every row of a line starts in the same column and no text is lost`, () => {
 			const rows = plain(draw(text, cols)).split("\n");
-			const first = rows.findIndex((r) => /^\s*\+ ?word/.test(r));
-			expect(first).toBeGreaterThan(-1);
-			const textCol = rows[first].indexOf("word");
-			let continuation = 0;
-			for (let i = first + 1; i < rows.length; i++) {
-				const r = rows[i];
-				if (!/\S/.test(r) || /^\s*[─-]{3}/.test(r)) break;
-				continuation++;
-				// Never under the mark: the mark columns are blank. (Ink may keep one
-				// space of the wrapped words, so the text starts at the column or one past it.)
-				expect(r.slice(0, textCol).trim()).toBe("");
-				expect(r.search(/\S/)).toBeGreaterThanOrEqual(textCol);
-				expect(r.search(/\S/)).toBeLessThanOrEqual(textCol + 1);
+			for (const mark of ["+", "-"]) {
+				const first = rows.findIndex((r) => new RegExp(`^\\s*\\${mark} word`).test(r));
+				expect(first).toBeGreaterThan(-1);
+				const textCol = rows[first].indexOf("word");
+				const pieces = [rows[first].slice(textCol)];
+				for (let i = first + 1; i < rows.length; i++) {
+					const r = rows[i];
+					if (!/\S/.test(r) || /[+-] word|^\s*─/.test(r)) break;
+					// Same column as row one, not one past it, and nothing under the mark.
+					expect(r.slice(0, textCol).trim()).toBe("");
+					expect(r[textCol]).not.toBe(" ");
+					pieces.push(r.slice(textCol));
+				}
+				if (cols < 160) expect(pieces.length).toBeGreaterThan(1);
+				// Joined, the rows are the source minus the single space at each break.
+				expect(pieces.join(" ")).toBe(long);
 			}
-			expect(continuation).toBeGreaterThan(0);
 		});
 	}
 
-	test("the row estimate holds with the mark column", () => {
+	test("a leading indent stays on the first row only; a long token is hard-broken", () => {
+		expect(wrapDiffText("    const a = 1; const b = 2;", 20)).toEqual(["    const a = 1;", "const b = 2;"]);
+		expect(wrapDiffText("x".repeat(25), 10)).toEqual(["x".repeat(10), "x".repeat(10), "x".repeat(5)]);
+		expect(wrapDiffText("ab cd", 5)).toEqual(["ab cd"]);
+		expect(wrapDiffText("abc def", 3)).toEqual(["abc", "def"]);
+		expect(wrapDiffText("", 10)).toEqual([""]);
+	});
+
+	test("the row estimate equals the rows drawn", () => {
 		for (const cols of [40, 52, 160]) {
 			const drawn = plain(draw(text, cols)).split("\n");
-			const used = drawn.length - drawn.slice().reverse().findIndex((r) => /\S/.test(r)) ;
-			const est = estimateMessageRowsForTest(diffMsg(text), cols - 4);
-			// The estimate is a budget: never short of what is drawn, and not far over.
-			expect(est).toBeGreaterThanOrEqual(used - 1);
-			expect(est).toBeLessThanOrEqual(used + 3);
+			const used = drawn.length - drawn.slice().reverse().findIndex((r) => /\S/.test(r));
+			const wrap = bubbleWidths(cols - 4, "system").wrap;
+			const est = estimateMessageRowsForTest(diffMsg(text), wrap);
+			// The diff rows, two rule rows and the margin row: the margin is blank, so not in `used`.
+			expect(diffRowCount(text, wrap) + 2).toBe(used);
+			expect(est).toBe(used + 1);
 		}
 	});
 });
@@ -112,5 +124,18 @@ describe("the header", () => {
 
 	test("a row that merely starts with 'diff' inside a file is not a header", () => {
 		expect(diffRows("+diff a.ts  +1 -1")[0]?.kind).toBe("add");
+	});
+});
+
+describe("a long path keeps the stats beside it", () => {
+	test("+N -M stay on the first row of the path, never on their own row", () => {
+		const path = `${"dir/".repeat(14)}file.ts`;
+		for (const cols of [40, 52]) {
+			const rows = plain(draw(`diff ${path}  +12 -3\n@@ -1 +1 @@\n+x`, cols)).split("\n");
+			const withStats = rows.filter((r) => /\+12 -3/.test(r));
+			expect(withStats).toHaveLength(1);
+			expect(withStats[0]).toContain("diff dir/");
+			expect(rows.filter((r) => /^\s*\+12 -3\s*$/.test(r))).toHaveLength(0);
+		}
 	});
 });

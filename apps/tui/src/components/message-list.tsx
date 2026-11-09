@@ -49,7 +49,7 @@ import {
 } from "../lib/inline-markdown.js";
 import { type MarkStream, holdLivingMark } from "../lib/living-mark.js";
 import { motionEnabled } from "../lib/motion.js";
-import { DIFF_MARK_COLS, diffRowCount, diffRows, isDiffText } from "../lib/session-changes.js";
+import { DIFF_MARK_COLS, diffLayout, diffRowCount, isDiffText } from "../lib/session-changes.js";
 import { wrapNotice } from "../lib/notice-wrap.js";
 import { drawsColour, glyphs } from "../lib/term-caps.js";
 import { useToolOutputVersion } from "../lib/tool-output-state.js";
@@ -258,7 +258,7 @@ function estimateMessageRows(
 	if (message.role === "system" && isDiffText(message.content) && message.content.includes("\n")) {
 		// Rows as DiffText draws them (mark column beside the text), inside the
 		// padded, ruled block every multi-line system message gets.
-		return diffRowCount(message.content, Math.max(1, w - 1)) + 2 + 1;
+		return diffRowCount(message.content, w) + 2 + 1;
 	}
 	if (message.role === "system") {
 		if (!message.content.includes("\n") && message.content.length > Math.max(20, wrapWidth - 10)) {
@@ -786,7 +786,7 @@ function MessageItem({
 			return fadeWrap(
 				<Box flexDirection="column" marginBottom={1} paddingLeft={1}>
 					<Text dimColor>{"─".repeat(3)}</Text>
-					<SystemMessageText content={message.content} />
+					<SystemMessageText content={message.content} width={textWrapWidth} />
 					<Text dimColor>{"─".repeat(3)}</Text>
 				</Box>,
 			);
@@ -1132,23 +1132,32 @@ function InlineSpans({
 }
 
 /**
- * A diff from SessionChanges. The +/- mark sits in its own two-column Box with
- * the text beside it, so a wrapped row keeps its text clear of the mark. The
- * header is the first thing read: bold primary text, +N green, -N red.
+ * A diff from SessionChanges. Rows are wrapped by diffLayout, not by Ink: Ink
+ * keeps the space at a break, so wrapped rows started at alternating columns.
+ * Each row is one truncating Text beside a 2-column mark Box, so continuation
+ * rows stay aligned and the count the chat budgets for is the count drawn. The
+ * header is bold primary text with +N green and -M red, the stats in a Box that
+ * never shrinks so a long path cannot push them onto their own rows.
  */
-function DiffText({ content }: { content: string }) {
+function DiffText({ content, width }: { content: string; width: number }) {
 	return (
 		<Box flexDirection="column">
-			{diffRows(content).map((row, i) => {
+			{diffLayout(content, width).map((row, i) => {
 				if (row.kind === "header") {
 					return (
-						<Text key={i} wrap="wrap">
-							<Text bold color={t.textPrimary}>
-								{row.text}
-							</Text>
-							<Text color={t.green}> {row.added}</Text>
-							<Text color={t.red}> {row.removed}</Text>
-						</Text>
+						<Box key={i} flexDirection="row">
+							<Box flexShrink={1}>
+								<Text bold color={t.textPrimary} wrap="truncate">
+									{row.text}
+								</Text>
+							</Box>
+							{row.first ? (
+								<Box flexShrink={0}>
+									<Text color={t.green}> {row.added}</Text>
+									<Text color={t.red}> {row.removed}</Text>
+								</Box>
+							) : null}
+						</Box>
 					);
 				}
 				const colour = row.kind === "add" ? t.green : row.kind === "del" ? t.red : undefined;
@@ -1157,15 +1166,13 @@ function DiffText({ content }: { content: string }) {
 						<Box width={DIFF_MARK_COLS} flexShrink={0}>
 							{colour ? <Text color={colour}>{row.mark}</Text> : <Text> </Text>}
 						</Box>
-						<Box flexGrow={1} flexShrink={1}>
-							{colour ? (
-								<Text color={colour} wrap="wrap">
-									{row.text}
-								</Text>
-							) : (
-								<MutedText>{row.text}</MutedText>
-							)}
-						</Box>
+						{colour ? (
+							<Text color={colour} wrap="truncate">
+								{row.text}
+							</Text>
+						) : (
+							<MutedText wrap="truncate">{row.text}</MutedText>
+						)}
 					</Box>
 				);
 			})}
@@ -1173,9 +1180,10 @@ function DiffText({ content }: { content: string }) {
 	);
 }
 
-function SystemMessageText({ content }: { content: string }) {
+function SystemMessageText({ content, width }: { content: string; width?: number }) {
 	// System messages are structured (commands, help) — never bionic them
-	if (isDiffText(content) && content.includes("\n")) return <DiffText content={content} />;
+	if (width !== undefined && isDiffText(content) && content.includes("\n"))
+		return <DiffText content={content} width={width} />;
 	return <MutedText>{content}</MutedText>;
 }
 
