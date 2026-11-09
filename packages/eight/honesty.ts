@@ -177,12 +177,19 @@ const exitedNonZero = (e: ToolLedgerEntry) => /^Exit code (?!0\b)/.test(e.result
 
 // ── Repo state ───────────────────────────────────────────────────────────────
 //
-// Whether a commit or push HAPPENED is read from the repository, never from
-// output text or from how the shell line is parsed (eight rounds of review
-// found a new trick each time: pipes, flags, brace expansion, grep file
-// options, aliases, scripts, variables). In the turn's own directory the HEAD
-// reflog alone decides. The command text is used for one thing only: to add
-// other directories to check (`-C <dir>`, a leading `cd <dir>`).
+// When the repository can be read, whether a commit or push HAPPENED is read
+// from it, not from output text or from how the shell line is parsed (eight
+// rounds of review found a new trick each time: pipes, flags, brace expansion,
+// grep file options, aliases, scripts, variables).
+// - Commit: in the turn's own directory the HEAD reflog alone decides.
+// - Push: the reflog of the upstream ref pinned at turn start decides.
+// - With a readable repository, command text only adds other directories to
+//   check (`-C <dir>`, a leading `cd <dir>`).
+// Two fallbacks still rest on the tool ledger, because there is no reflog to
+// read: with no repository state at all, a `git_commit` call, or a plain,
+// unpiped, unchained shell `git commit` that exited 0 (see plainGit), backs a
+// commit claim; and with no upstream at the start or end of the turn, a
+// `git_push` call or the same kind of plain `git push` backs a push claim.
 
 /** What the repo looked like at one instant. All local reads; nothing touches the network. */
 export interface RepoSnapshot {
@@ -410,7 +417,8 @@ function judge(
  *   `git update-ref -m "commit: x" HEAD HEAD`, reads as a commit. The gate
  *   catches a model that says more than it did; it is not a defence against
  *   one that forges the repository's own record.
- * - A sibling worktree has its own HEAD reflog, so a commit there backs nothing here.
+ * - A sibling worktree has its own HEAD reflog, so a commit there backs nothing here,
+ *   unless the command names that worktree with `-C` or a leading `cd`.
  */
 function commitEvidence(ledger: readonly ToolLedgerEntry[], repo: RepoDelta): Evidence {
 	return judge(ledger, repo, COMMIT_CMD, (dir) => {
