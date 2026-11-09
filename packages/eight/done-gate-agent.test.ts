@@ -212,13 +212,13 @@ describe("friction record (#4511), text-tool path", () => {
 			readdirSync(dir)
 				.filter((f) => f.endsWith(".jsonl"))
 				.some((f) => readFileSync(join(dir, f), "utf8").includes('"type":"session_end"'));
-		let endAtFirstAwait: boolean | null = null;
+		const seen: { endAtFirstAwait: boolean | null } = { endAtFirstAwait: null };
 		(
 			agent as unknown as { sessionSync: { endSession: () => Promise<void> } }
 		).sessionSync.endSession = async () => {
-			endAtFirstAwait = sawEnd();
+			seen.endAtFirstAwait = sawEnd();
 		};
 		await agent.cleanup();
-		expect(endAtFirstAwait).toBe(true);
+		expect(seen.endAtFirstAwait).toBe(true);
 	}, 60_000);
 });
