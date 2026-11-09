@@ -356,6 +356,33 @@ describe("real commits and pushes are backed", () => {
 		expect(push("git push origin main | wc -l && echo ok", "ok")).toHaveLength(1);
 	});
 
+	it("backslash-newline cannot hide a dry run (8SO)", () => {
+		expect(push("git push origin main \\\n--dry-run")).toHaveLength(1);
+		expect(push("git push origin main \\\n-n")).toHaveLength(1);
+		expect(push('git push origin main "--dry\\\n-run"')).toHaveLength(1);
+		// A plain continuation is still a real push.
+		expect(push("git push origin \\\nmain")).toEqual([]);
+	});
+
+	it("grep options that read files are not a pipe sink (8SO)", () => {
+		const out = "To github.com:o/r.git\n   a1b2c3d..c2d4e5f  main -> main";
+		for (const g of ["-R", "-rn", "--dereference-recursive", "-drecurse", "--directories=recurse", "-f /tmp/x", "--recursive"]) {
+			expect(push(`git push origin main 2>&1 | grep ${g} main`, out)).toHaveLength(1);
+		}
+		expect(push("git push origin main 2>&1 | grep main", out)).toEqual([]);
+	});
+
+	it("cut rewrites output, so it is not a pipe sink (8SO)", () => {
+		const out = "To github.com:o/r.git\n   a1b2c3d..c2d4e5f  main -> main";
+		expect(push("git push origin main 2>&1 | cut -c1-5", out)).toHaveLength(1);
+	});
+
+	it("a pushed branch named like a failure word is not a failed push", () => {
+		const out = "To github.com:o/r.git\n   a1b2c3d..c2d4e5f  fix/error-handling -> fix/error-handling";
+		expect(push("git push origin fix/error-handling 2>&1 | tail -5", out)).toEqual([]);
+		expect(push("git push origin fix/error-handling 2>&1 | tail -5", `${out}\nerror: hook declined`)).toHaveLength(1);
+	});
+
 	it("'A commit was made' is a claim; one made by someone is not", () => {
 		expect(unbackedActionClaims("A commit was made.", [])).toHaveLength(1);
 		expect(unbackedActionClaims("A new commit was created.", [])).toHaveLength(1);

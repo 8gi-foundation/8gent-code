@@ -184,9 +184,20 @@ function shellChain(command: string): Array<{ seg: string; op: string }> {
 	for (let i = 0; i < text.length; i++) {
 		const ch = text[i];
 		if (quote) {
+			// Inside double quotes bash drops backslash-newline; inside single quotes it stays.
+			if (ch === "\\" && quote === '"' && text[i + 1] === "\n") {
+				i++;
+				continue;
+			}
 			cur += ch;
 			if (ch === "\\" && quote === '"' && i + 1 < text.length) cur += text[++i];
 			else if (ch === quote) quote = "";
+			continue;
+		}
+		// Unquoted backslash-newline is a line continuation: bash removes it, so
+		// `git push \<newline>--dry-run` is one command with a --dry-run argument.
+		if (ch === "\\" && text[i + 1] === "\n") {
+			i++;
 			continue;
 		}
 		if (ch === "\\" && i + 1 < text.length) {
@@ -243,7 +254,9 @@ function shellWords(s: string): ShellWord[] {
 	};
 	for (let i = 0; i < s.length; i++) {
 		const ch = s[i];
-		if (quote) {
+		if (ch === "\\" && quote !== "'" && s[i + 1] === "\n") {
+			i++; // line continuation: bash drops backslash-newline outside single quotes
+		} else if (quote) {
 			if (ch === quote) quote = "";
 			else if (ch === "\\" && quote === '"' && i + 1 < s.length) cur += s[++i];
 			else {
@@ -355,7 +368,8 @@ function shellGit(command: unknown, sub: string): boolean {
 /** What git prints for a ref it moved, at the start of a line: `   abc1234..def5678  main -> main`, ` * [new branch]`. */
 const PUSHED_REF =
 	/(?:^[ \t]*[+*=\-]?[ \t]*[0-9a-f]{7,}\.\.\.?[0-9a-f]{7,}[ \t]+\S+[ \t]+->[ \t]+\S+|^[ \t]*\*[ \t]+\[new (?:branch|tag)\])/m;
-const PUSH_FAILED = /\b(?:error|fatal|rejected|denied|failed)\b/i;
+/** Failure is read at the start of a line (`error:`, `fatal:`, ` ! [rejected]`), never inside a ref name like fix/error-handling. */
+const PUSH_FAILED = /^(?:[ \t]*! \[|(?:remote: )?(?:error|fatal):)/im;
 /** What `git commit` echoes of its own: `[main 1a2b3c4] <subject>` and the `create mode` lines. */
 const COMMIT_ECHO = /^(?:\[[^\]\n]+ [0-9a-f]{7,}\].*|[ \t]*(?:create|delete|rename|copy|mode change).*)$/gm;
 
@@ -396,10 +410,17 @@ function isPipeSink(seg: string): boolean {
 	if (cmd === "cat") return words.length === 1;
 	if (cmd === "tail" || cmd === "head") return sinkOperands(words, "nc") === 0;
 	if (cmd === "less" || cmd === "more") return sinkOperands(words, "") === 0;
-	if (cmd === "cut") return sinkOperands(words, "fdcb") === 0;
 	if (cmd === "tee") return true;
 	if (cmd === "grep") {
-		if (words.some((w) => /^-[A-Za-z]*[fr]/.test(w) || w === "--file" || w === "--recursive")) return false;
+		// Any option that reads files (-f, -r, -R, -d recurse, --directories=recurse and their
+		// long forms or abbreviations) lets the command print its own "evidence".
+		const readsFiles = (w: string) => {
+			if (/^-[A-Za-z]*[frRd]/.test(w) && !w.startsWith("--")) return true;
+			if (!w.startsWith("--")) return false;
+			const long = w.slice(2).split("=")[0];
+			return long.length > 0 && ["file", "recursive", "dereference-recursive", "directories"].some((n) => n.startsWith(long));
+		};
+		if (words.some(readsFiles)) return false;
 		const hasE = words.some((w) => /^-[A-Za-z]*e/.test(w) || w === "--regexp");
 		return sinkOperands(words, "eAmBC") === (hasE ? 0 : 1);
 	}
