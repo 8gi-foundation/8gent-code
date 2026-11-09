@@ -80,6 +80,21 @@ export function finish(code = 0): Promise<never> {
 	});
 }
 
+/**
+ * Let React's passive effects run. Ink writes a frame in the commit, but a
+ * component subscribes to stdin (useInput) in an effect, which flushes a turn
+ * later. A key fed in that gap reaches no subscriber and is dropped. On a fast
+ * host the poll that sees the frame lands after the flush; on 8gi-ci-1 it landed
+ * 1 ms before it (picker mounted at +1 ms, feed at +0). Turns, not a time pause:
+ * the flush is one event-loop turn however loaded the host is.
+ */
+export async function settle() {
+	for (let i = 0; i < 3; i++) {
+		await new Promise((r) => setImmediate(r));
+		await tick(0);
+	}
+}
+
 export async function waitFor(check: () => boolean, label: string, timeoutMs = 20000) {
 	// performance.now, not Date.now: a harness may freeze Date.now to a coarse
 	// clock (once-notices does, to minute resolution). Timed by it, a minute

@@ -2,7 +2,7 @@
  * #4720 harness: the /provider picker on a narrow terminal. Selecting a provider
  * must close the picker, and with no model pinned the model list opens once.
  */
-import { bootApp, strip, tick, waitFor } from "./app-driver.js";
+import { bootApp, settle, strip, tick, waitFor } from "./app-driver.js";
 
 async function main() {
 	const cols = Number(process.env.HARNESS_COLS ?? 52);
@@ -12,6 +12,9 @@ async function main() {
 	});
 	const m = await app.submit("/provider");
 	await waitFor(() => app.since(m).includes("Select Provider"), "picker opens", 15000);
+	// Drawn is not listening: the picker subscribes to keys in an effect that runs a
+	// turn after its frame is written. Feed before that and the filter is dropped.
+	await settle();
 	const opened = app.since(m);
 	// Filter to the one row, then Enter.
 	const f = app.mark();
