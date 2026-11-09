@@ -20,6 +20,8 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 import { isTestRun } from "./test-claim-gate";
 
 /** One tool call made during the current turn. */
@@ -182,11 +184,21 @@ const exitedNonZero = (e: ToolLedgerEntry) => /^Exit code (?!0\b)/.test(e.result
 
 /** What the repo looked like at one instant. All local reads; nothing touches the network. */
 export interface RepoSnapshot {
+	/** Directory the snapshot was read from. */
+	cwd: string;
+	/** Epoch ms when it was taken: the start of the turn, for other directories' reflogs. */
+	since: number;
 	head: string;
 	/** `@{u}`, when the branch tracks one. */
 	upstream?: string;
+	/** `@{u}` as a ref NAME (refs/remotes/origin/feat2), pinned so a later checkout cannot swap it. */
+	upstreamRef?: string;
 	/** HEAD is an ancestor of (or equal to) `@{u}`. */
 	headInUpstream: boolean;
+	/** Entries in the HEAD reflog now, so entries beyond it are this turn's. */
+	headReflog: number;
+	/** Entries in the pinned upstream ref's reflog. */
+	upstreamReflog: number;
 }
 
 /** The repo at the start of the turn and at its end. `null` = could not be read (no repo). */
@@ -209,14 +221,47 @@ function git(cwd: string, args: string[]): string | undefined {
 	}
 }
 
-/** `git rev-parse` and `merge-base` only. Null outside a repo or before the first commit. */
+interface ReflogEntry {
+	/** The sha the ref moved to. */
+	sha: string;
+	/** "commit: msg", "commit (amend): msg", "update by push", "pull: ...", "checkout: ...". */
+	subject: string;
+	/** Epoch seconds. */
+	ts: number;
+}
+
+/** A ref's reflog, newest first. Undefined when git cannot read it. Local only. */
+function readReflog(cwd: string, ref: string): ReflogEntry[] | undefined {
+	const out = git(cwd, ["reflog", "show", "--date=unix", "--format=%H%x09%gs%x09%gd", ref, "--"]);
+	if (out === undefined) return undefined;
+	return out
+		.split("\n")
+		.filter(Boolean)
+		.map((line) => {
+			const [sha = "", subject = "", sel = ""] = line.split("\t");
+			return { sha, subject, ts: Number(/@\{(\d+)\}$/.exec(sel)?.[1] ?? 0) };
+		});
+}
+
+/** `git rev-parse`, `merge-base` and `reflog show` only. Null outside a repo or before the first commit. */
 export function readRepoSnapshot(cwd: string): RepoSnapshot | null {
+	const since = Date.now();
 	const head = git(cwd, ["rev-parse", "HEAD"]);
 	if (!head) return null;
 	const upstream = git(cwd, ["rev-parse", "@{u}"]);
+	const upstreamRef = upstream ? git(cwd, ["rev-parse", "--symbolic-full-name", "@{u}"]) : undefined;
 	const headInUpstream =
 		upstream !== undefined && git(cwd, ["merge-base", "--is-ancestor", "HEAD", "@{u}"]) !== undefined;
-	return { head, upstream, headInUpstream };
+	return {
+		cwd,
+		since,
+		head,
+		upstream,
+		upstreamRef,
+		headInUpstream,
+		headReflog: readReflog(cwd, "HEAD")?.length ?? 0,
+		upstreamReflog: upstreamRef ? (readReflog(cwd, upstreamRef)?.length ?? 0) : 0,
+	};
 }
 
 const COMMIT_CMD = /\bgit(?:\s+(?:-[cC]\s+\S+|--[\w-]+(?:=\S+)?))*\s+commit\b/;
@@ -249,19 +294,165 @@ function commitAttempted(ledger: readonly ToolLedgerEntry[]): boolean {
 	return ledger.some((e) => (e.success && e.name === "git_commit") || mentions(e, COMMIT_CMD));
 }
 
-function commitBacked(ledger: readonly ToolLedgerEntry[], repo?: RepoDelta): boolean {
-	if (repo?.after) return commitAttempted(ledger) && repo.before?.head !== repo.after.head;
-	return ledger.some((e) => ran(e) && (e.name === "git_commit" || plainGit(e, "commit")));
-}
-
 function pushAttempted(ledger: readonly ToolLedgerEntry[]): boolean {
 	return ledger.some((e) => (e.success && e.name === "git_push") || mentions(e, PUSH_CMD));
 }
 
+// ── Where the command ran ────────────────────────────────────────────────────
+//
+// `git -C <dir> commit` and `cd <dir> && git commit` act on another repository.
+// Only that repository can say whether the commit or push happened.
+
+const SHELL_UNSAFE = /["'\\$`~{}*?()<>|&;!#]/;
+
+/** Directories the command may have run in. `unresolved` = some segment could not be resolved to a path. */
+function commandDirs(
+	command: string,
+	cwd: string,
+	sub: RegExp,
+): { dirs: string[]; unresolved: boolean } {
+	const segments = command.replace(/\\\n/g, " ").split(/&&|\|\||;|\n/);
+	let dir = cwd;
+	let unresolved = false;
+	const dirs: string[] = [];
+	for (const seg of segments) {
+		const cd = /^\s*cd\s+(\S+)\s*$/.exec(seg);
+		if (cd) {
+			if (SHELL_UNSAFE.test(cd[1] as string)) unresolved = true;
+			else dir = resolvePath(dir, cd[1] as string);
+			continue;
+		}
+		const m = sub.exec(seg);
+		if (!m) continue;
+		let target = dir;
+		for (const c of m[0].matchAll(/(?:^|\s)-C(?:\s+|=)?(\S+)/g)) {
+			if (SHELL_UNSAFE.test(c[1] as string)) unresolved = true;
+			else target = resolvePath(target, c[1] as string);
+		}
+		dirs.push(target);
+	}
+	// A segment such as `cd "$X"` or `-C "$REPO"` we could not read: the real target is unknown.
+	if (/\bcd\s+["'$`~]|-C\s*["'$`~]/.test(command)) unresolved = true;
+	return { dirs, unresolved };
+}
+
+const sameDir = (a: string, b: string) => {
+	try {
+		return realpathSync(a) === realpathSync(b);
+	} catch {
+		return a === b;
+	}
+};
+
+interface Evidence {
+	/** Proven by a reflog entry. */
+	backed: boolean;
+	/** At least one repository could not be read or resolved: absence proves nothing. */
+	unconfirmed: boolean;
+	/** Reflog commit entries were written this turn but none is reachable from HEAD any more. */
+	removed: boolean;
+	/** The reflog is switched off in a repository that was checked. */
+	reflogOff: boolean;
+	/** A directory other than the turn's own was checked, so the turn's HEAD says nothing about it. */
+	elsewhere: boolean;
+}
+
+const reflogDisabled = (dir: string) => {
+	const v = git(dir, ["config", "--get", "core.logAllRefUpdates"])?.toLowerCase();
+	if (v && ["false", "no", "off", "0", "never"].includes(v)) return true;
+	return (readReflog(dir, "HEAD")?.length ?? 0) === 0;
+};
+
+/** The reflog entries a repo gained this turn: counted from the snapshot in the turn's own directory, by time elsewhere. */
+function entriesSince(dir: string, ref: string, repo: RepoDelta): ReflogEntry[] | undefined {
+	const all = readReflog(dir, ref);
+	const before = repo.before;
+	if (!all || !before) return undefined;
+	const counted = ref === "HEAD" || ref === before.upstreamRef;
+	if (counted && sameDir(dir, before.cwd)) {
+		const count = ref === "HEAD" ? before.headReflog : before.upstreamReflog;
+		return all.slice(0, Math.max(0, all.length - count));
+	}
+	// Reflog stamps are whole seconds, so an entry from the same second as the turn's start counts as the turn's.
+	const floor = Math.floor(before.since / 1000);
+	return all.filter((e) => e.ts >= floor);
+}
+
+function judge(
+	ledger: readonly ToolLedgerEntry[],
+	repo: RepoDelta,
+	sub: RegExp,
+	read: (dir: string) => Partial<Evidence>,
+): Evidence {
+	const cwd = repo.before?.cwd ?? repo.after?.cwd;
+	const ev: Evidence = { backed: false, unconfirmed: false, removed: false, reflogOff: false, elsewhere: false };
+	if (!cwd) return { ...ev, unconfirmed: true };
+	const dirs = new Set<string>([cwd]);
+	for (const e of ledger) {
+		if (e.name !== "run_command" || typeof e.args?.command !== "string" || !sub.test(e.args.command)) continue;
+		const found = commandDirs(e.args.command, cwd, sub);
+		if (found.unresolved) ev.unconfirmed = true;
+		for (const d of found.dirs) dirs.add(d);
+	}
+	for (const dir of dirs) {
+		if (!sameDir(dir, cwd)) ev.elsewhere = true;
+		const r = read(dir);
+		if (r.backed) ev.backed = true;
+		if (r.unconfirmed) ev.unconfirmed = true;
+		if (r.removed) ev.removed = true;
+		if (r.reflogOff) ev.reflogOff = true;
+	}
+	return ev;
+}
+
+function commitEvidence(ledger: readonly ToolLedgerEntry[], repo: RepoDelta): Evidence {
+	return judge(ledger, repo, COMMIT_CMD, (dir) => {
+		const entries = entriesSince(dir, "HEAD", repo);
+		if (!entries) return { unconfirmed: true };
+		const commits = entries.filter((e) => e.subject.startsWith("commit"));
+		const alive = commits.some(
+			(e) => git(dir, ["merge-base", "--is-ancestor", e.sha, "HEAD"]) !== undefined,
+		);
+		if (alive) return { backed: true };
+		if (commits.length > 0) return { removed: true };
+		if (reflogDisabled(dir)) return { unconfirmed: true, reflogOff: true };
+		return {};
+	});
+}
+
+function pushEvidence(ledger: readonly ToolLedgerEntry[], repo: RepoDelta): Evidence {
+	return judge(ledger, repo, PUSH_CMD, (dir) => {
+		// The turn's own directory reads the ref pinned at turn start, never the @{u} of whatever
+		// branch a later checkout left. Elsewhere, and when nothing was pinned, the current upstream.
+		const refs = new Set<string>();
+		const pinned = repo.before && sameDir(dir, repo.before.cwd) ? repo.before.upstreamRef : undefined;
+		if (pinned) refs.add(pinned);
+		else {
+			const end = git(dir, ["rev-parse", "--symbolic-full-name", "@{u}"]);
+			if (end) refs.add(end);
+		}
+		if (refs.size === 0) return { unconfirmed: true };
+		let pushed = false;
+		for (const ref of refs) {
+			const entries = entriesSince(dir, ref, repo);
+			if (!entries) continue;
+			if (entries.some((e) => e.subject === "update by push")) pushed = true;
+		}
+		if (pushed) return { backed: true };
+		if (reflogDisabled(dir)) return { unconfirmed: true, reflogOff: true };
+		return {};
+	});
+}
+
+function commitBacked(ledger: readonly ToolLedgerEntry[], repo?: RepoDelta): boolean {
+	if (repo?.after) return commitAttempted(ledger) && commitEvidence(ledger, repo).backed;
+	return ledger.some((e) => ran(e) && (e.name === "git_commit" || plainGit(e, "commit")));
+}
+
 function pushBacked(ledger: readonly ToolLedgerEntry[], repo?: RepoDelta): boolean {
 	const after = repo?.after;
-	if (after?.upstream)
-		return pushAttempted(ledger) && after.headInUpstream && repo?.before?.upstream !== after.upstream;
+	if (after?.upstream || repo?.before?.upstreamRef)
+		return pushAttempted(ledger) && pushEvidence(ledger, repo as RepoDelta).backed;
 	return ledger.some((e) => ran(e) && (e.name === "git_push" || plainGit(e, "push")));
 }
 
@@ -272,23 +463,34 @@ const ACTION_CLAIMS: readonly ActionClaim[] = [
 		kind: "commit",
 		says: /\b(?:committed|(?:created|made)\s+(?:the\s+|a\s+|that\s+)?commit|commit\s+(?:is\s+|was\s+)?(?:created|made|done|complete))\b/i,
 		backed: commitBacked,
-		note: (ledger, repo) =>
-			!commitAttempted(ledger)
-				? "No commit was made: no git commit ran this turn."
-				: repo?.after
-					? "No commit was made: HEAD did not change this turn."
-					: `Could not confirm a commit: ${UNREADABLE}.`,
+		note: (ledger, repo) => {
+			if (!commitAttempted(ledger)) return "No commit was made: no git commit ran this turn.";
+			if (!repo?.after) return `Could not confirm a commit: ${UNREADABLE}.`;
+			const ev = commitEvidence(ledger, repo);
+			if (ev.reflogOff)
+				return "Could not confirm a commit: the repository keeps no reflog (core.logAllRefUpdates is off).";
+			if (ev.unconfirmed) return "Could not confirm a commit: the directory it ran in could not be checked.";
+			if (ev.removed) return "No new commit remains: the commit made this turn is no longer in HEAD.";
+			return !ev.elsewhere && repo.before?.head === repo.after.head
+				? "No commit was made: HEAD did not change this turn."
+				: "No commit was made: no commit was recorded in the repository this turn.";
+		},
 	},
 	{
 		kind: "push",
 		says: /\b(?:pushed|push\s+(?:is\s+|was\s+)?(?:done|complete|succeeded))\b/i,
 		backed: pushBacked,
-		note: (ledger, repo) =>
-			!pushAttempted(ledger)
-				? "Nothing was pushed: no git push ran this turn."
-				: repo?.after?.upstream
-					? "Could not confirm a push: the upstream branch did not move to include HEAD this turn."
-					: `Could not confirm a push: ${UNREADABLE}.`,
+		note: (ledger, repo) => {
+			if (!pushAttempted(ledger)) return "Nothing was pushed: no git push ran this turn.";
+			if (!repo?.after?.upstream && !repo?.before?.upstreamRef)
+				return `Could not confirm a push: ${UNREADABLE}.`;
+			const ev = pushEvidence(ledger, repo);
+			if (ev.reflogOff)
+				return "Could not confirm a push: the repository keeps no reflog (core.logAllRefUpdates is off).";
+			if (ev.unconfirmed)
+				return "Could not confirm a push: the directory it ran in could not be checked.";
+			return "Could not confirm a push: the upstream branch did not move to include HEAD this turn.";
+		},
 	},
 	{
 		kind: "tests",

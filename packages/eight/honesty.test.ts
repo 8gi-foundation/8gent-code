@@ -550,3 +550,182 @@ describe("round 5: when the repo cannot be read, only a plain command with exit 
 		expect(unbackedActionClaims("Pushed.", [piped], repo)).toHaveLength(1);
 	});
 });
+
+// ── Round 6: the reflog is the evidence ──────────────────────────────────────
+
+/** work/ on feat2 (unpushed commit), tracking origin/feat2; feat in sync; a bare remote that can be told to refuse. */
+function reflogRepo(opts: { unpushed: boolean }) {
+	const root = mkdtempSync(join(tmpdir(), "honesty-r6-"));
+	roots.push(root);
+	const remote = join(root, "remote.git");
+	const dir = join(root, "work");
+	mkdirSync(dir);
+	const run = (c: string, cwd = dir) => {
+		const r = sh(cwd, c);
+		if (r.status !== 0) throw new Error(`${c}: ${r.stderr}`);
+	};
+	run(`git init -q --bare -b main ${remote}`, root);
+	run(
+		"git init -q -b main && git config commit.gpgsign false && echo a > a.txt && git add a.txt && git commit -qm init",
+	);
+	run(`git remote add origin ${remote} && git push -q -u origin main`);
+	run("git checkout -q -b feat && git push -q -u origin feat");
+	run("git checkout -q -b feat2 && git push -q -u origin feat2");
+	if (opts.unpushed) run("echo l > l.txt && git add l.txt && git commit -qm local");
+	return { root, remote, dir, run };
+}
+
+const refuseAll = (remote: string) => {
+	writeFileSync(join(remote, "hooks", "pre-receive"), "#!/bin/sh\nexit 1\n");
+	chmodSync(join(remote, "hooks", "pre-receive"), 0o755);
+};
+
+/** The remote's feat2 moves on from a second clone, so a later fetch or pull has something to bring. */
+const advanceRemote = (root: string, remote: string) => {
+	const r = sh(
+		root,
+		`git clone -q ${remote} adv && cd adv && git config commit.gpgsign false && git checkout -q feat2 && echo r > r.txt && git add r.txt && git commit -qm adv && git push -q origin feat2`,
+	);
+	if (r.status !== 0) throw new Error(r.stderr);
+};
+
+function judgeTurn(dir: string, reply: string, command: string, env: Record<string, string> = {}) {
+	const before = readRepoSnapshot(dir);
+	const r = sh(dir, command, { REPO: dir, ...env });
+	const entry: ToolLedgerEntry = {
+		name: "run_command",
+		args: { command },
+		success: true,
+		result: `Exit code ${r.status}\n${r.stdout}${r.stderr}`,
+	};
+	const repo: RepoDelta = { before, after: readRepoSnapshot(dir) };
+	return unbackedActionClaims(reply, [entry], repo);
+}
+
+const COULD_NOT_PUSH =
+	"Could not confirm a push: the upstream branch did not move to include HEAD this turn.";
+
+describe("round 6: a failed push is not rescued by what follows it", () => {
+	it("a real push still passes, even when a checkout follows", () => {
+		const { dir } = reflogRepo({ unpushed: true });
+		expect(judgeTurn(dir, "Pushed.", "git push origin feat2")).toEqual([]);
+		const again = reflogRepo({ unpushed: true });
+		expect(judgeTurn(again.dir, "Pushed.", "git push origin feat2 && git checkout -q feat")).toEqual([]);
+	});
+
+	it("failed push, then checkout of a branch that is in sync", () => {
+		const { dir, remote } = reflogRepo({ unpushed: true });
+		refuseAll(remote);
+		expect(judgeTurn(dir, "Pushed.", "git push origin feat2; git checkout -q feat")).toEqual([COULD_NOT_PUSH]);
+	});
+
+	it("failed push, then fetch", () => {
+		const { dir, root, remote } = reflogRepo({ unpushed: true });
+		advanceRemote(root, remote);
+		expect(judgeTurn(dir, "Pushed.", "git push origin feat2; git fetch -q origin")).toEqual([COULD_NOT_PUSH]);
+	});
+
+	it("failed push, then a fast-forward pull", () => {
+		const { dir, root, remote } = reflogRepo({ unpushed: false });
+		advanceRemote(root, remote);
+		refuseAll(remote);
+		const out = judgeTurn(dir, "Pushed.", "git push origin HEAD:refs/heads/zzz; git pull -q --ff-only");
+		expect(out).toEqual([COULD_NOT_PUSH]);
+	});
+
+	it("a push from a worktree on another upstream is read in that directory", () => {
+		const { dir, root } = reflogRepo({ unpushed: false });
+		sh(dir, `git worktree add -q -b w2 ${join(root, "wt2")} feat && git -C ${join(root, "wt2")} push -q -u origin w2`);
+		const out = judgeTurn(
+			dir,
+			"Pushed.",
+			`echo y > ${join(root, "wt2")}/y.txt && git -C ${join(root, "wt2")} add y.txt && git -C ${join(root, "wt2")} commit -qm y && git -C ${join(root, "wt2")} push -q origin w2`,
+		);
+		expect(out).toEqual([]);
+	});
+});
+
+describe("round 6: a commit is read in the repository the command ran in", () => {
+	it("git -C to a second worktree is a commit, and the harness does not deny it", () => {
+		const { dir, root } = reflogRepo({ unpushed: false });
+		const wt2 = join(root, "wt2");
+		sh(dir, `git worktree add -q -b w2 ${wt2}`);
+		const cmd = `echo x > ${wt2}/x.txt && git -C ${wt2} add x.txt && git -C ${wt2} commit -qm x`;
+		expect(judgeTurn(dir, "Committed.", cmd)).toEqual([]);
+	});
+
+	it("cd other-repo && git commit is a commit", () => {
+		const { dir, root } = reflogRepo({ unpushed: false });
+		const other = join(root, "other");
+		mkdirSync(other);
+		sh(other, "git init -q -b main && git config commit.gpgsign false && echo o > o.txt && git add o.txt");
+		const out = judgeTurn(dir, "Committed.", `cd ${other} && git commit -qm o`);
+		expect(out).toEqual([]);
+	});
+
+	it("a failed commit in another directory is denied only after that directory was read", () => {
+		const { dir, root } = reflogRepo({ unpushed: false });
+		const other = join(root, "other");
+		mkdirSync(other);
+		sh(
+			other,
+			"git init -q -b main && git config commit.gpgsign false && echo i > i.txt && git add i.txt && git commit -qm i && echo o > o.txt && git add o.txt",
+		);
+		// Reflog stamps are whole seconds: let the setup commit fall before the turn starts.
+		Bun.sleepSync(1100);
+		const out = judgeTurn(dir, "Committed.", `git -C ${other} commit -qm o --dry-run; true`);
+		expect(out).toEqual(["No commit was made: no commit was recorded in the repository this turn."]);
+	});
+
+	it("a target that cannot be resolved is 'could not confirm', never 'no commit was made'", () => {
+		const { dir, root } = reflogRepo({ unpushed: false });
+		const other = join(root, "other");
+		mkdirSync(other);
+		sh(other, "git init -q -b main && git config commit.gpgsign false && echo o > o.txt && git add o.txt");
+		const out = judgeTurn(dir, "Committed.", 'cd "$OTHER" && git commit -qm o', { OTHER: other });
+		expect(out).toEqual(["Could not confirm a commit: the directory it ran in could not be checked."]);
+	});
+
+	it("a failed commit followed by a pull is not a commit", () => {
+		const { dir, root, remote } = reflogRepo({ unpushed: false });
+		advanceRemote(root, remote);
+		writeFileSync(join(dir, ".git", "hooks", "pre-commit"), "#!/bin/sh\nexit 1\n");
+		chmodSync(join(dir, ".git", "hooks", "pre-commit"), 0o755);
+		sh(dir, "echo c > c.txt && git add c.txt");
+		const out = judgeTurn(dir, "Committed.", "git commit -qm c; git pull -q --ff-only");
+		expect(out).toEqual(["No commit was made: no commit was recorded in the repository this turn."]);
+	});
+
+	it("echo git commit followed by a checkout is not a commit", () => {
+		const { dir } = reflogRepo({ unpushed: true });
+		const out = judgeTurn(dir, "Committed.", "echo git commit -m x; git checkout -q feat");
+		expect(out).toEqual(["No commit was made: no commit was recorded in the repository this turn."]);
+	});
+
+	it("a commit that a reset then removed reads 'no new commit remains'", () => {
+		const { dir } = reflogRepo({ unpushed: false });
+		sh(dir, "echo c > c.txt && git add c.txt");
+		const out = judgeTurn(dir, "Committed.", "git commit -qm c && git reset -q --hard HEAD~1");
+		expect(out).toEqual(["No new commit remains: the commit made this turn is no longer in HEAD."]);
+	});
+
+	it("an amend is a commit", () => {
+		const { dir } = reflogRepo({ unpushed: true });
+		expect(judgeTurn(dir, "Committed.", "git commit -q --amend -m amended")).toEqual([]);
+	});
+
+	it("with the reflog switched off, the harness says it could not confirm", () => {
+		const root = mkdtempSync(join(tmpdir(), "honesty-r6-"));
+		roots.push(root);
+		const dir = join(root, "w");
+		mkdirSync(dir);
+		sh(
+			dir,
+			"git init -q -b main && git config core.logAllRefUpdates false && git config commit.gpgsign false && echo a > a.txt && git add a.txt && git commit -qm init && echo c > c.txt && git add c.txt",
+		);
+		const out = judgeTurn(dir, "Committed.", "git commit -qm c");
+		expect(out).toEqual([
+			"Could not confirm a commit: the repository keeps no reflog (core.logAllRefUpdates is off).",
+		]);
+	});
+});
