@@ -65,7 +65,23 @@ export interface SelectInputProps<T = string> {
  * how many option rows fit. A picker taller than the screen lost its bottom
  * border and the frame's corners landed inside the hint line (pilot break 11).
  */
-export const PICKER_CHROME_ROWS = 20;
+export const PICKER_CHROME_ROWS = 23;
+/** Under this many rows the picker drops its description and spacer rows. */
+export const PICKER_COMPACT_BELOW_ROWS = 26;
+/** Under this many columns the long hint (56 cells) no longer fits the card (columns minus 10), so the short form is used. */
+export const PICKER_NARROW_COLUMNS = 66;
+
+export function isCompactPicker(terminalRows: number | undefined): boolean {
+	return !!terminalRows && terminalRows > 0 && terminalRows < PICKER_COMPACT_BELOW_ROWS;
+}
+
+/** The key hint, whole at any width: the short form keeps Cancel and the filter tip. */
+export function pickerHint(columns: number | undefined, searchable: boolean): string {
+	if (columns && columns < PICKER_NARROW_COLUMNS) {
+		return searchable ? "↑↓ Enter Esc  type to filter" : "↑↓ Enter Esc";
+	}
+	return `[↑↓] Navigate [Enter] Select [Esc] Cancel${searchable ? " [type] Filter" : ""}`;
+}
 export const PICKER_MIN_VISIBLE = 3;
 
 export function fitVisible(maxVisible: number, terminalRows: number | undefined): number {
@@ -90,6 +106,7 @@ export function SelectInput<T = string>({
 }: SelectInputProps<T>) {
 	const { stdout } = useStdout();
 	const maxVisible = fitVisible(maxVisibleProp, stdout?.rows);
+	const compact = isCompactPicker(stdout?.rows);
 	const inkHighlight = highlightColor as NonNullable<TextProps["color"]>;
 	// useState here intentionally freezes a value at mount; recomputing per render would break stable references downstream.
 	// react-doctor-disable-next-line react-doctor/no-derived-useState
@@ -190,7 +207,7 @@ export function SelectInput<T = string>({
 		<Card borderColor="blue">
 			{/* Title */}
 			{title && (
-				<Box marginBottom={1}>
+				<Box marginBottom={compact ? 0 : 1}>
 					<Heading color={inkHighlight}>{title}</Heading>
 				</Box>
 			)}
@@ -260,7 +277,7 @@ export function SelectInput<T = string>({
 						</Inline>
 
 						{/* Description (only for selected item) */}
-						{showDescription && isSelected && option.description && (
+						{showDescription && !compact && isSelected && option.description && (
 							<Box paddingLeft={4}>
 								<MutedText wrap="truncate-end">{option.description}</MutedText>
 							</Box>
@@ -286,10 +303,8 @@ export function SelectInput<T = string>({
 			)}
 
 			{/* Help text */}
-			<Box marginTop={1}>
-				<MutedText wrap="truncate-end">
-					[↑↓] Navigate [Enter] Select [Esc] Cancel{searchable ? " [type] Filter" : ""}
-				</MutedText>
+			<Box marginTop={compact ? 0 : 1}>
+				<MutedText wrap="truncate-end">{pickerHint(stdout?.columns, searchable)}</MutedText>
 			</Box>
 		</Card>
 	);

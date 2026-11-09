@@ -9,7 +9,15 @@ import { EventEmitter } from "node:events";
 import { Writable } from "node:stream";
 import { render } from "ink";
 import React from "react";
-import { ModelSelector, PICKER_MIN_VISIBLE, fitVisible } from "../select-input";
+import {
+	ModelSelector,
+	PICKER_CHROME_ROWS,
+	PICKER_MIN_VISIBLE,
+	PICKER_NARROW_COLUMNS,
+	fitVisible,
+	isCompactPicker,
+	pickerHint,
+} from "../select-input";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escapes
 const strip = (s: string) => s.replace(/\u001B\[[0-9;?]*[ -/]*[@-~]/g, "");
@@ -82,33 +90,61 @@ async function lastFrame(cols: number, rows: number): Promise<string[]> {
 describe("fitVisible", () => {
 	test("never exceeds the caller's cap, never drops below the floor", () => {
 		expect(fitVisible(8, 60)).toBe(8);
-		expect(fitVisible(8, 25)).toBe(5);
+		expect(fitVisible(8, 30)).toBe(7);
 		expect(fitVisible(8, 10)).toBe(PICKER_MIN_VISIBLE);
 		expect(fitVisible(8, undefined)).toBe(8);
 	});
 });
 
-describe("model picker at 52 columns", () => {
-	test("every line fits the width and each model is one row", async () => {
-		const lines = await lastFrame(52, 25);
-		const top = lines.map((l) => l.length);
-		expect(Math.max(...top)).toBeLessThanOrEqual(52);
-		const joined = lines.join("\n");
-		// A wrapped hash would leave its tail alone on a row; truncation leaves an ellipsis.
-		expect(joined).toContain("…");
-		expect(joined).not.toMatch(/\n│\s+f293ff425a/);
-		// 4 rows of chrome (border, title, blank, hint) plus the option rows and indicators.
-		expect(lines.length).toBeLessThanOrEqual(25 - 11);
+describe("model picker borders and hint (design fix)", () => {
+	const cases: Array<[number, number]> = [
+		[52, 24],
+		[52, 27],
+		[52, 30],
+		[44, 24],
+	];
+	for (const [cols, rows] of cases) {
+		test(`${cols}x${rows}: fits the rows, keeps the bottom border, whole hint, no wrapped ids`, async () => {
+			const lines = await lastFrame(cols, rows);
+			const text = lines.join("\n");
+			expect(Math.max(...lines.map((l) => l.length))).toBeLessThanOrEqual(cols);
+			// The app draws 11 rows around a picker.
+			expect(lines.length).toBeLessThanOrEqual(rows - 11);
+			// Bottom border is the last row, and the hint sits above it.
+			expect(lines[lines.length - 1]).toStartWith("╰");
+			const hintRow = lines[lines.length - 2] ?? "";
+			expect(hintRow).toContain("Esc");
+			expect(hintRow).toContain(cols < PICKER_NARROW_COLUMNS ? "type to filter" : "[type] Filter");
+			expect(hintRow).not.toContain("…");
+			expect(text).toContain("…");
+			expect(text).not.toMatch(/\n│\s+f293ff425a/);
+		});
+	}
+
+	test("under 26 rows the description and spacer rows are dropped", async () => {
+		const compact = (await lastFrame(52, 24)).join("\n");
+		const roomy = (await lastFrame(52, 40)).join("\n");
+		expect(compact).not.toContain("Currently active");
+		expect(roomy).toContain("Currently active");
 	});
 
-	test("keeps its bottom border and the whole hint, with room to spare", async () => {
-		const lines = await lastFrame(52, 25);
-		const text = lines.join("\n");
-		const lastBorder = text.lastIndexOf("╰");
-		expect(lastBorder).toBeGreaterThan(-1);
-		expect(text.lastIndexOf("[Esc] Cancel")).toBeLessThan(lastBorder);
-		// Only the options that fit the screen are drawn.
-		const drawn = MODELS.filter((m) => text.includes(m.slice(0, 8))).length;
-		expect(drawn).toBeLessThanOrEqual(fitVisible(8, 25));
+	test("PICKER_CHROME_ROWS counts the description and the scroll lines", () => {
+		expect(PICKER_CHROME_ROWS).toBe(23);
+		expect(isCompactPicker(25)).toBe(true);
+		expect(isCompactPicker(26)).toBe(false);
+	});
+});
+
+describe("pickerHint", () => {
+	test("long form wide, short form that keeps Esc and the filter tip when narrow", () => {
+		expect(pickerHint(80, true)).toContain("[Esc] Cancel");
+		expect(pickerHint(52, true)).toBe("↑↓ Enter Esc  type to filter");
+		expect(pickerHint(44, false)).toBe("↑↓ Enter Esc");
+	});
+
+	test("the long form fits the card at the width where it is used", () => {
+		expect(pickerHint(PICKER_NARROW_COLUMNS, true).length).toBeLessThanOrEqual(
+			PICKER_NARROW_COLUMNS - 10,
+		);
 	});
 });

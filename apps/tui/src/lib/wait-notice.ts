@@ -11,7 +11,7 @@
 /** The sentence. No jargon, names the model, says what the person can do. */
 export function waitNotice(model: string, silentSeconds: number): string {
 	const who = model.trim() || "The model";
-	return `${who} has not answered for ${silentSeconds} s. It may be busy with another request. Still waiting; Esc stops the turn.`;
+	return `${who} has not answered for ${silentSeconds} s. It may be busy. Esc stops the turn.`;
 }
 
 /**
