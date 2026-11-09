@@ -92,6 +92,21 @@ export interface ProviderSnapshot {
 	offline: { name: string; latencyMs?: number } | null;
 }
 
+/**
+ * The rail's snapshot for the route in use. A route that cannot answer right now
+ * (readiness "none": engine down, key refused) is an offline row, not the live
+ * primary: the NOW strip says NO MODEL, so the rail must not show a filled dot
+ * beside the same model (pilot break, banner vs PROVIDERS).
+ */
+export function routeSnapshot(opts: {
+	canAnswer: boolean;
+	route: { name: string; asked?: string };
+	fallback: ProviderSnapshot["fallback"];
+}): ProviderSnapshot {
+	if (opts.canAnswer) return { primary: opts.route, fallback: opts.fallback, offline: null };
+	return { primary: null, fallback: opts.fallback, offline: { name: opts.route.name } };
+}
+
 export function deriveProviders(snap: ProviderSnapshot): ActivityRailProviderRow[] {
 	const rows: ActivityRailProviderRow[] = [];
 	const fmt = (ms?: number) => (typeof ms === "number" ? `${Math.round(ms)}ms` : undefined);

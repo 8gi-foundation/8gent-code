@@ -139,7 +139,7 @@ export interface AgentEventCallbacks {
 	/** No token, step or tool for a while (#4727). null = the reply arrived. Display only. */
 	onRetry?: (event: AgentRetryEvent) => void;
 	onGuard?: (event: AgentGuardEvent) => void;
-	onStall?: (event: { silentSeconds: number | null; provider: string }) => void;
+	onStall?: (event: { silentSeconds: number | null; provider: string; model: string }) => void;
 	onEvidence?: (event: AgentEvidenceEvent) => void;
 	onEvidenceSummary?: (event: AgentEvidenceSummaryEvent) => void;
 	/**

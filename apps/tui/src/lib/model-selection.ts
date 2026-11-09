@@ -418,6 +418,26 @@ export function startupModelSeed(opts: {
 }
 
 /**
+ * Whether the launch tab keeps the provider and model saved in providers.json
+ * instead of taking its role-registry default (pilot break 10).
+ *
+ * #4720 pinned only a saved HOSTED provider with a key. A saved local choice
+ * lost to the Orchestrator role default (qwen3.6:27b) at every launch, so a
+ * /model pick was forgotten on relaunch and the cold 27B loaded each day. A
+ * saved model for the provider now in use is the person's choice and wins.
+ * `savedModel` is what was on disk at launch, never a detected default.
+ */
+export function savedChoiceIsPinned(opts: {
+	savedProvider: string;
+	savedModel: string;
+	savedHostedWithKey: boolean;
+	currentProvider: string;
+}): boolean {
+	if (!opts.savedProvider || opts.currentProvider !== opts.savedProvider) return false;
+	return opts.savedHostedWithKey || opts.savedModel.trim().length > 0;
+}
+
+/**
  * Whether the TUI should list a provider's models from the configured Ollama's
  * installed models rather than from the registry (#3332). The `8gent` provider
  * is Ollama at the same host (providerToRuntime maps it to "ollama"), so its

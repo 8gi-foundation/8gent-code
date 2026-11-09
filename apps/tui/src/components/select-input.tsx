@@ -15,7 +15,7 @@
  * - Highlighted current selection
  */
 
-import { Box, type TextProps, useInput } from "ink";
+import { Box, type TextProps, useInput, useStdout } from "ink";
 import React, { useState, useEffect, useMemo } from "react";
 import { providerRowNote } from "../lib/provider-order.js";
 import { AppText, Heading, Label, MutedText } from "./primitives/AppText.js";
@@ -59,6 +59,20 @@ export interface SelectInputProps<T = string> {
 	highlightColor?: string;
 }
 
+/**
+ * Rows the app draws around a picker (banner, tabs, NOW strip, frame, footer)
+ * plus the picker's own border, title, hint and scroll lines. What is left is
+ * how many option rows fit. A picker taller than the screen lost its bottom
+ * border and the frame's corners landed inside the hint line (pilot break 11).
+ */
+export const PICKER_CHROME_ROWS = 20;
+export const PICKER_MIN_VISIBLE = 3;
+
+export function fitVisible(maxVisible: number, terminalRows: number | undefined): number {
+	if (!terminalRows || terminalRows <= 0) return maxVisible;
+	return Math.max(PICKER_MIN_VISIBLE, Math.min(maxVisible, terminalRows - PICKER_CHROME_ROWS));
+}
+
 // ============================================
 // Main Select Input Component
 // ============================================
@@ -69,11 +83,13 @@ export function SelectInput<T = string>({
 	onCancel,
 	title,
 	initialIndex = 0,
-	maxVisible = 8,
+	maxVisible: maxVisibleProp = 8,
 	showDescription = true,
 	searchable = true,
 	highlightColor = "cyan",
 }: SelectInputProps<T>) {
+	const { stdout } = useStdout();
+	const maxVisible = fitVisible(maxVisibleProp, stdout?.rows);
 	const inkHighlight = highlightColor as NonNullable<TextProps["color"]>;
 	// useState here intentionally freezes a value at mount; recomputing per render would break stable references downstream.
 	// react-doctor-disable-next-line react-doctor/no-derived-useState
@@ -216,9 +232,13 @@ export function SelectInput<T = string>({
 
 							{/* Label */}
 							{isDisabled || option.dim ? (
-								<MutedText>{option.label}</MutedText>
+								<MutedText wrap="truncate-middle">{option.label}</MutedText>
 							) : (
-								<AppText color={isSelected ? inkHighlight : undefined} bold={isSelected}>
+								<AppText
+									color={isSelected ? inkHighlight : undefined}
+									bold={isSelected}
+									wrap="truncate-middle"
+								>
 									{option.label}
 								</AppText>
 							)}
@@ -242,7 +262,7 @@ export function SelectInput<T = string>({
 						{/* Description (only for selected item) */}
 						{showDescription && isSelected && option.description && (
 							<Box paddingLeft={4}>
-								<MutedText>{option.description}</MutedText>
+								<MutedText wrap="truncate-end">{option.description}</MutedText>
 							</Box>
 						)}
 					</Stack>
@@ -267,7 +287,7 @@ export function SelectInput<T = string>({
 
 			{/* Help text */}
 			<Box marginTop={1}>
-				<MutedText>
+				<MutedText wrap="truncate-end">
 					[↑↓] Navigate [Enter] Select [Esc] Cancel{searchable ? " [type] Filter" : ""}
 				</MutedText>
 			</Box>
