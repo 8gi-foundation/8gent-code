@@ -169,6 +169,7 @@ import { startProviderHealthPolling } from "./lib/provider-health-schedule.js";
 import { probeProviders } from "./lib/provider-health.js";
 import { TelegramTab, type TelegramTabHost } from "./lib/telegram-tab.js";
 import { isUserThemeId } from "./lib/user-themes.js";
+import { createWaitNoticeGate } from "./lib/wait-notice.js";
 import {
 	type ThemeChoice,
 	applyDesignSystem,
@@ -250,6 +251,7 @@ import {
 	deriveTools,
 	fallbackFromChain,
 	planStepsFromText,
+	routeSnapshot,
 } from "./lib/activity-rail-derivation.js";
 import * as bgPool from "./lib/background-pool.js";
 import {
@@ -543,6 +545,7 @@ import {
 	pickBestChatModel,
 	planAgentBuild,
 	providerToRuntime,
+	savedChoiceIsPinned,
 	specForActivatedTab,
 	startupModelSeed,
 	tabAgentRole,
@@ -709,6 +712,12 @@ async function detectBestLocalProviderUntraced(): Promise<{ provider: string; mo
 
 loadEnvFile();
 const _savedProviderSettings = loadProviderSettings();
+// What was on disk at launch, before auto-detection below fills gaps. Only this is the
+// person's choice; a detected default is not (break 10).
+const _launchSavedChoice = {
+	provider: _savedProviderSettings.provider,
+	model: _savedProviderSettings.model,
+};
 // If no saved provider/model, auto-detect the best available local provider. Awaited
 // here, once, so the first frame still knows it; computeCliOverrides reuses the answer.
 // A saved HOSTED provider whose key is present wins over the local default, even
@@ -1806,7 +1815,12 @@ export function App({
 		if (
 			(cliProviderRequestedRef.current ||
 				cliModelRequestedRef.current ||
-				(_savedHostedWithKey && currentProvider === _savedProviderSettings.provider)) &&
+				savedChoiceIsPinned({
+					savedProvider: _launchSavedChoice.provider,
+					savedModel: _launchSavedChoice.model,
+					savedHostedWithKey: _savedHostedWithKey,
+					currentProvider,
+				})) &&
 			cliPinRef.current === null
 		) {
 			cliPinRef.current = {
@@ -2263,6 +2277,8 @@ export function App({
 
 	// Each fallback line is said once per session, not once per turn (#4754).
 	const fallbackNoticeGateRef = useRef(createFallbackNoticeGate());
+	// One "model has gone quiet" line per quiet spell per tab (break 12).
+	const waitNoticeGateRef = useRef(createWaitNoticeGate());
 	// After model list loads: ensure currentModel is valid for the active provider.
 	// If the model isn't in the fetched list (e.g. Ollama model on OpenRouter), auto-select.
 	// react-doctor-disable-next-line react-doctor/no-effect-chain
@@ -3860,7 +3876,16 @@ export function App({
 					toolTrail: toTrailEntry(event),
 				});
 			},
-			onStall: ({ silentSeconds }) => {
+			onStall: ({ silentSeconds, model }) => {
+				// Say which model is quiet, once per quiet spell (break 12).
+				const waitLine = waitNoticeGateRef.current(tabId, { silentSeconds, model });
+				if (waitLine)
+					appendToTabLatest.current(tabId, {
+						id: messageId("wait"),
+						role: "system",
+						content: waitLine,
+						timestamp: new Date(),
+					});
 				if (tabId !== activeTabId) return;
 				setNarratorText(
 					silentSeconds === null
@@ -9167,13 +9192,19 @@ export function App({
 		turnError,
 	});
 	readinessRef.current = readiness;
-	const providerRows = deriveProviders({
-		primary: currentModel
-			? { name: `${shownProvider}:${shownModel.ran}`, asked: shownModel.asked }
-			: { name: currentProvider },
-		fallback: railFallback(shownProvider, shownModel.ran),
-		offline: null,
-	});
+	const providerRows = deriveProviders(
+		currentModel
+			? routeSnapshot({
+					canAnswer: readiness.state !== "none",
+					route: { name: `${shownProvider}:${shownModel.ran}`, asked: shownModel.asked },
+					fallback: railFallback(shownProvider, shownModel.ran),
+				})
+			: {
+					primary: { name: currentProvider },
+					fallback: railFallback(shownProvider, shownModel.ran),
+					offline: null,
+				},
+	);
 	const orchestrationAgents: OrchestrationAgentSnapshot[] = orchestration.agents.map((a) => ({
 		id: a.id,
 		name: a.name,
