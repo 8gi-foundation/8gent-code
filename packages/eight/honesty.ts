@@ -249,9 +249,12 @@ export function readRepoSnapshot(cwd: string): RepoSnapshot | null {
 	const head = git(cwd, ["rev-parse", "HEAD"]);
 	if (!head) return null;
 	const upstream = git(cwd, ["rev-parse", "@{u}"]);
-	const upstreamRef = upstream ? git(cwd, ["rev-parse", "--symbolic-full-name", "@{u}"]) : undefined;
+	const upstreamRef = upstream
+		? git(cwd, ["rev-parse", "--symbolic-full-name", "@{u}"])
+		: undefined;
 	const headInUpstream =
-		upstream !== undefined && git(cwd, ["merge-base", "--is-ancestor", "HEAD", "@{u}"]) !== undefined;
+		upstream !== undefined &&
+		git(cwd, ["merge-base", "--is-ancestor", "HEAD", "@{u}"]) !== undefined;
 	return {
 		cwd,
 		since,
@@ -387,7 +390,12 @@ function judge(
 	const dirs = new Set<string>([cwd]);
 	let unconfirmed = false;
 	for (const e of ledger) {
-		if (e.name !== "run_command" || typeof e.args?.command !== "string" || !sub.test(e.args.command)) continue;
+		if (
+			e.name !== "run_command" ||
+			typeof e.args?.command !== "string" ||
+			!sub.test(e.args.command)
+		)
+			continue;
 		const found = commandDirs(e.args.command, cwd, sub);
 		if (found.unresolved) unconfirmed = true;
 		for (const d of found.dirs) dirs.add(d);
@@ -408,7 +416,8 @@ function commitEvidence(ledger: readonly ToolLedgerEntry[], repo: RepoDelta): Ev
 		if (!entries) return { unreadable: true };
 		const alive = entries.some(
 			(e) =>
-				e.subject.startsWith("commit") && git(dir, ["merge-base", "--is-ancestor", e.sha, "HEAD"]) !== undefined,
+				e.subject.startsWith("commit") &&
+				git(dir, ["merge-base", "--is-ancestor", e.sha, "HEAD"]) !== undefined,
 		);
 		return alive ? { backed: true } : { empty: reflogEmpty(dir) };
 	});
@@ -418,7 +427,8 @@ function pushEvidence(ledger: readonly ToolLedgerEntry[], repo: RepoDelta): Evid
 	return judge(ledger, repo, PUSH_CMD, (dir) => {
 		// The turn's own directory reads the ref pinned at turn start, never the @{u} of whatever
 		// branch a later checkout left. Elsewhere, and when nothing was pinned, the current upstream.
-		const pinned = repo.before && sameDir(dir, repo.before.cwd) ? repo.before.upstreamRef : undefined;
+		const pinned =
+			repo.before && sameDir(dir, repo.before.cwd) ? repo.before.upstreamRef : undefined;
 		const ref = pinned ?? git(dir, ["rev-parse", "--symbolic-full-name", "@{u}"]);
 		if (!ref) return { unreadable: true };
 		// Remote-tracking reflogs are shared by every worktree: a push only backs this turn
@@ -453,7 +463,8 @@ const WHY = {
 const couldNot = (what: string, why?: keyof typeof WHY) =>
 	`Could not confirm ${what}${why ? `: ${WHY[why]}` : ""}.`;
 
-const UNREADABLE = "the repository state could not be read, so only a plain successful command counts";
+const UNREADABLE =
+	"the repository state could not be read, so only a plain successful command counts";
 
 const ACTION_CLAIMS: readonly ActionClaim[] = [
 	{
