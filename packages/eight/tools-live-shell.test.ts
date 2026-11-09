@@ -37,6 +37,17 @@ afterEach(() => {
 	rmSync(ws, { recursive: true, force: true });
 });
 
+/**
+ * A group that is dying can still exist when the command's close fires, so it
+ * stays registered until the next sweep (up to 2 s). Wait for the registry to
+ * empty instead of reading it the instant the command returns.
+ */
+async function registryEmpties(withinMs = 3000): Promise<number> {
+	const end = Date.now() + withinMs;
+	while (liveShellCount() > 0 && Date.now() < end) await new Promise((r) => setTimeout(r, 25));
+	return liveShellCount();
+}
+
 describe("run_command and the live shell registry", () => {
 	test("a running command is registered; quit ends it and the registry empties", async () => {
 		const done = executor.runCommand("sleep 61", 120);
@@ -44,12 +55,12 @@ describe("run_command and the live shell registry", () => {
 		expect(liveShellCount()).toBe(1);
 		killLiveShells("SIGTERM");
 		await done;
-		expect(liveShellCount()).toBe(0);
+		expect(await registryEmpties()).toBe(0);
 	});
 
 	test("a command that finishes on its own leaves nothing registered", async () => {
 		await executor.runCommand("true", 30);
-		expect(liveShellCount()).toBe(0);
+		expect(await registryEmpties()).toBe(0);
 	});
 
 	test("a backgrounded command with redirected output stays registered after run_command returns, and quit ends it", async () => {

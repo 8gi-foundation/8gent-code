@@ -35,7 +35,12 @@ function groupAlive(pid: number, kill: NonNullable<LiveShellDeps["kill"]>): bool
 	}
 }
 
-/** Drop groups that are gone, so a recycled pid is never signalled. */
+/**
+ * Drop groups that are gone. Quit only ever signals a process group, and a
+ * dead group stays registered for at most one sweep (2 s). Inside that window
+ * a new process that got the same pid and made itself a group leader could be
+ * signalled; nothing else can.
+ */
 function prune(deps: LiveShellDeps = {}): void {
 	if (process.platform === "win32") return;
 	const kill = deps.kill ?? ((p, s) => process.kill(p, s));
