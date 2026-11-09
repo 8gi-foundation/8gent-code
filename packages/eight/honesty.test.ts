@@ -4,11 +4,11 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	type RepoDelta,
 	type ToolLedgerEntry,
 	buildHonestFailureReply,
 	claimsCompletion,
 	enforceAgenticHonesty,
-	type RepoDelta,
 	isErrorToolResult,
 	readRepoSnapshot,
 	unbackedActionClaims,
@@ -137,6 +137,11 @@ describe("buildHonestFailureReply", () => {
 const FAKE_COMMIT =
 	"Committed both files with the message `add sub`:\nThe commit is ready in the working tree.";
 
+const NO_REPO_COMMIT =
+	"Could not confirm a commit: the repository state could not be read, so only a plain successful command counts.";
+const NO_REPO_PUSH =
+	"Could not confirm a push: the repository state could not be read, so only a plain successful command counts.";
+
 const ok = (name: string, args: Record<string, unknown>, result = "ok"): ToolLedgerEntry => ({
 	name,
 	args,
@@ -149,7 +154,7 @@ describe("action claims need a matching successful call", () => {
 		const out = enforceAgenticHonesty({ content: FAKE_COMMIT, ledger: [] });
 		expect(out.violated).toBe(true);
 		expect(out.content).toContain(FAKE_COMMIT.split("\n")[0]);
-		expect(out.content).toContain("[harness] No git commit ran this turn.");
+		expect(out.content).toContain(`[harness] ${NO_REPO_COMMIT}`);
 	});
 
 	it("flags a commit claim backed only by an edit and a test run", () => {
@@ -159,7 +164,7 @@ describe("action claims need a matching successful call", () => {
 		];
 		const out = enforceAgenticHonesty({ content: FAKE_COMMIT, ledger });
 		expect(out.violated).toBe(true);
-		expect(out.content).toContain("No git commit ran this turn.");
+		expect(out.content).toContain(NO_REPO_COMMIT);
 	});
 
 	it("passes a real commit, by the git_commit tool", () => {
@@ -199,7 +204,7 @@ describe("action claims need a matching successful call", () => {
 
 	it("flags a push claim without a push, passes one with it", () => {
 		expect(unbackedActionClaims("Pushed to origin.", [ok("git_commit", {})])).toEqual([
-			"No git push ran this turn.",
+			NO_REPO_PUSH,
 		]);
 		expect(unbackedActionClaims("Pushed to origin.", [ok("git_push", {})])).toEqual([]);
 	});
@@ -240,17 +245,17 @@ describe("claims are not hidden by a later clause or a loose shell match", () =>
 			expect(claimed(text).length).toBeGreaterThan(0);
 		}
 		expect(claimed("I committed and pushed the changes, you can open a PR now.")).toEqual([
-			"No git commit ran this turn.",
-			"No git push ran this turn.",
+			NO_REPO_COMMIT,
+			NO_REPO_PUSH,
 		]);
 		expect(claimed("Ran the tests and everything is green; committed before lunch.")).toEqual([
-			"No git commit ran this turn.",
-			"No tests were run: no test command ran this turn.",
+			NO_REPO_COMMIT,
+			"Could not confirm a test run.",
 		]);
 	});
 
 	it("a negation counts only when it governs the verb", () => {
-		expect(claimed("Committed, but not pushed.")).toEqual(["No git commit ran this turn."]);
+		expect(claimed("Committed, but not pushed.")).toEqual([NO_REPO_COMMIT]);
 		expect(claimed("I have not committed the files.")).toEqual([]);
 		expect(claimed("The files are ready to be committed.")).toEqual([]);
 		expect(claimed("If I committed now it would fail.")).toEqual([]);
@@ -396,7 +401,8 @@ function makeRepo(setup: Setup) {
 }
 
 /** The asymmetry: the gate may confirm or decline to confirm, never state a negative about a repo. */
-const NEGATIVE_NOTE = /No commit was made|Nothing was pushed|did not change|no new commit remains/i;
+const NEGATIVE_NOTE =
+	/No commit was made|Nothing was pushed|did not change|no new commit remains|No git (?:commit|push) ran|No tests were run/i;
 function noNegatives(notes: string[]): string[] {
 	for (const n of notes) expect(NEGATIVE_NOTE.test(n)).toBe(false);
 	return notes;
@@ -470,7 +476,7 @@ describe("round 5: a push is backed when the upstream moved to include HEAD", ()
 
 	it("no push attempted says so plainly", () => {
 		const { notes } = turn("push", "Pushed.", "git status");
-		expect(notes).toEqual(["No git push ran this turn."]);
+		expect(notes).toEqual(["Could not confirm a push to the tracked branch."]);
 	});
 });
 
@@ -792,9 +798,7 @@ describe("round 6: a commit is read in the repository the command ran in", () =>
 			"git init -q -b main && git config core.logAllRefUpdates false && git config commit.gpgsign false && echo a > a.txt && git add a.txt && git commit -qm init && echo c > c.txt && git add c.txt",
 		);
 		const out = judgeTurn(dir, "Committed.", "git commit -qm c");
-		expect(out).toEqual([
-			"Could not confirm a commit: the repository has no reflog entries to check.",
-		]);
+		expect(out).toEqual(["Could not confirm a commit: HEAD has no reflog entries to check."]);
 	});
 });
 
@@ -901,9 +905,7 @@ describe("round 7: a commit the parser cannot place reads 'could not confirm', n
 			"Committed.",
 			"git commit -qm c && git reflog expire --expire=now --all",
 		);
-		expect(out).toEqual([
-			"Could not confirm a commit: the repository has no reflog entries to check.",
-		]);
+		expect(out).toEqual(["Could not confirm a commit: HEAD has no reflog entries to check."]);
 		expect(out.join(" ")).not.toContain("logAllRefUpdates");
 	});
 });
@@ -935,5 +937,80 @@ describe("round 7: a push is backed only by a push whose sha contains this turn'
 		const { dir } = reflogRepo({ unpushed: true });
 		const cmd = "git commit -q --amend -m again && git push -q --force origin feat2";
 		expect(judgeTurn(dir, "Pushed.", cmd)).toEqual([]);
+	});
+});
+
+// ── Round 8: the reflog judges alone; command text never decides a negative ─────────────────
+
+describe("round 8: a real commit or push passes in every form the text matcher misses", () => {
+	const commitIn = (dir: string, name: string) =>
+		sh(dir, `echo ${name} > ${name}.txt && git add ${name}.txt`);
+
+	it("git alias commit", () => {
+		const { dir } = reflogRepo({ unpushed: false });
+		sh(dir, "git config alias.ci commit");
+		commitIn(dir, "al");
+		expect(judgeTurn(dir, "Committed.", "git ci -qm al")).toEqual([]);
+		expect(commitCount(dir)).toBe(2);
+	});
+
+	it("a script that commits", () => {
+		const { dir } = reflogRepo({ unpushed: false });
+		commitIn(dir, "sc");
+		writeFileSync(join(dir, "c.sh"), "#!/bin/sh\ngit commit -qm sc\n");
+		chmodSync(join(dir, "c.sh"), 0o755);
+		expect(judgeTurn(dir, "Committed.", "./c.sh")).toEqual([]);
+	});
+
+	it("g=git; $g commit", () => {
+		const { dir } = reflogRepo({ unpushed: false });
+		commitIn(dir, "gv");
+		expect(judgeTurn(dir, "Committed.", "g=git; $g commit -qm gv")).toEqual([]);
+	});
+
+	it("git alias push", () => {
+		const { dir } = reflogRepo({ unpushed: true });
+		sh(dir, "git config alias.p push");
+		expect(judgeTurn(dir, "Pushed.", "git p origin feat2")).toEqual([]);
+	});
+
+	it("a failed git_commit tool call reads 'could not confirm', not 'no commit ran'", () => {
+		const { dir } = reflogRepo({ unpushed: false });
+		const before = readRepoSnapshot(dir);
+		const entry: ToolLedgerEntry = {
+			name: "git_commit",
+			args: { message: "x" },
+			success: false,
+			result: "nothing to commit",
+		};
+		const repo: RepoDelta = { before, after: readRepoSnapshot(dir) };
+		expect(noNegatives(unbackedActionClaims("Committed.", [entry], repo))).toEqual([
+			COULD_NOT_COMMIT,
+		]);
+	});
+});
+
+describe("round 8: unreal actions still read 'could not confirm' without any attempt check", () => {
+	it("an alias that does not commit, a script that does not push", () => {
+		const { dir } = reflogRepo({ unpushed: true });
+		sh(dir, "git config alias.ci status");
+		expect(judgeTurn(dir, "Committed.", "git ci")).toEqual([COULD_NOT_COMMIT]);
+		expect(judgeTurn(dir, "Pushed.", "git status")).toEqual([COULD_NOT_PUSH]);
+	});
+
+	it("pull, checkout and cherry-pick in the turn's own directory are not commits", () => {
+		for (const cmd of [
+			"git pull -q --no-rebase --no-edit origin feat2",
+			"git checkout -q side",
+			"git cherry-pick side",
+		]) {
+			const { dir: d, root: r, remote: rm } = reflogRepo({ unpushed: false });
+			advanceRemote(r, rm);
+			sh(
+				d,
+				"git checkout -q -b side && echo s > s.txt && git add s.txt && git commit -qm side && git checkout -q feat2",
+			);
+			expect(judgeTurn(d, "Committed.", cmd)).toEqual([COULD_NOT_COMMIT]);
+		}
 	});
 });

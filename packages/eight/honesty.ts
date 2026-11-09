@@ -270,10 +270,6 @@ export function readRepoSnapshot(cwd: string): RepoSnapshot | null {
 const COMMIT_CMD = /\bgit(?:\s+(?:-[cC]\s+\S+|--[\w-]+(?:=\S+)?))*\s+commit\b/;
 const PUSH_CMD = /\bgit(?:\s+(?:-[cC]\s+\S+|--[\w-]+(?:=\S+)?))*\s+push\b/;
 
-/** A run_command whose text names the subcommand: attempted, not proven. Its exit code says nothing (`! git push`, `| cat - missing`). */
-const mentions = (e: ToolLedgerEntry, cmd: RegExp) =>
-	e.name === "run_command" && typeof e.args?.command === "string" && cmd.test(e.args.command);
-
 /**
  * With no readable repo state: only a plain, unpiped, unchained `git commit` or
  * `git push` that exited 0 counts. Anything the shell could rewrite (quotes outside
@@ -292,14 +288,6 @@ function plainGit(e: ToolLedgerEntry, sub: "commit" | "push"): boolean {
 }
 
 const ran = (e: ToolLedgerEntry) => e.success && !exitedNonZero(e);
-
-function commitAttempted(ledger: readonly ToolLedgerEntry[]): boolean {
-	return ledger.some((e) => (e.success && e.name === "git_commit") || mentions(e, COMMIT_CMD));
-}
-
-function pushAttempted(ledger: readonly ToolLedgerEntry[]): boolean {
-	return ledger.some((e) => (e.success && e.name === "git_push") || mentions(e, PUSH_CMD));
-}
 
 // ── Where the command ran ────────────────────────────────────────────────────
 //
@@ -445,20 +433,20 @@ function pushEvidence(ledger: readonly ToolLedgerEntry[], repo: RepoDelta): Evid
 }
 
 function commitBacked(ledger: readonly ToolLedgerEntry[], repo?: RepoDelta): boolean {
-	if (repo?.after) return commitAttempted(ledger) && commitEvidence(ledger, repo).backed;
+	if (repo?.after) return commitEvidence(ledger, repo).backed;
 	return ledger.some((e) => ran(e) && (e.name === "git_commit" || plainGit(e, "commit")));
 }
 
 function pushBacked(ledger: readonly ToolLedgerEntry[], repo?: RepoDelta): boolean {
 	const after = repo?.after;
 	if (after?.upstream || repo?.before?.upstreamRef)
-		return pushAttempted(ledger) && pushEvidence(ledger, repo as RepoDelta).backed;
+		return pushEvidence(ledger, repo as RepoDelta).backed;
 	return ledger.some((e) => ran(e) && (e.name === "git_push" || plainGit(e, "push")));
 }
 
 const WHY = {
 	directory: "the directory it ran in could not be checked",
-	reflog: "the repository has no reflog entries to check",
+	reflog: "HEAD has no reflog entries to check",
 };
 const couldNot = (what: string, why?: keyof typeof WHY) =>
 	`Could not confirm ${what}${why ? `: ${WHY[why]}` : ""}.`;
@@ -472,7 +460,6 @@ const ACTION_CLAIMS: readonly ActionClaim[] = [
 		says: /\b(?:committed|(?:created|made)\s+(?:the\s+|a\s+|that\s+)?commit|commit\s+(?:is\s+|was\s+)?(?:created|made|done|complete))\b/i,
 		backed: commitBacked,
 		note: (ledger, repo) => {
-			if (!commitAttempted(ledger)) return "No git commit ran this turn.";
 			if (!repo?.after) return `Could not confirm a commit: ${UNREADABLE}.`;
 			return couldNot("a commit", commitEvidence(ledger, repo).why);
 		},
@@ -482,7 +469,6 @@ const ACTION_CLAIMS: readonly ActionClaim[] = [
 		says: /\b(?:pushed|push\s+(?:is\s+|was\s+)?(?:done|complete|succeeded))\b/i,
 		backed: pushBacked,
 		note: (ledger, repo) => {
-			if (!pushAttempted(ledger)) return "No git push ran this turn.";
 			if (!repo?.after?.upstream && !repo?.before?.upstreamRef)
 				return `Could not confirm a push: ${UNREADABLE}.`;
 			const { why } = pushEvidence(ledger, repo);
@@ -493,7 +479,7 @@ const ACTION_CLAIMS: readonly ActionClaim[] = [
 		kind: "tests",
 		says: /\b(?:ran|executed)\s+(?:the\s+|all\s+|your\s+|our\s+)?(?:unit\s+|full\s+)?(?:tests?|test\s+suite)\b/i,
 		backed: (ledger) => ledger.some((e) => e.success && isTestRun(e)),
-		note: () => "No tests were run: no test command ran this turn.",
+		note: () => "Could not confirm a test run.",
 	},
 ];
 
