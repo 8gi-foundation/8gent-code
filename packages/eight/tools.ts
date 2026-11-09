@@ -286,6 +286,7 @@ import { isErrorToolResult } from "./honesty";
 import { downscaleNote, imageMaxSide } from "./image-fit";
 import { IssueBlameGate, issueBodyOf } from "./issue-blame";
 import { layoutMeasureLine } from "./layout-measure";
+import { trackShell, untrackShell } from "./live-shells";
 import { MESSAGE_BOARDROOM_TOOL_DEF, messageBoardroom } from "./message-boardroom";
 import { moduleHintFor } from "./module-hint";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
@@ -4073,6 +4074,11 @@ export class ToolExecutor {
 					...SPAWN_NON_INTERACTIVE_ENV,
 				}),
 			});
+
+			// Registered so quitting the TUI ends it, whatever its timer does (live-shells.ts).
+			trackShell(proc.pid);
+			proc.once("close", () => untrackShell(proc.pid));
+			proc.once("error", () => untrackShell(proc.pid));
 
 			let stdout = "";
 			let stderr = "";

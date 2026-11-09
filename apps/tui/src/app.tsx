@@ -25,6 +25,7 @@ import { resolveOllamaBaseUrl } from "../../../packages/ai/text-tool-endpoint.js
 import { dropOllamaCloudNames } from "../../../packages/core/ollama-cloud.js";
 import { answerFromLine } from "../../../packages/eight/android-setup.js";
 import { sanitizeForDisplay } from "../../../packages/eight/changelog-view.js";
+import { killLiveShells } from "../../../packages/eight/live-shells.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
 import {
 	type SessionListItem,
@@ -2965,6 +2966,8 @@ export function App({
 				abortAll: () => {
 					agent?.abort();
 					perTabAgents.abortAll();
+					// A command the model started outlives the TUI otherwise (live-shells.ts).
+					killLiveShells("SIGTERM");
 					agent?.cleanup().catch(() => {});
 				},
 				unmount: exit,

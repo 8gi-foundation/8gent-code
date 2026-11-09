@@ -203,4 +203,22 @@ describe("friction record (#4511), text-tool path", () => {
 		expect(lines[lines.length - 2].type).toBe("friction");
 		expect(JSON.stringify(friction[0])).not.toContain("second line");
 	}, 60_000);
+
+	test("cleanup writes session_end before it awaits the slow shutdown steps (hard exit safe)", async () => {
+		const agent = build();
+		await agent.chat(PROMPT);
+		const dir = join(home, ".8gent", "sessions");
+		const sawEnd = () =>
+			readdirSync(dir)
+				.filter((f) => f.endsWith(".jsonl"))
+				.some((f) => readFileSync(join(dir, f), "utf8").includes('"type":"session_end"'));
+		let endAtFirstAwait: boolean | null = null;
+		(
+			agent as unknown as { sessionSync: { endSession: () => Promise<void> } }
+		).sessionSync.endSession = async () => {
+			endAtFirstAwait = sawEnd();
+		};
+		await agent.cleanup();
+		expect(endAtFirstAwait).toBe(true);
+	}, 60_000);
 });
