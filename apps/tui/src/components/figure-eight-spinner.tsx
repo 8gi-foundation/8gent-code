@@ -5,12 +5,12 @@
  */
 
 import { Text } from "ink";
-import React, { useEffect, useState } from "react";
-import {
-	FIGURE_EIGHT_INTERVAL_MS,
-	FIGURE_EIGHT_STILL,
-	figureEightFrame,
-} from "../lib/figure-eight.js";
+import React, { useSyncExternalStore } from "react";
+import { FIGURE_EIGHT_STILL, figureEightFrame } from "../lib/figure-eight.js";
+import { spinnerClockTick, subscribeSpinnerClock } from "../lib/spinner-clock.js";
+
+const noSubscribe = () => () => {};
+const frozenTick = () => 0;
 
 interface FigureEightProps {
 	/** False holds a single frame, for reduced motion or a quiet terminal. */
@@ -20,15 +20,11 @@ interface FigureEightProps {
 }
 
 export function FigureEight({ animate = true, color }: FigureEightProps) {
-	const [tick, setTick] = useState(0);
-
-	useEffect(() => {
-		if (!animate) return;
-		const timer = setInterval(() => {
-			setTick((previous) => previous + 1);
-		}, FIGURE_EIGHT_INTERVAL_MS);
-		return () => clearInterval(timer);
-	}, [animate]);
+	// Held spinners subscribe to nothing, so they cost no timer and no repaint.
+	const tick = useSyncExternalStore(
+		animate ? subscribeSpinnerClock : noSubscribe,
+		animate ? spinnerClockTick : frozenTick,
+	);
 
 	const glyph = animate ? figureEightFrame(tick) : FIGURE_EIGHT_STILL;
 

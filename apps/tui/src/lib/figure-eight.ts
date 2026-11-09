@@ -29,7 +29,7 @@ export interface CellPoint {
 export const BRAILLE_BASE = 0x2800;
 
 /** How long each frame is held. Slow enough to read as motion, not a flicker. */
-export const FIGURE_EIGHT_INTERVAL_MS = 90;
+export const FIGURE_EIGHT_INTERVAL_MS = 150;
 
 /**
  * The eight cell positions in travel order. Starting at the middle of the left

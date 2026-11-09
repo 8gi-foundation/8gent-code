@@ -216,6 +216,17 @@ export function usePerTabAgents() {
 		}
 	}, []);
 
+	/** Abort the in-flight turn on every tab (quit path). Keeps the agents. */
+	const abortAll = useCallback(() => {
+		for (const a of agentsRef.current.values()) {
+			try {
+				a.abort();
+			} catch {
+				// best-effort
+			}
+		}
+	}, []);
+
 	/** Abort + drop the Agent for this tab. Called when a tab is closed. */
 	const removeTabAgent = useCallback(
 		(tabId: string) => {
@@ -270,6 +281,7 @@ export function usePerTabAgents() {
 		setAgent,
 		getOrCreateAgent,
 		abortTab,
+		abortAll,
 		removeTabAgent,
 		// foreground promise registry (used by Ctrl+G background-divert)
 		trackPromise,

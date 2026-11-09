@@ -346,6 +346,7 @@ import {
 	modelListFailureNotice,
 	registryKeyNotice,
 } from "./lib/provider-truth.js";
+import { quitNow } from "./lib/quit.js";
 import {
 	type TurnError,
 	buildResultFor,
@@ -2958,8 +2959,16 @@ export function App({
 			}
 			flushSession();
 			stopBangRuns();
-			if (agent) agent.cleanup().catch(() => {});
-			exit();
+			// Stop the turn first, then unmount, then a hard exit backstop: a turn
+			// waiting on a slow model must not hold the process open (break 13).
+			quitNow({
+				abortAll: () => {
+					agent?.abort();
+					perTabAgents.abortAll();
+					agent?.cleanup().catch(() => {});
+				},
+				unmount: exit,
+			});
 		}
 
 		// Toggle animations with Ctrl+A
