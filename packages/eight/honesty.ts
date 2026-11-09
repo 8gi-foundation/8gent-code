@@ -300,28 +300,29 @@ function pushAttempted(ledger: readonly ToolLedgerEntry[]): boolean {
 
 // ── Where the command ran ────────────────────────────────────────────────────
 //
-// `git -C <dir> commit` and `cd <dir> && git commit` act on another repository.
-// Only that repository can say whether the commit or push happened.
+// `git -C <dir> commit` and a leading `cd <dir> && git commit` act on another repository.
+// Only that repository can say whether the commit or push happened. Any other form
+// (subshell, pushd, --git-dir, GIT_DIR, bash -c) is read in the turn's own directory
+// and, finding nothing, reads "could not confirm".
 
 const SHELL_UNSAFE = /["'\\$`~{}*?()<>|&;!#]/;
 
-/** Directories the command may have run in. `unresolved` = some segment could not be resolved to a path. */
+/** Directories the command may have run in. `unresolved` = a path could not be read. */
 function commandDirs(
 	command: string,
 	cwd: string,
 	sub: RegExp,
 ): { dirs: string[]; unresolved: boolean } {
-	const segments = command.replace(/\\\n/g, " ").split(/&&|\|\||;|\n/);
+	const [first = "", ...rest] = command.replace(/\\\n/g, " ").split(/&&|\|\||;|\n/);
+	const cd = /^\s*cd\s+(\S+)\s*$/.exec(first);
 	let dir = cwd;
 	let unresolved = false;
+	if (cd) {
+		if (SHELL_UNSAFE.test(cd[1] as string)) unresolved = true;
+		else dir = resolvePath(cwd, cd[1] as string);
+	}
 	const dirs: string[] = [];
-	for (const seg of segments) {
-		const cd = /^\s*cd\s+(\S+)\s*$/.exec(seg);
-		if (cd) {
-			if (SHELL_UNSAFE.test(cd[1] as string)) unresolved = true;
-			else dir = resolvePath(dir, cd[1] as string);
-			continue;
-		}
+	for (const seg of cd ? rest : [first, ...rest]) {
 		const m = sub.exec(seg);
 		if (!m) continue;
 		let target = dir;
@@ -331,8 +332,6 @@ function commandDirs(
 		}
 		dirs.push(target);
 	}
-	// A segment such as `cd "$X"` or `-C "$REPO"` we could not read: the real target is unknown.
-	if (/\bcd\s+["'$`~]|-C\s*["'$`~]/.test(command)) unresolved = true;
 	return { dirs, unresolved };
 }
 
@@ -344,26 +343,25 @@ const sameDir = (a: string, b: string) => {
 	}
 };
 
+/** Proof, or the one reason proof could not be had. Absence of proof is never a finding. */
 interface Evidence {
-	/** Proven by a reflog entry. */
 	backed: boolean;
-	/** At least one repository could not be read or resolved: absence proves nothing. */
-	unconfirmed: boolean;
-	/** Reflog commit entries were written this turn but none is reachable from HEAD any more. */
-	removed: boolean;
-	/** The reflog is switched off in a repository that was checked. */
-	reflogOff: boolean;
-	/** A directory other than the turn's own was checked, so the turn's HEAD says nothing about it. */
-	elsewhere: boolean;
+	why?: "directory" | "reflog";
 }
 
-const reflogDisabled = (dir: string) => {
-	const v = git(dir, ["config", "--get", "core.logAllRefUpdates"])?.toLowerCase();
-	if (v && ["false", "no", "off", "0", "never"].includes(v)) return true;
-	return (readReflog(dir, "HEAD")?.length ?? 0) === 0;
-};
+/** What one repository said: proof, "unreadable", "empty reflog", or nothing. */
+interface Reading {
+	backed?: boolean;
+	unreadable?: boolean;
+	empty?: boolean;
+}
 
-/** The reflog entries a repo gained this turn: counted from the snapshot in the turn's own directory, by time elsewhere. */
+const reflogEmpty = (dir: string) => (readReflog(dir, "HEAD")?.length ?? 0) === 0;
+
+/**
+ * The reflog entries a repo gained this turn: counted from the snapshot in the turn's own
+ * directory; elsewhere strictly after the turn's start second and not in the future.
+ */
 function entriesSince(dir: string, ref: string, repo: RepoDelta): ReflogEntry[] | undefined {
 	const all = readReflog(dir, ref);
 	const before = repo.before;
@@ -373,50 +371,46 @@ function entriesSince(dir: string, ref: string, repo: RepoDelta): ReflogEntry[] 
 		const count = ref === "HEAD" ? before.headReflog : before.upstreamReflog;
 		return all.slice(0, Math.max(0, all.length - count));
 	}
-	// Reflog stamps are whole seconds, so an entry from the same second as the turn's start counts as the turn's.
 	const floor = Math.floor(before.since / 1000);
-	return all.filter((e) => e.ts >= floor);
+	const now = Math.floor(Date.now() / 1000);
+	return all.filter((e) => e.ts > floor && e.ts <= now);
 }
 
 function judge(
 	ledger: readonly ToolLedgerEntry[],
 	repo: RepoDelta,
 	sub: RegExp,
-	read: (dir: string) => Partial<Evidence>,
+	read: (dir: string) => Reading,
 ): Evidence {
 	const cwd = repo.before?.cwd ?? repo.after?.cwd;
-	const ev: Evidence = { backed: false, unconfirmed: false, removed: false, reflogOff: false, elsewhere: false };
-	if (!cwd) return { ...ev, unconfirmed: true };
+	if (!cwd) return { backed: false, why: "directory" };
 	const dirs = new Set<string>([cwd]);
+	let unconfirmed = false;
 	for (const e of ledger) {
 		if (e.name !== "run_command" || typeof e.args?.command !== "string" || !sub.test(e.args.command)) continue;
 		const found = commandDirs(e.args.command, cwd, sub);
-		if (found.unresolved) ev.unconfirmed = true;
+		if (found.unresolved) unconfirmed = true;
 		for (const d of found.dirs) dirs.add(d);
 	}
+	let empty = false;
 	for (const dir of dirs) {
-		if (!sameDir(dir, cwd)) ev.elsewhere = true;
 		const r = read(dir);
-		if (r.backed) ev.backed = true;
-		if (r.unconfirmed) ev.unconfirmed = true;
-		if (r.removed) ev.removed = true;
-		if (r.reflogOff) ev.reflogOff = true;
+		if (r.backed) return { backed: true };
+		if (r.unreadable) unconfirmed = true;
+		if (r.empty) empty = true;
 	}
-	return ev;
+	return { backed: false, why: unconfirmed ? "directory" : empty ? "reflog" : undefined };
 }
 
 function commitEvidence(ledger: readonly ToolLedgerEntry[], repo: RepoDelta): Evidence {
 	return judge(ledger, repo, COMMIT_CMD, (dir) => {
 		const entries = entriesSince(dir, "HEAD", repo);
-		if (!entries) return { unconfirmed: true };
-		const commits = entries.filter((e) => e.subject.startsWith("commit"));
-		const alive = commits.some(
-			(e) => git(dir, ["merge-base", "--is-ancestor", e.sha, "HEAD"]) !== undefined,
+		if (!entries) return { unreadable: true };
+		const alive = entries.some(
+			(e) =>
+				e.subject.startsWith("commit") && git(dir, ["merge-base", "--is-ancestor", e.sha, "HEAD"]) !== undefined,
 		);
-		if (alive) return { backed: true };
-		if (commits.length > 0) return { removed: true };
-		if (reflogDisabled(dir)) return { unconfirmed: true, reflogOff: true };
-		return {};
+		return alive ? { backed: true } : { empty: reflogEmpty(dir) };
 	});
 }
 
@@ -424,23 +418,19 @@ function pushEvidence(ledger: readonly ToolLedgerEntry[], repo: RepoDelta): Evid
 	return judge(ledger, repo, PUSH_CMD, (dir) => {
 		// The turn's own directory reads the ref pinned at turn start, never the @{u} of whatever
 		// branch a later checkout left. Elsewhere, and when nothing was pinned, the current upstream.
-		const refs = new Set<string>();
 		const pinned = repo.before && sameDir(dir, repo.before.cwd) ? repo.before.upstreamRef : undefined;
-		if (pinned) refs.add(pinned);
-		else {
-			const end = git(dir, ["rev-parse", "--symbolic-full-name", "@{u}"]);
-			if (end) refs.add(end);
-		}
-		if (refs.size === 0) return { unconfirmed: true };
-		let pushed = false;
-		for (const ref of refs) {
-			const entries = entriesSince(dir, ref, repo);
-			if (!entries) continue;
-			if (entries.some((e) => e.subject === "update by push")) pushed = true;
-		}
-		if (pushed) return { backed: true };
-		if (reflogDisabled(dir)) return { unconfirmed: true, reflogOff: true };
-		return {};
+		const ref = pinned ?? git(dir, ["rev-parse", "--symbolic-full-name", "@{u}"]);
+		if (!ref) return { unreadable: true };
+		// Remote-tracking reflogs are shared by every worktree: a push only backs this turn
+		// when the pushed sha contains this turn's end HEAD.
+		const end = git(dir, ["rev-parse", "HEAD"]);
+		const pushed = (entriesSince(dir, ref, repo) ?? []).some(
+			(e) =>
+				e.subject === "update by push" &&
+				end !== undefined &&
+				git(dir, ["merge-base", "--is-ancestor", end, e.sha]) !== undefined,
+		);
+		return pushed ? { backed: true } : { empty: reflogEmpty(dir) };
 	});
 }
 
@@ -456,6 +446,13 @@ function pushBacked(ledger: readonly ToolLedgerEntry[], repo?: RepoDelta): boole
 	return ledger.some((e) => ran(e) && (e.name === "git_push" || plainGit(e, "push")));
 }
 
+const WHY = {
+	directory: "the directory it ran in could not be checked",
+	reflog: "the repository has no reflog entries to check",
+};
+const couldNot = (what: string, why?: keyof typeof WHY) =>
+	`Could not confirm ${what}${why ? `: ${WHY[why]}` : ""}.`;
+
 const UNREADABLE = "the repository state could not be read, so only a plain successful command counts";
 
 const ACTION_CLAIMS: readonly ActionClaim[] = [
@@ -464,16 +461,9 @@ const ACTION_CLAIMS: readonly ActionClaim[] = [
 		says: /\b(?:committed|(?:created|made)\s+(?:the\s+|a\s+|that\s+)?commit|commit\s+(?:is\s+|was\s+)?(?:created|made|done|complete))\b/i,
 		backed: commitBacked,
 		note: (ledger, repo) => {
-			if (!commitAttempted(ledger)) return "No commit was made: no git commit ran this turn.";
+			if (!commitAttempted(ledger)) return "No git commit ran this turn.";
 			if (!repo?.after) return `Could not confirm a commit: ${UNREADABLE}.`;
-			const ev = commitEvidence(ledger, repo);
-			if (ev.reflogOff)
-				return "Could not confirm a commit: the repository keeps no reflog (core.logAllRefUpdates is off).";
-			if (ev.unconfirmed) return "Could not confirm a commit: the directory it ran in could not be checked.";
-			if (ev.removed) return "No new commit remains: the commit made this turn is no longer in HEAD.";
-			return !ev.elsewhere && repo.before?.head === repo.after.head
-				? "No commit was made: HEAD did not change this turn."
-				: "No commit was made: no commit was recorded in the repository this turn.";
+			return couldNot("a commit", commitEvidence(ledger, repo).why);
 		},
 	},
 	{
@@ -481,15 +471,11 @@ const ACTION_CLAIMS: readonly ActionClaim[] = [
 		says: /\b(?:pushed|push\s+(?:is\s+|was\s+)?(?:done|complete|succeeded))\b/i,
 		backed: pushBacked,
 		note: (ledger, repo) => {
-			if (!pushAttempted(ledger)) return "Nothing was pushed: no git push ran this turn.";
+			if (!pushAttempted(ledger)) return "No git push ran this turn.";
 			if (!repo?.after?.upstream && !repo?.before?.upstreamRef)
 				return `Could not confirm a push: ${UNREADABLE}.`;
-			const ev = pushEvidence(ledger, repo);
-			if (ev.reflogOff)
-				return "Could not confirm a push: the repository keeps no reflog (core.logAllRefUpdates is off).";
-			if (ev.unconfirmed)
-				return "Could not confirm a push: the directory it ran in could not be checked.";
-			return "Could not confirm a push: the upstream branch did not move to include HEAD this turn.";
+			const { why } = pushEvidence(ledger, repo);
+			return couldNot(why ? "a push" : "a push to the tracked branch", why);
 		},
 	},
 	{

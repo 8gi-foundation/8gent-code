@@ -148,7 +148,7 @@ describe("action claims need a matching successful call", () => {
 		const out = enforceAgenticHonesty({ content: FAKE_COMMIT, ledger: [] });
 		expect(out.violated).toBe(true);
 		expect(out.content).toContain(FAKE_COMMIT.split("\n")[0]);
-		expect(out.content).toContain("[harness] No commit was made");
+		expect(out.content).toContain("[harness] No git commit ran this turn.");
 	});
 
 	it("flags a commit claim backed only by an edit and a test run", () => {
@@ -158,7 +158,7 @@ describe("action claims need a matching successful call", () => {
 		];
 		const out = enforceAgenticHonesty({ content: FAKE_COMMIT, ledger });
 		expect(out.violated).toBe(true);
-		expect(out.content).toContain("No commit was made");
+		expect(out.content).toContain("No git commit ran this turn.");
 	});
 
 	it("passes a real commit, by the git_commit tool", () => {
@@ -191,7 +191,7 @@ describe("action claims need a matching successful call", () => {
 
 	it("flags a push claim without a push, passes one with it", () => {
 		expect(unbackedActionClaims("Pushed to origin.", [ok("git_commit", {})])).toEqual([
-			"Nothing was pushed: no git push ran this turn.",
+			"No git push ran this turn.",
 		]);
 		expect(unbackedActionClaims("Pushed to origin.", [ok("git_push", {})])).toEqual([]);
 	});
@@ -231,18 +231,18 @@ describe("claims are not hidden by a later clause or a loose shell match", () =>
 			expect(claimed(text).length).toBeGreaterThan(0);
 		}
 		expect(claimed("I committed and pushed the changes, you can open a PR now.")).toEqual([
-			"No commit was made: no git commit ran this turn.",
-			"Nothing was pushed: no git push ran this turn.",
+			"No git commit ran this turn.",
+			"No git push ran this turn.",
 		]);
 		expect(claimed("Ran the tests and everything is green; committed before lunch.")).toEqual([
-			"No commit was made: no git commit ran this turn.",
+			"No git commit ran this turn.",
 			"No tests were run: no test command ran this turn.",
 		]);
 	});
 
 	it("a negation counts only when it governs the verb", () => {
 		expect(claimed("Committed, but not pushed.")).toEqual([
-			"No commit was made: no git commit ran this turn.",
+			"No git commit ran this turn.",
 		]);
 		expect(claimed("I have not committed the files.")).toEqual([]);
 		expect(claimed("The files are ready to be committed.")).toEqual([]);
@@ -370,6 +370,13 @@ function makeRepo(setup: Setup) {
 	return { dir, root };
 }
 
+/** The asymmetry: the gate may confirm or decline to confirm, never state a negative about a repo. */
+const NEGATIVE_NOTE = /No commit was made|Nothing was pushed|did not change|no new commit remains/i;
+function noNegatives(notes: string[]): string[] {
+	for (const n of notes) expect(NEGATIVE_NOTE.test(n)).toBe(false);
+	return notes;
+}
+
 /** Take the turn's start snapshot, run the command for real, read the end snapshot, judge the claim. */
 function turn(setup: Setup, reply: string, command: string) {
 	const { dir } = makeRepo(setup);
@@ -382,7 +389,7 @@ function turn(setup: Setup, reply: string, command: string) {
 		result: `Exit code ${r.status}\n${r.stdout}${r.stderr}`,
 	};
 	const repo: RepoDelta = { before, after: readRepoSnapshot(dir) };
-	return { notes: unbackedActionClaims(reply, [entry], repo), dir, entry, repo };
+	return { notes: noNegatives(unbackedActionClaims(reply, [entry], repo)), dir, entry, repo };
 }
 
 describe("round 5: a push is backed when the upstream moved to include HEAD", () => {
@@ -434,13 +441,13 @@ describe("round 5: a push is backed when the upstream moved to include HEAD", ()
 	it("an up-to-date push moved nothing, and the note says it could not confirm", () => {
 		const { notes } = turn("push-uptodate", "Pushed.", "git push origin main");
 		expect(notes).toEqual([
-			"Could not confirm a push: the upstream branch did not move to include HEAD this turn.",
+			"Could not confirm a push to the tracked branch.",
 		]);
 	});
 
 	it("no push attempted says so plainly", () => {
 		const { notes } = turn("push", "Pushed.", "git status");
-		expect(notes).toEqual(["Nothing was pushed: no git push ran this turn."]);
+		expect(notes).toEqual(["No git push ran this turn."]);
 	});
 });
 
@@ -473,7 +480,7 @@ describe("round 5: a commit is backed when HEAD changed", () => {
 	it("a hook rejection is not a commit, plain or piped (the known gap)", () => {
 		for (const command of ["git commit -m x", "git commit -m x 2>&1 | tail", "git commit -m x || true"]) {
 			const { notes } = turn("commit-hook", "Committed.", command);
-			expect(notes).toEqual(["No commit was made: HEAD did not change this turn."]);
+			expect(notes).toEqual(["Could not confirm a commit."]);
 		}
 	});
 
@@ -482,7 +489,7 @@ describe("round 5: a commit is backed when HEAD changed", () => {
 		const out = enforceAgenticHonesty({ content: "Committed both files.", ledger: [entry], repo });
 		expect(out.violated).toBe(true);
 		expect(out.content).toBe(
-			"Committed both files.\n\n[harness] No commit was made: HEAD did not change this turn.",
+			"Committed both files.\n\n[harness] Could not confirm a commit.",
 		);
 	});
 });
@@ -589,8 +596,16 @@ const advanceRemote = (root: string, remote: string) => {
 	if (r.status !== 0) throw new Error(r.stderr);
 };
 
-function judgeTurn(dir: string, reply: string, command: string, env: Record<string, string> = {}) {
+/** `settle`: let the turn's start second pass, for commands that act in another directory (judged by time). */
+function judgeTurn(
+	dir: string,
+	reply: string,
+	command: string,
+	env: Record<string, string> = {},
+	settle = false,
+) {
 	const before = readRepoSnapshot(dir);
+	if (settle) Bun.sleepSync(1100);
 	const r = sh(dir, command, { REPO: dir, ...env });
 	const entry: ToolLedgerEntry = {
 		name: "run_command",
@@ -599,11 +614,11 @@ function judgeTurn(dir: string, reply: string, command: string, env: Record<stri
 		result: `Exit code ${r.status}\n${r.stdout}${r.stderr}`,
 	};
 	const repo: RepoDelta = { before, after: readRepoSnapshot(dir) };
-	return unbackedActionClaims(reply, [entry], repo);
+	return noNegatives(unbackedActionClaims(reply, [entry], repo));
 }
 
 const COULD_NOT_PUSH =
-	"Could not confirm a push: the upstream branch did not move to include HEAD this turn.";
+	"Could not confirm a push to the tracked branch.";
 
 describe("round 6: a failed push is not rescued by what follows it", () => {
 	it("a real push still passes, even when a checkout follows", () => {
@@ -640,6 +655,8 @@ describe("round 6: a failed push is not rescued by what follows it", () => {
 			dir,
 			"Pushed.",
 			`echo y > ${join(root, "wt2")}/y.txt && git -C ${join(root, "wt2")} add y.txt && git -C ${join(root, "wt2")} commit -qm y && git -C ${join(root, "wt2")} push -q origin w2`,
+			{},
+			true,
 		);
 		expect(out).toEqual([]);
 	});
@@ -651,7 +668,7 @@ describe("round 6: a commit is read in the repository the command ran in", () =>
 		const wt2 = join(root, "wt2");
 		sh(dir, `git worktree add -q -b w2 ${wt2}`);
 		const cmd = `echo x > ${wt2}/x.txt && git -C ${wt2} add x.txt && git -C ${wt2} commit -qm x`;
-		expect(judgeTurn(dir, "Committed.", cmd)).toEqual([]);
+		expect(judgeTurn(dir, "Committed.", cmd, {}, true)).toEqual([]);
 	});
 
 	it("cd other-repo && git commit is a commit", () => {
@@ -659,11 +676,11 @@ describe("round 6: a commit is read in the repository the command ran in", () =>
 		const other = join(root, "other");
 		mkdirSync(other);
 		sh(other, "git init -q -b main && git config commit.gpgsign false && echo o > o.txt && git add o.txt");
-		const out = judgeTurn(dir, "Committed.", `cd ${other} && git commit -qm o`);
+		const out = judgeTurn(dir, "Committed.", `cd ${other} && git commit -qm o`, {}, true);
 		expect(out).toEqual([]);
 	});
 
-	it("a failed commit in another directory is denied only after that directory was read", () => {
+	it("a failed commit in another directory is 'could not confirm' after that directory was read", () => {
 		const { dir, root } = reflogRepo({ unpushed: false });
 		const other = join(root, "other");
 		mkdirSync(other);
@@ -673,8 +690,8 @@ describe("round 6: a commit is read in the repository the command ran in", () =>
 		);
 		// Reflog stamps are whole seconds: let the setup commit fall before the turn starts.
 		Bun.sleepSync(1100);
-		const out = judgeTurn(dir, "Committed.", `git -C ${other} commit -qm o --dry-run; true`);
-		expect(out).toEqual(["No commit was made: no commit was recorded in the repository this turn."]);
+		const out = judgeTurn(dir, "Committed.", `git -C ${other} commit -qm o --dry-run; true`, {}, true);
+		expect(out).toEqual(["Could not confirm a commit."]);
 	});
 
 	it("a target that cannot be resolved is 'could not confirm', never 'no commit was made'", () => {
@@ -693,20 +710,20 @@ describe("round 6: a commit is read in the repository the command ran in", () =>
 		chmodSync(join(dir, ".git", "hooks", "pre-commit"), 0o755);
 		sh(dir, "echo c > c.txt && git add c.txt");
 		const out = judgeTurn(dir, "Committed.", "git commit -qm c; git pull -q --ff-only");
-		expect(out).toEqual(["No commit was made: no commit was recorded in the repository this turn."]);
+		expect(out).toEqual(["Could not confirm a commit."]);
 	});
 
 	it("echo git commit followed by a checkout is not a commit", () => {
 		const { dir } = reflogRepo({ unpushed: true });
 		const out = judgeTurn(dir, "Committed.", "echo git commit -m x; git checkout -q feat");
-		expect(out).toEqual(["No commit was made: no commit was recorded in the repository this turn."]);
+		expect(out).toEqual(["Could not confirm a commit."]);
 	});
 
-	it("a commit that a reset then removed reads 'no new commit remains'", () => {
+	it("a commit that a reset then removed is 'could not confirm', not a claim about HEAD", () => {
 		const { dir } = reflogRepo({ unpushed: false });
 		sh(dir, "echo c > c.txt && git add c.txt");
 		const out = judgeTurn(dir, "Committed.", "git commit -qm c && git reset -q --hard HEAD~1");
-		expect(out).toEqual(["No new commit remains: the commit made this turn is no longer in HEAD."]);
+		expect(out).toEqual(["Could not confirm a commit."]);
 	});
 
 	it("an amend is a commit", () => {
@@ -725,7 +742,127 @@ describe("round 6: a commit is read in the repository the command ran in", () =>
 		);
 		const out = judgeTurn(dir, "Committed.", "git commit -qm c");
 		expect(out).toEqual([
-			"Could not confirm a commit: the repository keeps no reflog (core.logAllRefUpdates is off).",
+			"Could not confirm a commit: the repository has no reflog entries to check.",
 		]);
+	});
+});
+
+// ── Round 7: the gate confirms, or declines to confirm, and never states a negative ─────────
+
+const COULD_NOT_COMMIT = "Could not confirm a commit.";
+
+/** A second repo with one commit and one staged file; its setup falls before the next turn starts. */
+function otherRepo(root: string, name = "other") {
+	const other = join(root, name);
+	mkdirSync(other);
+	const r = sh(
+		other,
+		"git init -q -b main && git config commit.gpgsign false && echo i > i.txt && git add i.txt && git commit -qm i && echo o > o.txt && git add o.txt",
+	);
+	if (r.status !== 0) throw new Error(r.stderr);
+	return other;
+}
+
+const commitCount = (dir: string) => Number(sh(dir, "git rev-list --count HEAD").stdout.trim());
+
+/** Wait for the start of a wall-clock second, so what follows lands inside one second. */
+const atSecondStart = () => {
+	while (Date.now() % 1000 > 300) Bun.sleepSync(20);
+};
+
+describe("round 7: a commit the parser cannot place reads 'could not confirm', never 'no commit was made'", () => {
+	const FORMS: Array<[string, (o: string) => string]> = [
+		["subshell cd", (o) => `(cd ${o} && git commit -qm o)`],
+		["pushd", (o) => `pushd ${o} >/dev/null && git commit -qm o`],
+		["--git-dir and --work-tree", (o) => `git --git-dir=${o}/.git --work-tree=${o} commit -qm o`],
+		["GIT_DIR env", (o) => `GIT_DIR=${o}/.git GIT_WORK_TREE=${o} git commit -qm o`],
+		["bash -c", (o) => `bash -c 'cd ${o} && git commit -qm o'`],
+	];
+	for (const [name, build] of FORMS) {
+		it(`${name}: a real commit in another repo`, () => {
+			const { dir, root } = reflogRepo({ unpushed: false });
+			const other = otherRepo(root);
+			expect(judgeTurn(dir, "Committed.", build(other), {}, true)).toEqual([COULD_NOT_COMMIT]);
+			expect(commitCount(other)).toBe(2);
+		});
+	}
+
+	it("commit-tree then update-ref moves HEAD with no commit reflog subject", () => {
+		const { dir } = reflogRepo({ unpushed: false });
+		const out = judgeTurn(
+			dir,
+			"Committed.",
+			"t=$(git commit-tree 'HEAD^{tree}' -p HEAD -m x) && git update-ref HEAD $t",
+		);
+		expect(out).toEqual([COULD_NOT_COMMIT]);
+	});
+
+	it("a real commit elsewhere with a past GIT_COMMITTER_DATE is not counted", () => {
+		const { dir, root } = reflogRepo({ unpushed: false });
+		const other = otherRepo(root);
+		const out = judgeTurn(
+			dir,
+			"Committed.",
+			`GIT_COMMITTER_DATE=2020-01-01T00:00:00 git -C ${other} commit -qm o`,
+			{},
+			true,
+		);
+		expect(out).toEqual([COULD_NOT_COMMIT]);
+		expect(commitCount(other)).toBe(2);
+	});
+
+	it("a same-second commit in another repo does not back this turn's failed commit", () => {
+		const { dir, root } = reflogRepo({ unpushed: false });
+		atSecondStart();
+		const other = otherRepo(root);
+		const out = judgeTurn(dir, "Committed.", `git -C ${other} commit -qm o --dry-run; true`, {}, true);
+		expect(out).toEqual([COULD_NOT_COMMIT]);
+	});
+
+	it("a future-dated entry in another repo backs nothing", () => {
+		const { dir, root } = reflogRepo({ unpushed: false });
+		const other = otherRepo(root);
+		sh(other, "echo f > f.txt && git add f.txt && git commit -qm future", {
+			GIT_COMMITTER_DATE: "2099-01-01T00:00:00",
+		});
+		sh(other, "echo g > g.txt && git add g.txt");
+		const out = judgeTurn(dir, "Committed.", `git -C ${other} commit -qm o --dry-run; true`, {}, true);
+		expect(out).toEqual([COULD_NOT_COMMIT]);
+	});
+
+	it("a reflog expired after a real commit says it has no entries to check", () => {
+		const { dir } = reflogRepo({ unpushed: false });
+		sh(dir, "echo c > c.txt && git add c.txt");
+		const out = judgeTurn(dir, "Committed.", "git commit -qm c && git reflog expire --expire=now --all");
+		expect(out).toEqual(["Could not confirm a commit: the repository has no reflog entries to check."]);
+		expect(out.join(" ")).not.toContain("logAllRefUpdates");
+	});
+});
+
+describe("round 7: a push is backed only by a push whose sha contains this turn's HEAD", () => {
+	it("a sibling worktree's push to the shared upstream does not back this turn's failed push", () => {
+		const { dir, root } = reflogRepo({ unpushed: true });
+		const sib = join(root, "sib");
+		sh(dir, `git worktree add -q -B sib ${sib} origin/feat2`);
+		const cmd = `(cd ${sib} && echo s > s.txt && git add s.txt && git commit -qm s && git push -q origin HEAD:feat2); git push -q origin feat2`;
+		expect(judgeTurn(dir, "Pushed.", cmd)).toEqual([COULD_NOT_PUSH]);
+		expect(sh(dir, "git reflog show refs/remotes/origin/feat2").stdout).toContain("update by push");
+	});
+
+	it("a push with -u to a new branch is declined with a reason that is not misleading", () => {
+		const { dir } = reflogRepo({ unpushed: true });
+		expect(judgeTurn(dir, "Pushed.", "git push -u origin HEAD:refs/heads/fresh")).toEqual([COULD_NOT_PUSH]);
+	});
+
+	it("a tag-only push is declined with a reason that is not misleading", () => {
+		const { dir } = reflogRepo({ unpushed: true });
+		sh(dir, "git tag v1");
+		expect(judgeTurn(dir, "Pushed.", "git push origin v1")).toEqual([COULD_NOT_PUSH]);
+	});
+
+	it("an amend then a force-push is a push", () => {
+		const { dir } = reflogRepo({ unpushed: true });
+		const cmd = "git commit -q --amend -m again && git push -q --force origin feat2";
+		expect(judgeTurn(dir, "Pushed.", cmd)).toEqual([]);
 	});
 });
