@@ -548,6 +548,66 @@ describe("savedChoiceIsPinned", () => {
 		).toBe(false);
 	});
 
+	test("a keyless provider of any wire shape is not pinned (anthropic-compat)", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pin-keyless-"));
+		const file = path.join(dir, "providers.json");
+		fs.writeFileSync(
+			file,
+			JSON.stringify({
+				providers: {
+					claudelike: {
+						baseUrl: "https://claude.example.test/v1",
+						compat: "anthropic",
+						apiKeyEnv: "CLAUDELIKE_TEST_KEY_NOT_SET",
+					},
+				},
+			}),
+		);
+		const saved = process.env.CLAUDELIKE_TEST_KEY_NOT_SET;
+		Reflect.deleteProperty(process.env, "CLAUDELIKE_TEST_KEY_NOT_SET");
+		try {
+			const pm = new ProviderManager(file);
+			const opts = {
+				savedProvider: "claudelike",
+				savedModel: "m",
+				savedHostedWithKey: false,
+				currentProvider: "claudelike",
+				providers: pm,
+			};
+			expect(savedChoiceIsPinned(opts)).toBe(false);
+			process.env.CLAUDELIKE_TEST_KEY_NOT_SET = "sk-test-0123456789abcdef";
+			expect(savedChoiceIsPinned(opts)).toBe(true);
+		} finally {
+			if (saved === undefined) Reflect.deleteProperty(process.env, "CLAUDELIKE_TEST_KEY_NOT_SET");
+			else process.env.CLAUDELIKE_TEST_KEY_NOT_SET = saved;
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("a local provider that declares no key still pins", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pin-local-"));
+		const file = path.join(dir, "providers.json");
+		fs.writeFileSync(
+			file,
+			JSON.stringify({
+				providers: { myrig: { baseUrl: "http://127.0.0.1:9999/v1", compat: "openai" } },
+			}),
+		);
+		try {
+			expect(
+				savedChoiceIsPinned({
+					savedProvider: "myrig",
+					savedModel: "m",
+					savedHostedWithKey: false,
+					currentProvider: "myrig",
+					providers: new ProviderManager(file),
+				}),
+			).toBe(true);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	test("a different provider in use is not the saved choice", () => {
 		expect(savedChoiceIsPinned({ ...base, currentProvider: "lmstudio" })).toBe(false);
 	});

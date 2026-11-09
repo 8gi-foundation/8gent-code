@@ -11,7 +11,7 @@
  *
  * Never falls back to another provider's key: only the entry's own names are read.
  */
-import { getProviderManager } from "./index";
+import { type ProviderManager, getProviderManager } from "./index";
 import { isLocalProvider } from "./local-providers";
 
 /** Why this provider's key is withheld, or undefined (the manager decides, on every key read). */
@@ -69,6 +69,24 @@ export function missingKeyMessage(name: string, host?: string): string {
 		`No API key for ${name}${host ? `, so nothing was sent to ${host}` : ""}. ` +
 		`Add your key with \`8gent keys set ${name}\` (${providerKeyEnvName(name)}), or edit the file with \`8gent keys\`, or pick a local provider.${extra}`
 	);
+}
+
+/**
+ * True when the provider's config declares a key (apiKeyEnv or apiKeyRef) and
+ * none resolves. Whatever the wire format: provider agnostic. A provider that
+ * declares no key (a local server) is never keyless by this test.
+ */
+export function declaresKeyWithNone(
+	name: string,
+	pm: Pick<ProviderManager, "getProvider" | "getApiKey"> = getProviderManager(),
+): boolean {
+	try {
+		const cfg = pm.getProvider(name);
+		if (!cfg.apiKeyEnv && !cfg.apiKeyRef) return false;
+		return !pm.getApiKey(name)?.trim();
+	} catch {
+		return false;
+	}
 }
 
 /**

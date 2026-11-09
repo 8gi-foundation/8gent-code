@@ -1,5 +1,8 @@
-import { getProviderManager, resolveModel } from "../../../../packages/providers/index.js";
-import { isHostedChatProvider } from "../../../../packages/providers/key-resolver.js";
+import { type ProviderManager, getProviderManager, resolveModel } from "../../../../packages/providers/index.js";
+import {
+	declaresKeyWithNone,
+	isHostedChatProvider,
+} from "../../../../packages/providers/key-resolver.js";
 
 /**
  * Pick a sensible default chat model from provider lists (avoid embedding / rerank models).
@@ -433,12 +436,13 @@ export function savedChoiceIsPinned(opts: {
 	savedModel: string;
 	savedHostedWithKey: boolean;
 	currentProvider: string;
+	providers?: Pick<ProviderManager, "getProvider" | "getApiKey">;
 }): boolean {
 	if (!opts.savedProvider || opts.currentProvider !== opts.savedProvider) return false;
 	if (opts.savedHostedWithKey) return true;
-	// A cloud provider with no key cannot answer: its saved model is not a choice
-	// that may displace the role default (8SO on #123).
-	if (isHostedChatProvider(opts.savedProvider)) return false;
+	// A provider that declares a key and has none cannot answer, whatever its wire
+	// format: its saved model is not a choice that may displace the role default (8SO on #123).
+	if (declaresKeyWithNone(opts.savedProvider, opts.providers)) return false;
 	return opts.savedModel.trim().length > 0;
 }
 
