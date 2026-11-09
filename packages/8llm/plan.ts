@@ -5,15 +5,18 @@
  */
 import { openSync, readSync, closeSync, statSync, mkdirSync, appendFileSync } from "node:fs";
 import { totalmem, freemem, platform, homedir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, basename } from "node:path";
 
 const GB = 1024 ** 3;
 const SCALAR: Record<number, number> = { 0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8 };
 export type Tensor = { name: string; offset: number; bytes: number };
 export type Header = { tensors: Tensor[]; meta: Record<string, number>; arch: string };
 
+const safe = (b: bigint) => { if (b > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("gguf: value too large"); return Number(b); };
+const MAX_ITEMS = 1 << 20;
+
 /** Windowed synchronous reader so large tokenizer arrays never load whole. */
-function reader(fd: number) {
+function reader(fd: number, size: number) {
   let base = 0, buf = Buffer.alloc(0), pos = 0;
   const need = (n: number) => {
     if (pos >= base && pos + n <= base + buf.length) return;
@@ -22,13 +25,15 @@ function reader(fd: number) {
     if (got < n) throw new Error("gguf: truncated header");
     base = pos; buf = b.subarray(0, got);
   };
-  const take = (n: number) => { need(n); const o = pos - base; pos += n; return buf.subarray(o, o + n); };
+  const take = (n: number) => {
+    if (!(n >= 0) || n > size - pos) throw new Error("gguf: length past end of file");
+    need(n); const o = pos - base; pos += n; return buf.subarray(o, o + n); };
   return {
     get pos() { return pos; },
-    skip: (n: number) => { pos += n; },
+    skip: (n: number) => { if (!(n >= 0) || n > size - pos) throw new Error("gguf: skip past end of file"); pos += n; },
     u32: () => take(4).readUInt32LE(0),
-    u64: () => Number(take(8).readBigUInt64LE(0)),
-    str: () => { const n = Number(take(8).readBigUInt64LE(0)); return take(n).toString("utf8"); },
+    u64: () => safe(take(8).readBigUInt64LE(0)),
+    str: () => { const n = safe(take(8).readBigUInt64LE(0)); return take(n).toString("utf8"); },
     take,
   };
 }
@@ -36,17 +41,19 @@ function reader(fd: number) {
 export function readHeader(path: string): Header {
   const fd = openSync(path, "r");
   try {
-    const r = reader(fd);
+    const fileSize = statSync(path).size, r = reader(fd, fileSize);
     if (r.take(4).toString("latin1") !== "GGUF") throw new Error("gguf: bad magic");
     const version = r.u32();
     if (version < 2 || version > 3) throw new Error(`gguf: unsupported version ${version}`);
     const nT = r.u64(), nKV = r.u64();
+    if (nT > MAX_ITEMS || nKV > MAX_ITEMS) throw new Error("gguf: implausible tensor or key count");
     const meta: Record<string, number> = {};
     let arch = "", align = 32;
     const value = (type: number): number | string | undefined => {
       if (type === 8) return r.str();
       if (type === 9) {
         const et = r.u32(), n = r.u64();
+        if (et !== 8 && !SCALAR[et]) throw new Error(`gguf: unknown array element type ${et}`);
         if (et === 8) for (let i = 0; i < n; i++) r.str();
         else r.skip(n * (SCALAR[et] ?? 0));
         return undefined;
@@ -58,17 +65,20 @@ export function readHeader(path: string): Header {
     for (let i = 0; i < nKV; i++) {
       const key = r.str(), v = value(r.u32());
       if (key === "general.architecture") arch = String(v);
-      else if (key === "general.alignment") align = Number(v);
+      else if (key === "general.alignment") { align = Number(v); if (!(align > 0) || (align & (align - 1)) !== 0) throw new Error("gguf: alignment must be a power of two"); }
       else if (typeof v === "number") meta[key] = v;
     }
     const raw: { name: string; offset: number }[] = [];
     for (let i = 0; i < nT; i++) {
       const name = r.str(), nd = r.u32();
+      if (nd > 8) throw new Error("gguf: too many tensor dims");
       r.skip(nd * 8 + 4);
       raw.push({ name, offset: r.u64() });
     }
     const dataStart = Math.ceil(r.pos / align) * align;
-    const end = statSync(path).size - dataStart;
+    const end = fileSize - dataStart;
+    if (end < 0) throw new Error("gguf: header runs past end of file");
+    for (const t of raw) if (t.offset > end) throw new Error(`gguf: tensor ${t.name} offset outside data section`);
     const order = [...raw].sort((a, b) => a.offset - b.offset);
     const size = new Map(order.map((t, i) => [t.name, (i + 1 < order.length ? order[i + 1].offset : end) - t.offset]));
     return { arch, meta, tensors: raw.map((t) => ({ ...t, bytes: size.get(t.name)! })) };
@@ -104,20 +114,30 @@ export function makePlan(h: Header, o: { context: number; budgetBytes: number; r
     decodeSecPerToken: secPerToken, decodeTokPerSec: secPerToken ? 1 / secPerToken : null };
 }
 
-/** Sequential read with the file cache bypassed. Returns null when bypass is unavailable (never a cached number). */
+/**
+ * Sequential read with the file cache bypassed. Returns null when the bypass cannot be confirmed
+ * (never a cached number). Caveat: F_NOCACHE only stops new reads being cached; it does not evict
+ * pages that are already cached, so measure a model file that has not been read recently.
+ * fcntl is variadic: on darwin-arm64 the third argument is read from the stack, so six padding
+ * arguments push the value past the registers. Success is confirmed by reading the flag back.
+ */
 export async function measureRead(path: string, limit = 2 * GB): Promise<number | null> {
   let fd = -1;
   try {
     const { dlopen, FFIType } = await import("bun:ffi");
-    const mac = platform() === "darwin";
+    const mac = platform() === "darwin", arm = process.arch === "arm64";
+    const I = FFIType.i32, L = FFIType.i64;
     const lib = dlopen(mac ? "libSystem.B.dylib" : "libc.so.6", mac
-      ? { fcntl: { args: [FFIType.i32, FFIType.i32, FFIType.i32], returns: FFIType.i32 } }
-      : { posix_fadvise: { args: [FFIType.i32, FFIType.i64, FFIType.i64, FFIType.i32], returns: FFIType.i32 } });
+      ? { fcntl: { args: arm ? [I, I, L, L, L, L, L, L, L] : [I, I, I], returns: I } }
+      : { posix_fadvise: { args: [I, L, L, I], returns: I } });
+    const get = mac ? dlopen("libSystem.B.dylib", { fcntl: { args: [I, I], returns: I } }) : null;
     fd = openSync(path, "r");
     const total = Math.min(statSync(path).size, limit);
-    // macOS F_NOCACHE=48 on the fd; Linux POSIX_FADV_DONTNEED=4 drops the range before reading.
-    const rc = mac ? lib.symbols.fcntl!(fd, 48, 1) : lib.symbols.posix_fadvise!(fd, 0, total, 4);
-    if (rc !== 0) return null;
+    if (mac) {
+      const set = arm ? (lib.symbols.fcntl as any)(fd, 48, 0, 0, 0, 0, 0, 0, 1) : (lib.symbols.fcntl as any)(fd, 48, 1);
+      // F_GETFL (3) reports FNOCACHE (0x40000) once the flag has really been set.
+      if (set !== 0 || (get!.symbols.fcntl(fd, 3) & 0x40000) === 0) return null;
+    } else if (lib.symbols.posix_fadvise!(fd, 0, total, 4) !== 0) return null; // POSIX_FADV_DONTNEED
     const buf = Buffer.alloc(8 << 20);
     const t0 = performance.now();
     let done = 0;
@@ -129,7 +149,7 @@ export async function measureRead(path: string, limit = 2 * GB): Promise<number 
 
 export function appendLedger(file: string, plan: Plan, model: string, measured: boolean) {
   mkdirSync(dirname(file), { recursive: true });
-  appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), model, measured, device: { platform: platform(), totalBytes: totalmem(), freeBytes: freemem() }, plan }) + "\n");
+  appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), model: basename(model), modelBytes: statSync(model).size, measured, device: { platform: platform(), totalBytes: totalmem(), freeBytes: freemem() }, plan }) + "\n");
 }
 
 export function render(p: Plan): string {
@@ -144,9 +164,10 @@ if (import.meta.main) {
   const flag = (k: string) => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] : undefined; };
   if (!model) { console.error("usage: plan.ts <model.gguf> [--context N] [--budget-gb N] [--measure]"); process.exit(2); }
   const budget = flag("--budget-gb") ? +flag("--budget-gb")! * GB : Math.max(0, totalmem() - 7 * GB);
+  const header = readHeader(model); // validate before anything else reads the file
   const bps = a.includes("--measure") ? await measureRead(model) : null;
-  if (a.includes("--measure") && bps === null) console.error("read speed not measured: cache bypass unavailable here");
-  const plan = makePlan(readHeader(model), { context: +(flag("--context") ?? 4096), budgetBytes: budget, readBps: bps });
+  if (a.includes("--measure") && bps === null) console.error("read speed not measured: cache bypass could not be confirmed");
+  const plan = makePlan(header, { context: +(flag("--context") ?? 4096), budgetBytes: budget, readBps: bps });
   console.log(render(plan));
   appendLedger(join(homedir(), ".8gent", "8llm", "plans.jsonl"), plan, model, bps !== null);
 }

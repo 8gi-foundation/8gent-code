@@ -58,3 +58,47 @@ test("measure returns a rate or null, never throws; ledger gets one line", async
   appendLedger(ledger, makePlan(readHeader(p), { context: 10, budgetBytes: 1e9 }), p, bps !== null);
   expect(readFileSync(ledger, "utf8").trim().split("\n").length).toBe(1);
 });
+
+// Hostile fixtures: raw bytes written to a temp file, then parsed.
+const tmp = (b: Buffer) => { const p = join(mkdtempSync(join(tmpdir(), "8llm-")), "h.gguf"); writeFileSync(p, b); return p; };
+const hdr = (nT: number, kvs: Buffer[], infos: Buffer[] = []) => Buffer.concat([Buffer.from("GGUF"), u32(3), u64(nT), u64(kvs.length), ...kvs, ...infos]);
+const info = (name: string, off: number) => Buffer.concat([str(name), u32(1), u64(1), u32(0), u64(off)]);
+
+test("hostile: string length past end of file is refused before allocation", () => {
+  const huge = Buffer.concat([u64(2 ** 40), Buffer.from("x")]);
+  expect(() => readHeader(tmp(hdr(0, [huge])))).toThrow("past end of file");
+});
+
+test("hostile: alignment must be a power of two", () => {
+  expect(() => readHeader(tmp(hdr(0, [kvU32("general.alignment", 48)])))).toThrow("power of two");
+  expect(() => readHeader(tmp(hdr(0, [kvU32("general.alignment", 0)])))).toThrow("power of two");
+});
+
+test("hostile: tensor offset outside the data section is refused", () => {
+  const h = hdr(1, [], [info("blk.0.a", 1 << 30)]);
+  expect(() => readHeader(tmp(Buffer.concat([h, Buffer.alloc(64)])))).toThrow("outside data section");
+});
+
+test("hostile: header running past end of file never yields a negative size", () => {
+  expect(() => readHeader(tmp(hdr(1, [], [info("blk.0.a", 0)])))).not.toThrow();
+  const sizes = readHeader(tmp(hdr(1, [], [info("blk.0.a", 0)]))).tensors.map((t) => t.bytes);
+  expect(sizes.every((b) => b >= 0)).toBe(true);
+});
+
+test("hostile: unknown array element type is refused", () => {
+  const arr = Buffer.concat([str("k"), u32(9), u32(99), u64(1), Buffer.alloc(8)]);
+  expect(() => readHeader(tmp(hdr(0, [arr])))).toThrow("unknown array element type");
+});
+
+test("hostile: implausible tensor count is refused", () => {
+  expect(() => readHeader(tmp(hdr(2 ** 40, [])))).toThrow("implausible");
+});
+
+test("ledger line holds no path separator and keeps the basename", () => {
+  const p = fixture();
+  const ledger = join(mkdtempSync(join(tmpdir(), "8llm-")), "plans.jsonl");
+  appendLedger(ledger, makePlan(readHeader(p), { context: 10, budgetBytes: 1e9 }), p, false);
+  const line = readFileSync(ledger, "utf8");
+  expect(line.includes("/")).toBe(false);
+  expect(JSON.parse(line).model).toBe("m.gguf");
+});
