@@ -198,6 +198,16 @@ function shellChain(command: string): Array<{ seg: string; op: string }> {
 			cur += ch;
 			continue;
 		}
+		// A redirection is part of its command: 2>&1, 1>&2, >&2, &>file, &>>file.
+		const redirect = text.slice(i).match(/^(?:\d*>&\d*-?|&>>?)/);
+		if (redirect && (ch === "&" || /\d|>/.test(ch))) {
+			// A digit only starts a redirection when it ends a word: "2>&1", not "v2>&1" mid-token.
+			if (!/\d/.test(ch) || /(?:^|\s)$/.test(cur)) {
+				cur += redirect[0];
+				i += redirect[0].length - 1;
+				continue;
+			}
+		}
 		const two = text.slice(i, i + 2);
 		if (two === "&&" || two === "||") {
 			out.push({ seg: cur.trim(), op: two });
@@ -212,13 +222,25 @@ function shellChain(command: string): Array<{ seg: string; op: string }> {
 	return out.filter((x) => x.seg !== "");
 }
 
-/** `git [global options] <sub> ...`, with the subcommand in the command position. */
+/** Quoted strings blanked, so a flag-looking word inside a commit message is not read as a flag. */
+function withoutQuoted(s: string): string {
+	return s.replace(/"(?:\\.|[^"\\])*"|'[^']*'/g, '""');
+}
+
+/**
+ * `git [global options] <sub> ...`, with the subcommand in command position.
+ * Flags that mean "nothing was done" are refused: --dry-run and --help/-h on
+ * any subcommand, and -n on push (on commit -n is --no-verify).
+ */
 function gitSub(seg: string, sub: string): boolean {
 	const m = seg.match(
 		/^(?:(?:env\s+)?(?:\w+=\S*\s+)*)git(?:\s+(?:-[cC]\s+\S+|--[\w-]+(?:=\S+)?))*\s+([\w-]+)\b(.*)$/s,
 	);
 	if (!m || m[1] !== sub) return false;
-	return !/(?:^|\s)(?:--dry-run|-n|--help|-h)(?:\s|$)/.test(m[2]);
+	const flags = withoutQuoted(m[2]);
+	if (/(?:^|\s)(?:--dry-run|--help|-h)(?:\s|$)/.test(flags)) return false;
+	if (sub === "push" && /(?:^|\s)-n(?:\s|$)/.test(flags)) return false;
+	return true;
 }
 
 /**
@@ -234,13 +256,38 @@ function shellGit(command: unknown, sub: string): boolean {
 	return chain.slice(i).every((c, k, all) => k === all.length - 1 || c.op === "&&");
 }
 
+/** A trailing pager or logger the output is piped through: it hides git's exit status. */
+const PIPE_SINK = /^(?:tail|head|tee|cat|less|more|grep|sed|cut)\b/;
+
+/**
+ * `git push origin main 2>&1 | tail -5`: the pipe's status is tail's, so the exit
+ * code proves nothing. Accepted when the only thing after git is such a sink and
+ * the output shows no failure.
+ */
+function shellGitPiped(command: unknown, sub: string, result: string): boolean {
+	// A commit hook's rejection can hide behind a pipe with no recognisable words: push only.
+	if (sub !== "push" || typeof command !== "string") return false;
+	const chain = shellChain(command);
+	const i = chain.findIndex((c) => gitSub(c.seg, sub));
+	if (i < 0 || i === chain.length - 1) return false;
+	const rest = chain.slice(i);
+	const onlySinks = rest.every(
+		(c, k, all) => (k === 0 ? c.op === "|" : k === all.length - 1 || c.op === "|") && (k === 0 || PIPE_SINK.test(c.seg)),
+	);
+	return onlySinks && !/\b(?:error|fatal|rejected|denied|failed)\b/i.test(result);
+}
+
 /** The dedicated tool, or a shell command passing `shellGit`, that succeeded with exit 0. */
 function gitBacked(tool: string, sub: string, noop?: RegExp) {
 	return (ledger: readonly ToolLedgerEntry[]): boolean =>
 		ledger.some((e) => {
 			if (!e.success || exitedNonZero(e)) return false;
 			if (noop?.test(e.result ?? "")) return false;
-			return e.name === tool || (e.name === "run_command" && shellGit(e.args?.command, sub));
+			return (
+				e.name === tool ||
+				(e.name === "run_command" &&
+					(shellGit(e.args?.command, sub) || shellGitPiped(e.args?.command, sub, e.result ?? "")))
+			);
 		});
 }
 
@@ -293,9 +340,13 @@ const OWN_VOICE =
 // "The changes have been committed": the thing acted on, then a passive auxiliary.
 const OWN_PASSIVE =
 	/^(?:(?:all|both|the|these|your|my|our)\s+)*(?:changes?|files?|edits?|work|everything|it|they)\s+(?:(?:has|have|had|is|are|was|were|now|all|been|successfully|just)\s+)*$/i;
+// "A commit was made": only an article before the noun the claim itself names.
+const ARTICLE_ONLY = /^(?:(?:a|an|the|new|this|that|my|our)\s*)+$/i;
+// Credits the action to someone else ("made by Alice").
+const BY_SOMEONE = /\bby\s+[A-Z]/;
 // A report about the past or about a log, not about this turn.
 const NOT_THIS_TURN =
-	/\b(?:yesterday|earlier|previously|ago|last\s+(?:week|month|year|night|time)|(?:on\s+)?(?:mon|tues|wednes|thurs|fri|satur|sun)day|\d{4}-\d{2}-\d{2}|in\s+the\s+previous|originally)\b/i;
+	/\b(?:yesterday|previously|last\s+(?:week|month|year|night|time)|(?:on\s+)?(?:mon|tues|wednes|thurs|fri|satur|sun)day|\d{4}-\d{2}-\d{2}|in\s+the\s+previous|originally)\b/i;
 
 /** Does this clause, spoken in the reply's own voice, report the action this turn? */
 function clauseClaims(clause: string, says: RegExp): boolean {
@@ -305,7 +356,8 @@ function clauseClaims(clause: string, says: RegExp): boolean {
 	const before = clause.slice(0, m.index).trim();
 	const nearby = before.split(/\s+/).filter(Boolean).slice(-NEGATION_WINDOW).join(" ");
 	if (GOVERNS.test(nearby)) return false;
-	return OWN_VOICE.test(before) || OWN_PASSIVE.test(`${before} `);
+	if (BY_SOMEONE.test(clause)) return false;
+	return OWN_VOICE.test(before) || OWN_PASSIVE.test(`${before} `) || ARTICLE_ONLY.test(before);
 }
 
 /** The notes for every action the reply reports that the turn's ledger does not back. */

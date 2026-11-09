@@ -309,3 +309,66 @@ describe("claims are not hidden by a later clause or a loose shell match", () =>
 		expect(out).toEqual({ content: "Alice committed the login fix yesterday.", violated: false });
 	});
 });
+
+// Review of #111 at 5ea9093 (Karen): real commits and pushes were marked unbacked.
+describe("real commits and pushes are backed", () => {
+	const run = (command: string, result = "Exit code 0"): ToolLedgerEntry => ({
+		name: "run_command",
+		args: { command },
+		success: true,
+		result,
+	});
+	const commit = (c: string, r?: string) => unbackedActionClaims("Committed both files.", [run(c, r)]);
+	const push = (c: string, r?: string) => unbackedActionClaims("Pushed to main.", [run(c, r)]);
+
+	it("2>&1, 1>&2 and &> are redirections, not separators", () => {
+		expect(commit("git commit -m x 2>&1")).toEqual([]);
+		expect(push("git push origin main 2>&1")).toEqual([]);
+		expect(commit("git add -A && git commit -m x 2>&1 && git log -1")).toEqual([]);
+		expect(commit("git commit -m x >&2")).toEqual([]);
+		expect(commit("git commit -m x &>/dev/null")).toEqual([]);
+		// ...and a real separator after it still counts as one.
+		expect(commit("git commit -m x 2>&1; true")).toHaveLength(1);
+		expect(commit("git commit -m x & true")).toHaveLength(1);
+	});
+
+	it("-n is --no-verify on commit, a dry run only on push", () => {
+		expect(commit("git commit -n -m x")).toEqual([]);
+		expect(commit("git commit --no-verify -m x")).toEqual([]);
+		expect(push("git push -n origin main")).toHaveLength(1);
+		expect(push("git push --dry-run")).toHaveLength(1);
+		expect(commit("git commit --dry-run")).toHaveLength(1);
+	});
+
+	it("a flag-looking word inside the quoted message is not a flag", () => {
+		expect(commit('git commit -m "support -n flag"')).toEqual([]);
+		expect(commit("git commit -m 'document --help and -h'")).toEqual([]);
+		expect(commit('git commit -m "x --dry-run y"')).toEqual([]);
+		expect(commit("git commit -m x --help")).toHaveLength(1);
+	});
+
+	it("a push piped through tail counts when its output shows no failure", () => {
+		expect(push("git push origin main 2>&1 | tail -5", "To github.com:o/r.git\n   a1b..c2d  main -> main")).toEqual([]);
+		expect(push("git push origin main 2>&1 | tail -5", "! [rejected]  main -> main (non-fast-forward)\nerror: failed to push")).toHaveLength(1);
+		expect(push("git push origin main 2>&1 | tail -5", "fatal: unable to access")).toHaveLength(1);
+		// Only a sink may follow the pipe: another command after it is not git's status.
+		expect(push("git push origin main | tail -5; true", "ok")).toHaveLength(1);
+		expect(push("git push origin main | wc -l && echo ok", "ok")).toHaveLength(1);
+	});
+
+	it("'A commit was made' is a claim; one made by someone is not", () => {
+		expect(unbackedActionClaims("A commit was made.", [])).toHaveLength(1);
+		expect(unbackedActionClaims("A new commit was created.", [])).toHaveLength(1);
+		expect(unbackedActionClaims("The commit was made.", [])).toHaveLength(1);
+		expect(unbackedActionClaims("The commit was made by Alice.", [])).toEqual([]);
+		expect(unbackedActionClaims("The last commit was made by Alice on Monday.", [])).toEqual([]);
+	});
+
+	it("'earlier' and 'ago' no longer exempt a claim; real dates still do", () => {
+		expect(unbackedActionClaims("I committed the fix earlier.", [])).toHaveLength(1);
+		expect(unbackedActionClaims("Committed it a minute ago.", [])).toHaveLength(1);
+		expect(unbackedActionClaims("I committed the fix yesterday.", [])).toEqual([]);
+		expect(unbackedActionClaims("I committed the fix on 2026-11-03.", [])).toEqual([]);
+		expect(unbackedActionClaims("I committed the fix last week.", [])).toEqual([]);
+	});
+});
