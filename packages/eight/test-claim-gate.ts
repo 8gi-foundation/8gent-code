@@ -78,7 +78,7 @@ export function claimsTestsPass(reply: string): boolean {
 	return reply.split(/(?<=[.!?])\s+|\n+/).some(sentenceClaims);
 }
 
-function isTestRun(e: TestGateEntry): boolean {
+export function isTestRun(e: TestGateEntry): boolean {
 	return (
 		e.name === "run_command" && typeof e.args?.command === "string" && TEST_CMD.test(e.args.command)
 	);

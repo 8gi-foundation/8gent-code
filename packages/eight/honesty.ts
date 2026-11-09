@@ -19,6 +19,8 @@
  * loop. See issue #2747 and the AgenticHonesty skill.
  */
 
+import { isTestRun } from "./test-claim-gate";
+
 /** One tool call made during the current turn. */
 export interface ToolLedgerEntry {
 	name: string;
@@ -147,6 +149,84 @@ export function buildNoActionReply(): string {
 	);
 }
 
+// ── Action claims (break found by the daily-driver pilot) ─────────────────────
+//
+// Law 1 above passes a reply when ANY action tool succeeded, and its patterns
+// only know "successfully committed", "has been committed" and "I committed
+// <file>". So "Committed both files with the message add sub", sent with no
+// tool call at all, matched nothing and reached the user as fact (qwen3.8:27b,
+// git log still showed only the init commit). A claim of one specific action
+// has to be backed by a successful call of that action, not by any call.
+
+type ActionClaimKind = "commit" | "push" | "tests";
+
+interface ActionClaim {
+	kind: ActionClaimKind;
+	/** Past-tense report of the action, one sentence. */
+	says: RegExp;
+	/** The turn's ledger holds a successful call of exactly this action. */
+	backed: (ledger: readonly ToolLedgerEntry[]) => boolean;
+	/** Shown to the user under the reply. */
+	note: string;
+}
+
+// A sentence that is a plan, a condition, a refusal or a question is not a report.
+const NOT_A_REPORT =
+	/\?\s*$|\b(?:not|never|no|nothing|unable|cannot|failed|without|yet|would|will|should|could|can|if|once|before|until|need|needs|want|wants|please|let me|ready to|be committed|be pushed|get committed)\b|n't\b/i;
+
+const exitedNonZero = (e: ToolLedgerEntry) => /^Exit code (?!0\b)/.test(e.result ?? "");
+
+/** A shell command run this turn that matches `re` and exited 0, or the named dedicated tool. */
+function shellOrTool(tool: string, re: RegExp, doneOnNoop?: RegExp) {
+	return (ledger: readonly ToolLedgerEntry[]): boolean =>
+		ledger.some((e) => {
+			if (!e.success || exitedNonZero(e)) return false;
+			if (doneOnNoop?.test(e.result ?? "")) return false;
+			if (e.name === tool) return true;
+			return e.name === "run_command" && typeof e.args?.command === "string" && re.test(e.args.command);
+		});
+}
+
+const ACTION_CLAIMS: readonly ActionClaim[] = [
+	{
+		kind: "commit",
+		says: /\b(?:committed|(?:created|made)\s+(?:the\s+|a\s+|that\s+)?commit|commit\s+(?:is\s+|was\s+)?(?:created|made|done|complete))\b/i,
+		backed: shellOrTool("git_commit", /\bgit\b[^;&|]*\bcommit\b/, /nothing (?:added )?to commit|no changes added/i),
+		note: "No commit was made: no git commit succeeded this turn.",
+	},
+	{
+		kind: "push",
+		says: /\b(?:pushed|push\s+(?:is\s+|was\s+)?(?:done|complete|succeeded))\b/i,
+		backed: shellOrTool("git_push", /\bgit\b[^;&|]*\bpush\b/),
+		note: "Nothing was pushed: no git push succeeded this turn.",
+	},
+	{
+		kind: "tests",
+		says: /\b(?:ran|executed)\s+(?:the\s+|all\s+|your\s+|our\s+)?(?:unit\s+|full\s+)?(?:tests?|test\s+suite)\b/i,
+		backed: (ledger) => ledger.some((e) => e.success && isTestRun(e)),
+		note: "No tests were run: no test command ran this turn.",
+	},
+];
+
+/** A reply sentence, split the way a reader would: lines, then sentence ends. */
+function replySentences(text: string): string[] {
+	return text
+		.replace(/```[\s\S]*?```/g, " ")
+		.split(/\n+/)
+		.flatMap((line) => line.split(/(?<=[.!?:])\s+/))
+		.map((s) => s.trim())
+		.filter(Boolean);
+}
+
+/** The notes for every action the reply reports that the turn's ledger does not back. */
+export function unbackedActionClaims(content: string, ledger: readonly ToolLedgerEntry[]): string[] {
+	if (!content) return [];
+	const sentences = replySentences(content).filter((s) => !NOT_A_REPORT.test(s));
+	return ACTION_CLAIMS.filter(
+		(c) => sentences.some((s) => c.says.test(s)) && !c.backed(ledger),
+	).map((c) => c.note);
+}
+
 export interface HonestyGateResult {
 	content: string;
 	violated: boolean;
@@ -168,10 +248,10 @@ export function enforceAgenticHonesty(opts: {
 	const { content, ledger, workingDirectory } = opts;
 	const actions = ledger.filter((e) => ACTION_TOOLS.has(e.name));
 	if (actions.some((e) => e.success)) {
-		return { content, violated: false };
+		return actionClaimGate(content, ledger);
 	}
 	if (!claimsCompletion(content)) {
-		return { content, violated: false };
+		return actionClaimGate(content, ledger);
 	}
 	const failed = actions.filter((e) => !e.success);
 	if (failed.length > 0) {
@@ -186,6 +266,17 @@ export function enforceAgenticHonesty(opts: {
 		content: buildNoActionReply(),
 		violated: true,
 		reason: "success claim with no action tool call at all",
+	};
+}
+
+/** The reply stays; what the turn did not do is said under it, in plain words. */
+function actionClaimGate(content: string, ledger: ToolLedgerEntry[]): HonestyGateResult {
+	const notes = unbackedActionClaims(content, ledger);
+	if (notes.length === 0) return { content, violated: false };
+	return {
+		content: `${content.trimEnd()}\n\n${notes.map((n) => `[harness] ${n}`).join("\n")}`,
+		violated: true,
+		reason: `action claim without a matching successful call: ${notes.join(" ")}`,
 	};
 }
 
