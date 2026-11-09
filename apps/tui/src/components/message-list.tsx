@@ -50,6 +50,7 @@ import {
 import { type MarkStream, holdLivingMark } from "../lib/living-mark.js";
 import { motionEnabled } from "../lib/motion.js";
 import { wrapNotice } from "../lib/notice-wrap.js";
+import { offsetAfterNewMessages, pagingDelta } from "../lib/scroll-pin.js";
 import { drawsColour, glyphs } from "../lib/term-caps.js";
 import { useToolOutputVersion } from "../lib/tool-output-state.js";
 import { type ChatItem, type ToolTrailEntry, buildChatItems } from "../lib/tool-trail.js";
@@ -393,6 +394,8 @@ export function MessageList({
 	// scrollOffset = messages held back from the bottom. autoScrollRef tracks
 	// whether the user is pinned to the live edge.
 	const [scrollOffset, setScrollOffset] = useState(0);
+	const scrollOffsetRef = useRef(0);
+	scrollOffsetRef.current = scrollOffset;
 	const autoScrollRef = useRef(true);
 
 	const total = chatMessages.length;
@@ -460,15 +463,8 @@ export function MessageList({
 	// Keyboard: shift+arrows (plain arrows are owned by the input field).
 	useInput(
 		(_input, key) => {
-			// Unshifted PgUp/PgDn scroll the chat only in keys-up (a phone has no
-			// shift) and never while an approval card owns them.
-			const plainPaging = touchHints && !approvalPending;
-			if (key.pageUp && !key.shift && plainPaging) scrollBy(+5);
-			else if (key.pageDown && !key.shift && plainPaging) scrollBy(-5);
-			else if (key.shift && key.upArrow) scrollBy(+1);
-			else if (key.shift && key.downArrow) scrollBy(-1);
-			else if (key.shift && key.pageUp) scrollBy(+5);
-			else if (key.shift && key.pageDown) scrollBy(-5);
+			const delta = pagingDelta(key, { approvalPending: Boolean(approvalPending) });
+			if (delta !== null) scrollBy(delta);
 		},
 		{ isActive: scrollEnabled },
 	);
@@ -490,12 +486,14 @@ export function MessageList({
 		if (total > prevCountRef.current) {
 			const newMessage = chatMessages[chatMessages.length - 1];
 			if (newMessage) setNewMessageId(newMessage.id);
-			if (autoScrollRef.current) {
-				setScrollOffset(0);
-			} else {
-				const delta = total - prevCountRef.current;
-				setScrollOffset((prev) => Math.min(prev + delta, total - 1));
-			}
+			const next = offsetAfterNewMessages({
+				offset: scrollOffsetRef.current,
+				pinned: autoScrollRef.current,
+				added: chatMessages.slice(prevCountRef.current),
+				total,
+			});
+			autoScrollRef.current = next.pinned;
+			setScrollOffset(next.offset);
 		}
 		prevCountRef.current = total;
 	}, [total, chatMessages]);

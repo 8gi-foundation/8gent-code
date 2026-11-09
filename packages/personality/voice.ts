@@ -257,6 +257,27 @@ export function flavorResponse(content: string, flavor: FlavoredResponse): strin
 }
 
 /**
+ * Whether the person asked for a bare reply ("Reply with just the word pong",
+ * "one line", "nothing else"). A tagline stapled after "pong" breaks that
+ * instruction (pilot break 7), so such a turn gets no flavor.
+ *
+ * Conservative on purpose: only phrasings that constrain the output itself.
+ */
+const BARE_REPLY_PATTERNS: readonly RegExp[] = [
+	/\b(?:reply|respond|answer|say|output|print|return|give(?: me)?)\b[^.!?\n]{0,40}\b(?:just|only|exactly)\b/i,
+	/\b(?:just|only) (?:the|a|one|with) (?:word|number|name|line|sentence|answer|result|value|path|sha|command)\b/i,
+	/\b(?:one|1|a single|single)[- ](?:word|line|sentence|liner)\b/i,
+	/\bin (?:one|1|a single) (?:word|line|sentence)\b/i,
+	/\b(?:no|without) (?:preamble|commentary|explanation|extra text|extra words)\b/i,
+	/\bnothing else\b/i,
+];
+
+export function wantsBareReply(userMessage: string): boolean {
+	if (!userMessage) return false;
+	return BARE_REPLY_PATTERNS.some((re) => re.test(userMessage));
+}
+
+/**
  * Create a greeting response
  */
 export function createGreetingResponse(content?: string): string {
