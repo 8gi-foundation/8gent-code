@@ -75,8 +75,8 @@ export function untrackShell(pid: number | undefined): void {
  * Keep the pid registered while the group is alive; the prune sweep removes it
  * once the group is gone.
  *
- * Limit: a process that leaves the group (`setsid -f`, or a daemon that calls
- * setsid itself) is in a new session and group, so no pid we hold names it.
+ * Limit: a process that leaves the group (setsid or setpgid: `setsid -f`, or a
+ * daemon that calls either itself) is in another group, so no pid we hold names it.
  * There is no portable way to track it without a cgroup or subreaper; it
  * survives quit and that is not hidden.
  */
