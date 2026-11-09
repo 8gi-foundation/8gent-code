@@ -2597,7 +2597,11 @@ export function App({
 	}, []);
 	// Never leave a shell command behind: unmount, exit, SIGTERM and SIGHUP kill them.
 	useEffect(() => {
-		const uninstall = killBangsOnExit(() => stopBangRuns());
+		const uninstall = killBangsOnExit(() => {
+			stopBangRuns();
+			// A signal death never fires "exit", so the SIGKILL sweep there is not enough.
+			killLiveShells("SIGKILL");
+		});
 		return () => {
 			uninstall();
 			stopBangRuns();

@@ -89,4 +89,34 @@ describe("live shell registry", () => {
 		started.push(pid);
 		expect(await gone(pid)).toBe(true);
 	});
+
+	for (const sig of ["SIGHUP", "SIGTERM"] as const) {
+		test(`${sig} with the TUI's re-raise handler installed leaves no process behind`, async () => {
+			// The host dies by signal, so "exit" never fires. The handler app.tsx installs
+			// (killBangsOnExit with killLiveShells("SIGKILL")) must kill the sleeper first.
+			const script = `
+				import { spawnShell } from "${import.meta.dir}/../core/shell";
+				import { trackShell, killLiveShells } from "${import.meta.dir}/live-shells";
+				import { killBangsOnExit } from "${import.meta.dir}/../../apps/tui/src/lib/bang-command";
+				const c = spawnShell("sleep 60", { stdio: "ignore", processGroup: true });
+				c.unref();
+				trackShell(c.pid);
+				killBangsOnExit(() => { killLiveShells("SIGKILL"); });
+				console.log(c.pid);
+				process.kill(process.pid, "${sig}");
+				setTimeout(() => {}, 5000);
+			`;
+			const host = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "inherit"] });
+			let out = "";
+			host.stdout.on("data", (d) => {
+				out += d.toString();
+			});
+			const code = await new Promise<string | null>((r) => host.on("close", (_c, s) => r(s)));
+			expect(code).toBe(sig);
+			const pid = Number.parseInt(out.trim().split("\n").pop() ?? "", 10);
+			expect(pid).toBeGreaterThan(1);
+			started.push(pid);
+			expect(await gone(pid)).toBe(true);
+		});
+	}
 });
