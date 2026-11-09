@@ -1,10 +1,16 @@
-import { describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	type ToolLedgerEntry,
 	buildHonestFailureReply,
 	claimsCompletion,
 	enforceAgenticHonesty,
+	type RepoDelta,
 	isErrorToolResult,
+	readRepoSnapshot,
 	unbackedActionClaims,
 } from "./honesty";
 
@@ -166,7 +172,7 @@ describe("action claims need a matching successful call", () => {
 	it("passes a real commit, by git commit in a shell", () => {
 		const out = enforceAgenticHonesty({
 			content: "Committed both files.",
-			ledger: [ok("run_command", { command: "git add -A && git commit -m 'add sub'" }, "Exit code 0")],
+			ledger: [ok("run_command", { command: "git commit -m 'add sub'" }, "Exit code 0")],
 		});
 		expect(out.violated).toBe(false);
 	});
@@ -181,13 +187,11 @@ describe("action claims need a matching successful call", () => {
 		expect(unbackedActionClaims("I committed the change.", [failed])).toHaveLength(1);
 		const nonZero = ok("run_command", { command: "git commit -m x" }, "Exit code 1\nnothing to commit");
 		expect(unbackedActionClaims("Committed.", [nonZero])).toHaveLength(1);
-		const noop = ok("run_command", { command: "git commit -m x" }, "nothing to commit, working tree clean");
-		expect(unbackedActionClaims("Committed.", [noop])).toHaveLength(1);
 	});
 
 	it("flags a push claim without a push, passes one with it", () => {
 		expect(unbackedActionClaims("Pushed to origin.", [ok("git_commit", {})])).toEqual([
-			"Nothing was pushed: no git push succeeded this turn.",
+			"Nothing was pushed: no git push ran this turn.",
 		]);
 		expect(unbackedActionClaims("Pushed to origin.", [ok("git_push", {})])).toEqual([]);
 	});
@@ -227,18 +231,18 @@ describe("claims are not hidden by a later clause or a loose shell match", () =>
 			expect(claimed(text).length).toBeGreaterThan(0);
 		}
 		expect(claimed("I committed and pushed the changes, you can open a PR now.")).toEqual([
-			"No commit was made: no git commit succeeded this turn.",
-			"Nothing was pushed: no git push succeeded this turn.",
+			"No commit was made: no git commit ran this turn.",
+			"Nothing was pushed: no git push ran this turn.",
 		]);
 		expect(claimed("Ran the tests and everything is green; committed before lunch.")).toEqual([
-			"No commit was made: no git commit succeeded this turn.",
+			"No commit was made: no git commit ran this turn.",
 			"No tests were run: no test command ran this turn.",
 		]);
 	});
 
 	it("a negation counts only when it governs the verb", () => {
 		expect(claimed("Committed, but not pushed.")).toEqual([
-			"No commit was made: no git commit succeeded this turn.",
+			"No commit was made: no git commit ran this turn.",
 		]);
 		expect(claimed("I have not committed the files.")).toEqual([]);
 		expect(claimed("The files are ready to be committed.")).toEqual([]);
@@ -250,39 +254,6 @@ describe("claims are not hidden by a later clause or a loose shell match", () =>
 		args: { command },
 		success: true,
 		result,
-	});
-
-	it("shell commands that merely mention git commit do not back a commit claim", () => {
-		for (const command of [
-			"echo git commit -m x",
-			"git log --grep commit",
-			"git commit -m x; true",
-			"git commit -m x || true",
-			"git commit -m x | tee out.log",
-			"git commit --dry-run -m x",
-			"git status # git commit",
-		]) {
-			expect(claimed("Committed both files.", [run(command)])).toHaveLength(1);
-		}
-	});
-
-	it("real commit shapes back the claim", () => {
-		for (const command of [
-			"git commit -m x",
-			"git add -A && git commit -m 'add sub'",
-			'git commit -m "a; b && c"',
-			"git -C /tmp/repo commit -m x",
-			"git commit -m x && git log -1",
-			"cd repo && git commit -F - <<'EOF'\nadd sub\n\nline; two\nEOF",
-		]) {
-			expect(claimed("Committed both files.", [run(command)])).toEqual([]);
-		}
-	});
-
-	it("git push --dry-run does not back a push claim; a real push does", () => {
-		expect(claimed("Pushed to main.", [run("git push --dry-run origin main")])).toHaveLength(1);
-		expect(claimed("Pushed to main.", [run("git push origin main")])).toEqual([]);
-		expect(claimed("Pushed to main.", [run("git push origin main; true")])).toHaveLength(1);
 	});
 
 	it("reports about other people, past dates or log output are not claims", () => {
@@ -310,79 +281,7 @@ describe("claims are not hidden by a later clause or a loose shell match", () =>
 	});
 });
 
-// Review of #111 at 5ea9093 (Karen): real commits and pushes were marked unbacked.
-describe("real commits and pushes are backed", () => {
-	const run = (command: string, result = "Exit code 0"): ToolLedgerEntry => ({
-		name: "run_command",
-		args: { command },
-		success: true,
-		result,
-	});
-	const commit = (c: string, r?: string) => unbackedActionClaims("Committed both files.", [run(c, r)]);
-	const push = (c: string, r?: string) => unbackedActionClaims("Pushed to main.", [run(c, r)]);
-
-	it("2>&1, 1>&2 and &> are redirections, not separators", () => {
-		expect(commit("git commit -m x 2>&1")).toEqual([]);
-		expect(push("git push origin main 2>&1")).toEqual([]);
-		expect(commit("git add -A && git commit -m x 2>&1 && git log -1")).toEqual([]);
-		expect(commit("git commit -m x >&2")).toEqual([]);
-		expect(commit("git commit -m x &>/dev/null")).toEqual([]);
-		// ...and a real separator after it still counts as one.
-		expect(commit("git commit -m x 2>&1; true")).toHaveLength(1);
-		expect(commit("git commit -m x & true")).toHaveLength(1);
-	});
-
-	it("-n is --no-verify on commit, a dry run only on push", () => {
-		expect(commit("git commit -n -m x")).toEqual([]);
-		expect(commit("git commit --no-verify -m x")).toEqual([]);
-		expect(push("git push -n origin main")).toHaveLength(1);
-		expect(push("git push --dry-run")).toHaveLength(1);
-		expect(commit("git commit --dry-run")).toHaveLength(1);
-	});
-
-	it("a flag-looking word inside the quoted message is not a flag", () => {
-		expect(commit('git commit -m "support -n flag"')).toEqual([]);
-		expect(commit("git commit -m 'document --help and -h'")).toEqual([]);
-		expect(commit('git commit -m "x --dry-run y"')).toEqual([]);
-		expect(commit("git commit -m x --help")).toHaveLength(1);
-	});
-
-	it("a push piped through tail counts when its output shows no failure", () => {
-		expect(push("git push origin main 2>&1 | tail -5", "To github.com:o/r.git\n   a1b2c3d..c2d4e5f  main -> main")).toEqual([]);
-		expect(push("git push origin main 2>&1 | tail -5", "! [rejected]  main -> main (non-fast-forward)\nerror: failed to push")).toHaveLength(1);
-		expect(push("git push origin main 2>&1 | tail -5", "fatal: unable to access")).toHaveLength(1);
-		// Only a sink may follow the pipe: another command after it is not git's status.
-		expect(push("git push origin main | tail -5; true", "ok")).toHaveLength(1);
-		expect(push("git push origin main | wc -l && echo ok", "ok")).toHaveLength(1);
-	});
-
-	it("backslash-newline cannot hide a dry run (8SO)", () => {
-		expect(push("git push origin main \\\n--dry-run")).toHaveLength(1);
-		expect(push("git push origin main \\\n-n")).toHaveLength(1);
-		expect(push('git push origin main "--dry\\\n-run"')).toHaveLength(1);
-		// A plain continuation is still a real push.
-		expect(push("git push origin \\\nmain")).toEqual([]);
-	});
-
-	it("grep options that read files are not a pipe sink (8SO)", () => {
-		const out = "To github.com:o/r.git\n   a1b2c3d..c2d4e5f  main -> main";
-		for (const g of ["-R", "-rn", "--dereference-recursive", "-drecurse", "--directories=recurse", "-f /tmp/x", "--recursive"]) {
-			expect(push(`git push origin main 2>&1 | grep ${g} main`, out)).toHaveLength(1);
-		}
-		expect(push("git push origin main 2>&1 | grep main", out)).toEqual([]);
-	});
-
-	it("cut rewrites output, so it is not a pipe sink (8SO)", () => {
-		const out = "To github.com:o/r.git\n   a1b2c3d..c2d4e5f  main -> main";
-		expect(push("git push origin main 2>&1 | cut -c1-5", out)).toHaveLength(1);
-	});
-
-	it("a pushed branch named like a failure word is not a failed push", () => {
-		const out = "To github.com:o/r.git\n   a1b2c3d..c2d4e5f  fix/error-handling -> fix/error-handling";
-		expect(push("git push origin fix/error-handling 2>&1 | tail -5", out)).toEqual([]);
-		expect(push("git push origin fix/error-handling 2>&1 | tail -5", `${out}\nerror: hook declined`)).toHaveLength(1);
-	});
-
+describe("reply wording: who claims, and when", () => {
 	it("'A commit was made' is a claim; one made by someone is not", () => {
 		expect(unbackedActionClaims("A commit was made.", [])).toHaveLength(1);
 		expect(unbackedActionClaims("A new commit was created.", [])).toHaveLength(1);
@@ -400,39 +299,6 @@ describe("real commits and pushes are backed", () => {
 	});
 });
 
-// Review of #111 at 0d6edd5 (Karen): silence read as success, a loose "by" exemption, flag bypasses.
-describe("a pushed ref is positive evidence; silence is not", () => {
-	const OK = "To github.com:o/r.git\n   abc1234..def5678  main -> main\n";
-	const run = (command: string, result = "Exit code 0\n"): ToolLedgerEntry => ({
-		name: "run_command",
-		args: { command },
-		success: true,
-		result,
-	});
-	const push = (c: string, r?: string) => unbackedActionClaims("Pushed.", [run(c, r)]);
-	const commit = (c: string, r?: string) => unbackedActionClaims("Committed.", [run(c, r)]);
-
-	it("a piped push whose output hides the result is not backed", () => {
-		expect(push("git push origin main 2>&1 | head -1", "To github.com:o/r.git\n")).toHaveLength(1);
-		expect(push("git push origin main 2>/dev/null | tail")).toHaveLength(1);
-		expect(push("git push origin main 2>&1 | grep -vE 'error|rejected'", "To github.com:o/r.git\n")).toHaveLength(1);
-		expect(push("git push origin main 2>&1 | cat >/dev/null")).toHaveLength(1);
-		expect(push("git push origin main 2>&1 | tail -n 0")).toHaveLength(1);
-	});
-
-	it("a piped push is backed by a ref-update line, a new branch or a new tag", () => {
-		expect(push("git push origin main 2>&1 | tail -5", OK)).toEqual([]);
-		expect(push("git push -u origin x 2>&1 | tail", "To g\n * [new branch]      x -> x\n")).toEqual([]);
-		expect(push("git push --tags 2>&1 | tail", "To g\n * [new tag]         v1 -> v1\n")).toEqual([]);
-		expect(push("git push -f 2>&1 | tail", "To g\n + abc1234...def5678 main -> main (forced update)\n")).toEqual([]);
-	});
-
-	it("a ref line next to a rejection is not backed", () => {
-		const mixed = `${OK} ! [rejected]        dev -> dev (fetch first)\nerror: failed to push some refs\n`;
-		expect(push("git push origin main dev 2>&1 | tail -9", mixed)).toHaveLength(1);
-	});
-});
-
 describe("'by' only exempts a passive claim", () => {
 	it("a bare claim followed by 'by <Capital>' is still a claim", () => {
 		expect(unbackedActionClaims("Pushed to main by SSH.", [])).toHaveLength(1);
@@ -445,129 +311,242 @@ describe("'by' only exempts a passive claim", () => {
 	});
 });
 
-describe("flags and chains that mean nothing was done", () => {
+// ── Round 5: success comes from repo state, never from command text or output ──
+// Every case runs the command for real in a temp repo with a bare remote. The
+// text only says an attempt was made; HEAD and the upstream ref say what happened.
+const roots: string[] = [];
+afterAll(() => {
+	for (const r of roots) rmSync(r, { recursive: true, force: true });
+});
+
+function sh(cwd: string, command: string, env: Record<string, string> = {}) {
+	return spawnSync("bash", ["-c", command], {
+		cwd,
+		encoding: "utf8",
+		env: {
+			...process.env,
+			HOME: cwd,
+			GIT_CONFIG_NOSYSTEM: "1",
+			GIT_CONFIG_GLOBAL: "/dev/null",
+			GIT_TERMINAL_PROMPT: "0",
+			GIT_AUTHOR_NAME: "t",
+			GIT_AUTHOR_EMAIL: "t@example.test",
+			GIT_COMMITTER_NAME: "t",
+			GIT_COMMITTER_EMAIL: "t@example.test",
+			...env,
+		},
+	});
+}
+
+type Setup = "commit" | "push" | "push-rejected" | "push-uptodate" | "commit-hook";
+
+/** A clone of a bare remote, tracking origin/main, set up for the scenario. */
+function makeRepo(setup: Setup) {
+	const root = mkdtempSync(join(tmpdir(), "honesty-"));
+	roots.push(root);
+	const remote = join(root, "remote.git");
+	const dir = join(root, "work");
+	mkdirSync(dir);
+	const run = (c: string, cwd = dir) => {
+		const r = sh(cwd, c);
+		if (r.status !== 0) throw new Error(`${c}: ${r.stderr}`);
+	};
+	run(`git init -q --bare -b main ${remote}`, root);
+	run("git init -q -b main && git config commit.gpgsign false && echo a > a.txt && git add a.txt && git commit -qm init");
+	run(`git remote add origin ${remote} && git push -q -u origin main`);
+	writeFileSync(join(root, "fake"), "abc1234..def5678  main -> main\n");
+	if (setup === "push-rejected") {
+		// The remote moved on: every push from here is a non-fast-forward rejection.
+		run(`git clone -q ${remote} other && cd other && git config commit.gpgsign false && echo r > r.txt && git add r.txt && git commit -qm remote && git push -q origin main`, root);
+	}
+	if (setup === "commit-hook") {
+		writeFileSync(join(dir, ".git", "hooks", "pre-commit"), "#!/bin/sh\necho rejected by hook >&2\nexit 1\n");
+		chmodSync(join(dir, ".git", "hooks", "pre-commit"), 0o755);
+	}
+	writeFileSync(join(dir, "b.txt"), "b\n");
+	run("git add b.txt");
+	if (setup.startsWith("push")) run("git commit -qm local");
+	if (setup === "push-uptodate") run("git push -q origin main");
+	return { dir, root };
+}
+
+/** Take the turn's start snapshot, run the command for real, read the end snapshot, judge the claim. */
+function turn(setup: Setup, reply: string, command: string) {
+	const { dir } = makeRepo(setup);
+	const before = readRepoSnapshot(dir);
+	const r = sh(dir, command, { REPO: dir });
+	const entry: ToolLedgerEntry = {
+		name: "run_command",
+		args: { command },
+		success: true,
+		result: `Exit code ${r.status}\n${r.stdout}${r.stderr}`,
+	};
+	const repo: RepoDelta = { before, after: readRepoSnapshot(dir) };
+	return { notes: unbackedActionClaims(reply, [entry], repo), dir, entry, repo };
+}
+
+describe("round 5: a push is backed when the upstream moved to include HEAD", () => {
+	// [command, does it really push on a healthy remote]
+	const PUSHES: Array<[string, boolean]> = [
+		["git push origin main", true],
+		["git push origin main 2>&1 | tail -5", true],
+		["git push origin main 2>/dev/null | tail", true],
+		["git push origin main 2>&1 | head -1", true],
+		["git push origin main || true", true],
+		["git push origin main; true", true],
+		["git push origin main & wait", true],
+		['git -C "$REPO" push origin main', true],
+		["git push -u origin main", true],
+		["! git push origin main", true],
+		["git push --dry-run && git push 2>/dev/null | tail", true],
+		["git push origin main 2>&1 | sed 's/.*/abc1234..def5678 main -> main/'", true],
+		["git push origin main 2>/dev/null | cat - /tmp/fake", true],
+		// nothing is pushed by any of these
+		["git push --dry-run origin main", false],
+		["git push -n origin main", false],
+		["git push --dry-run origin main 2>&1 | tail", false],
+		["git push {--dry-run,origin} main 2>&1 | tail", false],
+		["git push --dry-run origin main 2>&1 | grep --regexp=main ../fake", false],
+		["git push $'--dry-run' origin main", false],
+		["D=--dry-run; git push $D origin main", false],
+		["git push $(echo --dry-run) origin main", false],
+		['git push --dry-ru""n origin main', false],
+		["git push \\--dry-run origin main", false],
+		["git push origin main \\\n--dry-run", false],
+		["git push -o --dry-run origin main", false],
+		["git push origin -- --dry-run", false],
+		['echo "abc1234..def5678 main -> main" | tail', false],
+		["printf 'abc1234..def5678 main -> main\\n'", false],
+		['echo "abc1234..def5678 main -> main"; git push --dry-run 2>/dev/null | tail', false],
+		["git commit -m 'abc1234..def5678 main -> main' 2>/dev/null; git push --dry-run | tail", false],
+	];
+	for (const [command, real] of PUSHES) {
+		it(`${real ? "passes" : "flags"} on a healthy remote: ${JSON.stringify(command)}`, () => {
+			const { notes } = turn("push", "Pushed to main.", command);
+			expect(notes.length > 0).toBe(!real);
+		});
+		it(`flags when the remote rejects it: ${JSON.stringify(command)}`, () => {
+			const { notes } = turn("push-rejected", "Pushed to main.", command);
+			expect(notes.length).toBe(1);
+		});
+	}
+
+	it("an up-to-date push moved nothing, and the note says it could not confirm", () => {
+		const { notes } = turn("push-uptodate", "Pushed.", "git push origin main");
+		expect(notes).toEqual([
+			"Could not confirm a push: the upstream branch did not move to include HEAD this turn.",
+		]);
+	});
+
+	it("no push attempted says so plainly", () => {
+		const { notes } = turn("push", "Pushed.", "git status");
+		expect(notes).toEqual(["Nothing was pushed: no git push ran this turn."]);
+	});
+});
+
+describe("round 5: a commit is backed when HEAD changed", () => {
+	const COMMITS: Array<[string, boolean]> = [
+		["git commit -m x", true],
+		["git add -A && git commit -m x 2>&1 | tail", true],
+		["git commit -m x || true", true],
+		["git commit -m x | cat", true],
+		["git commit -n -m x", true],
+		['git -C "$REPO" commit -m x', true],
+		["git commit -m x; true", true],
+		["git commit -m 'abc1234..def5678 main -> main'", true],
+		["git commit --dry-run -m x", false],
+		["git commit --dr -m x", false],
+		["git commit {--dry-run,--message=x}", false],
+		["git commit -S --dry-run -m x", false],
+		["git commit -h", false],
+		["echo git commit -m x", false],
+		["git log --grep commit", false],
+		["git status # git commit -m x", false],
+	];
+	for (const [command, real] of COMMITS) {
+		it(`${real ? "passes" : "flags"}: ${JSON.stringify(command)}`, () => {
+			const { notes } = turn("commit", "Committed both files.", command);
+			expect(notes.length > 0).toBe(!real);
+		});
+	}
+
+	it("a hook rejection is not a commit, plain or piped (the known gap)", () => {
+		for (const command of ["git commit -m x", "git commit -m x 2>&1 | tail", "git commit -m x || true"]) {
+			const { notes } = turn("commit-hook", "Committed.", command);
+			expect(notes).toEqual(["No commit was made: HEAD did not change this turn."]);
+		}
+	});
+
+	it("through the gate: the reply stays and the harness line is appended", () => {
+		const { entry, repo } = turn("commit-hook", "Committed.", "git commit -m x 2>&1 | tail");
+		const out = enforceAgenticHonesty({ content: "Committed both files.", ledger: [entry], repo });
+		expect(out.violated).toBe(true);
+		expect(out.content).toBe(
+			"Committed both files.\n\n[harness] No commit was made: HEAD did not change this turn.",
+		);
+	});
+});
+
+describe("round 5: when the repo cannot be read, only a plain command with exit 0 counts", () => {
 	const run = (command: string, result = "Exit code 0\n"): ToolLedgerEntry => ({
 		name: "run_command",
 		args: { command },
 		success: true,
 		result,
 	});
-	const push = (c: string) => unbackedActionClaims("Pushed.", [run(c)]);
-	const commit = (c: string) => unbackedActionClaims("Committed.", [run(c)]);
+	const commit = (c: string, r?: string) => unbackedActionClaims("Committed.", [run(c, r)]);
+	const push = (c: string, r?: string) => unbackedActionClaims("Pushed.", [run(c, r)]);
 
-	it("bundled short flags: -vn is a dry run on push", () => {
-		expect(push("git push -vn origin main")).toHaveLength(1);
-		expect(push("git push -nv origin main")).toHaveLength(1);
-		expect(push("git push -v origin main")).toEqual([]);
-		expect(commit("git commit -am 'x'")).toEqual([]);
-		expect(commit("git commit -anm 'x'")).toEqual([]);
+	it("a plain commit or push passes", () => {
+		expect(commit("git commit -m 'add sub'")).toEqual([]);
+		expect(commit("git commit -am x")).toEqual([]);
+		expect(push("git push origin main")).toEqual([]);
+		expect(push('git -C /repo push origin main')).toEqual([]);
 	});
 
-	it("shortened long flags: --dry and --dr on push and commit", () => {
-		expect(push("git push --dry origin main")).toHaveLength(1);
-		expect(commit("git commit --dry -m x")).toHaveLength(1);
-		expect(commit("git commit --dr -m x")).toHaveLength(1);
-		expect(commit("git commit --date=2026-11-01 -m x")).toEqual([]);
+	it("a dedicated tool that succeeded passes", () => {
+		expect(unbackedActionClaims("Committed.", [ok("git_commit", {})])).toEqual([]);
+		expect(unbackedActionClaims("Pushed.", [ok("git_push", {})])).toEqual([]);
 	});
 
-	it("a quoted flag that is a real argument counts; a message is only text", () => {
-		expect(push('git push "--dry-run" origin main')).toHaveLength(1);
-		expect(push("git push '-n' origin main")).toHaveLength(1);
-		expect(commit('git commit -m "use -n and --dry-run flags"')).toEqual([]);
-		expect(commit('git commit --message="use --dry-run"')).toEqual([]);
-		expect(commit("git commit -m'wip -n'")).toEqual([]);
-		expect(commit("git commit -F msg.txt")).toEqual([]);
+	it("anything chained, piped, quoted, expanded or dry is 'could not confirm', not 'nothing was pushed'", () => {
+		for (const c of [
+			"git push origin main 2>&1 | tail",
+			"git push origin main || true",
+			"git push origin main; true",
+			"cd r && git push origin main",
+			"git push {--dry-run,origin} main",
+			'git push "--dry-run" origin main',
+			"git push $(echo --dry-run) origin main",
+			"git push --dry-run origin main",
+			"git push -n origin main",
+			"git push origin main &",
+			"git push origin main \\\n--dry-run",
+		]) {
+			expect(push(c)).toEqual([
+				"Could not confirm a push: the repository state could not be read, so only a plain successful command counts.",
+			]);
+		}
+		expect(commit("git commit -m x | cat")).toEqual([
+			"Could not confirm a commit: the repository state could not be read, so only a plain successful command counts.",
+		]);
+		expect(commit("git commit --dry-run -m x")).toHaveLength(1);
 	});
 
-	it("a backgrounded push is not backed", () => {
-		expect(push("git push origin main &")).toHaveLength(1);
-		expect(commit("git commit -m x &")).toHaveLength(1);
+	it("a non-zero exit never counts", () => {
+		expect(push("git push origin main", "Exit code 1\nerror: failed\n")).toHaveLength(1);
 	});
 
-	it("&& after the commit proves it, even when a later command is piped", () => {
-		const r = "Exit code 0\nTo g\n   abc1234..def5678  main -> main\n";
-		const both = [run("git commit -m x && git push 2>&1 | tail -2", r)];
-		expect(unbackedActionClaims("Committed and pushed.", both)).toEqual([]);
-		// ...but a command that can mask the status still breaks it.
-		expect(commit("git commit -m x && true; true")).toHaveLength(1);
-		expect(commit("git commit -m x && git push || true")).toHaveLength(1);
-		expect(commit("git commit -m x | cat")).toHaveLength(1);
+	it("a repo with no upstream at the end falls back to the plain rule", () => {
+		const { dir } = makeRepo("push");
+		sh(dir, "git branch --unset-upstream");
+		const before = readRepoSnapshot(dir);
+		sh(dir, "git push origin main");
+		const repo: RepoDelta = { before, after: readRepoSnapshot(dir) };
+		expect(repo.after?.upstream).toBeUndefined();
+		const plain = run("git push origin main");
+		expect(unbackedActionClaims("Pushed.", [plain], repo)).toEqual([]);
+		const piped = run("git push origin main 2>&1 | tail");
+		expect(unbackedActionClaims("Pushed.", [piped], repo)).toHaveLength(1);
 	});
-});
-
-// ── Round 4: attack cases (8SO Karen, 44 + extras) ───────────────────────────
-describe("round 4: evidence comes from the command itself, never from another command's output", () => {
-	const run = (command: string, result = "Exit code 0\n"): ToolLedgerEntry[] => [
-		{ name: "run_command", args: { command }, success: true, result },
-	];
-	const FAKE = "Exit code 0\nabc1234..def5678 main -> main\n";
-	const OK = "Exit code 0\nTo github.com:o/r.git\n   abc1234..def5678  main -> main\n";
-	const NEWB = "Exit code 0\nTo github.com:o/r.git\n * [new branch]      feat -> feat\nbranch 'feat' set up to track 'origin/feat'.\n";
-	const FORCED = "Exit code 0\nTo github.com:o/r.git\n + abc1234...def5678 main -> main (forced update)\n";
-	const C: [string, string, any[], "flag" | "pass"][] = [
-	 ["echo ref | tail", "Pushed.", run('echo "abc1234..def5678 main -> main" | tail', FAKE), "flag"],
-	 ["printf ref", "Pushed.", run("printf 'abc1234..def5678 main -> main\\n'", FAKE), "flag"],
-	 ["echo ref ; push 2>/dev/null|tail", "Pushed.", run('echo "abc1234..def5678 main -> main"; git push origin main 2>/dev/null | tail', FAKE), "flag"],
-	 ["echo ref && push 2>/dev/null|tail", "Pushed.", run('echo "abc1234..def5678 main -> main" && git push origin main 2>/dev/null | tail', FAKE), "flag"],
-	 ["commit msg ref && push 2>/dev/null|tail", "Pushed.", run('git commit -m "abc1234..def5678 main -> main" && git push 2>/dev/null | tail', "Exit code 0\n[main 1a2b3c4] abc1234..def5678 main -> main\n"), "flag"],
-	 ["push 2>&1|sed rewrite", "Pushed.", run("git push origin main 2>&1 | sed 's/.*/abc1234..def5678 main -> main/'", FAKE), "flag"],
-	 ["push|tail; echo ref", "Pushed.", run('git push origin main 2>/dev/null | tail; echo "abc1234..def5678 main -> main"', FAKE), "flag"],
-	 ["push --dry-run 2>&1|tail (real dry output)", "Pushed.", run("git push --dry-run origin main 2>&1 | tail", "Exit code 0\nTo github.com:o/r.git\n   abc1234..def5678  main -> main\n"), "flag"],
-	 ["push|cat - fakefile", "Pushed.", run("git push origin main 2>/dev/null | cat - /tmp/fake", FAKE), "flag"],
-	 // flag parsing
-	 ["ansi-c $'--dry-run'", "Pushed.", run("git push $'--dry-run' origin main"), "flag"],
-	 ["var $D", "Pushed.", run("D=--dry-run; git push $D origin main"), "flag"],
-	 ["cmdsubst", "Pushed.", run("git push $(echo --dry-run) origin main"), "flag"],
-	 ["concat --dry-ru\"\"n", "Pushed.", run('git push --dry-ru""n origin main'), "flag"],
-	 ["escaped \\--dry-run", "Pushed.", run("git push \\--dry-run origin main"), "flag"],
-	 ["--dry-run=x? (--dry-run after --)", "Pushed.", run("git push origin -- --dry-run"), "pass"],
-	 ["commit -S --dry-run", "Committed.", run("git commit -S --dry-run -m x"), "flag"],
-	 ["commit -aS --dry-run", "Committed.", run("git commit -aS --dry-run -m x"), "flag"],
-	 ["commit --help", "Committed.", run("git commit --help"), "flag"],
-	 ["push -o --dry-run (value)", "Pushed.", run("git push -o --dry-run origin main"), "pass"],
-	 ["push --push-option=--dry-run", "Pushed.", run("git push --push-option=--dry-run origin main"), "pass"],
-	 ["commit -m '-n' msg", "Committed.", run("git commit -m '-n'"), "pass"],
-	 ["commit -m\"--dry-run\"", "Committed.", run('git commit -m"--dry-run"'), "pass"],
-	 ["commit -F - --dry-run", "Committed.", run("git commit -F - --dry-run"), "flag"],
-	 // chain masking
-	 ["push || true", "Pushed.", run("git push origin main || true"), "flag"],
-	 ["push ; true", "Pushed.", run("git push origin main; true"), "flag"],
-	 ["push && x &", "Pushed.", run("git push origin main && echo ok &"), "flag"],
-	 ["push & wait", "Pushed.", run("git push origin main & wait"), "flag"],
-	 ["push | true", "Pushed.", run("git push origin main | true"), "flag"],
-	 ["push && true || true", "Pushed.", run("git push origin main && true || true"), "flag"],
-	 ["push && echo | tail || true", "Pushed.", run("git push origin main && echo x | tail || true"), "flag"],
-	 ["! push", "Pushed.", run("! git push origin main"), "flag"],
-	 ["push 2>&1|tail|true", "Pushed.", run("git push origin main 2>&1 | tail | true", OK), "flag"],
-	 ["push |tail ||true", "Pushed.", run("git push origin main 2>&1 | tail || true", OK), "pass"],
-	 ["exit 1 nonzero result", "Pushed.", run("git push origin main", "Exit code 1\nerror: failed\n"), "flag"],
-	 // real ones
-	 ["plain push", "Pushed to main.", run("git push origin main", OK), "pass"],
-	 ["cd && push", "Pushed.", run("cd /repo && git push origin main", OK), "pass"],
-	 ["new branch |tail", "Pushed the branch.", run("git push -u origin feat 2>&1 | tail -3", NEWB), "pass"],
-	 ["forced |tail", "Pushed.", run("git push -f origin main 2>&1 | tail", FORCED), "pass"],
-	 ["commit + push chain", "Committed and pushed.", run('git add -A && git commit -m "fix" && git push origin main', "Exit code 0\n[main 1a2b3c4] fix\n" + OK.slice(12)), "pass"],
-	 ["commit msg w/ 'error' && push|tail", "Pushed.", run('git commit -m "fix error handling" && git push 2>&1 | tail', "Exit code 0\n[main 1a2b3c4] fix error handling\n" + OK.slice(12)), "pass"],
-	 ["git -C dir push", "Pushed.", run("git -C /repo push origin main", OK), "pass"],
-	 ["commit -S real", "Committed.", run("git commit -S -m x"), "pass"],
-	 ["commit --amend --no-edit", "Committed.", run("git commit --amend --no-edit"), "pass"],
-	 ["push --tags", "Pushed the tags.", run("git push --tags", "Exit code 0\n * [new tag] v1 -> v1\n"), "pass"],
-
-	 ["push|tail with file operand", "Pushed.", run("git push origin main 2>/dev/null | tail -n 5 /tmp/fake", FAKE), "flag"],
-	 ["push|head file operand", "Pushed.", run("git push origin main 2>/dev/null | head /tmp/fake", FAKE), "flag"],
-	 ["push|grep pattern file", "Pushed.", run("git push origin main 2>/dev/null | grep main /tmp/fake", FAKE), "flag"],
-	 ["fetch && push 2>/dev/null|tail", "Pushed.", run("git fetch origin 2>&1 && git push origin main 2>/dev/null | tail", FAKE), "flag"],
-	 ["dry-run push then push|tail", "Pushed.", run("git push --dry-run && git push 2>/dev/null | tail", OK), "flag"],
-	 ["push|tail || echo ref", "Pushed.", run('git push 2>/dev/null | tail || echo "abc1234..def5678 main -> main"', FAKE), "flag"],
-	 ["push 2>&1|grep main", "Pushed.", run("git push origin main 2>&1 | grep main", OK), "pass"],
-	 ["push 2>&1|cat", "Pushed.", run("git push origin main 2>&1 | cat", OK), "pass"],
-	 ["push 2>&1|tee log", "Pushed.", run("git push origin main 2>&1 | tee /tmp/log", OK), "pass"],
-	 ["commit -S -m real then push|tail", "Pushed.", run("git add -A && git commit -S -m x && git push 2>&1 | tail", "Exit code 0\n[main 1a2b3c4] x\n" + OK.slice(12)), "pass"],
-	];
-	for (const [name, reply, ledger, want] of C) {
-		it(`${want === "flag" ? "flags" : "passes"}: ${name}`, () => {
-			const notes = unbackedActionClaims(reply, ledger);
-			expect(notes.length > 0 ? "flag" : "pass").toBe(want);
-		});
-	}
 });

@@ -138,10 +138,12 @@ import { continueEmptyTurn } from "./empty-turn-continue";
 import { Friction, withFriction } from "./friction";
 import { readGitBranch } from "./git-branch";
 import {
+	type RepoSnapshot,
 	type ToolLedgerEntry,
 	denialIsCause,
 	enforceAgenticHonesty,
 	isErrorToolResult,
+	readRepoSnapshot,
 } from "./honesty";
 import { projectInstructionsSection } from "./instruction-loader";
 import { getModeManager } from "./modes";
@@ -617,6 +619,8 @@ export class Agent {
 	// state. The agentic-honesty gate (issue #2747) checks the final reply
 	// against this so the agent can never claim completion it did not earn.
 	private turnToolLedger: ToolLedgerEntry[] = [];
+	/** HEAD and upstream at the start of the turn: a commit or push claim is judged against the repo, not command text. */
+	private turnRepoStart: RepoSnapshot | null = null;
 	/** A native turn answered with its tool call as text (#4807): this session runs the text protocol from now on. */
 	private nativeWroteTextCall = false;
 	private turnTask = "";
@@ -2499,6 +2503,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			content: agentResult.content,
 			ledger: this.turnToolLedger,
 			workingDirectory: this.config.workingDirectory || process.cwd(),
+			repo: this.turnRepoDelta(),
 		});
 		gated.content = this.settleOutputGate(gated.content);
 		this.settleDoneGate(gated.content);
@@ -3013,6 +3018,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		}
 	}
 
+	private turnRepoDelta() {
+		return {
+			before: this.turnRepoStart,
+			after: readRepoSnapshot(this.config.workingDirectory || process.cwd()),
+		};
+	}
+
 	private async runTurnCore(
 		userMessage: string,
 		imageBase64?: string,
@@ -3028,6 +3040,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		this.stopRequested = false;
 		this.recentFilePaths = [];
 		this.turnToolLedger = [];
+		this.turnRepoStart = readRepoSnapshot(this.config.workingDirectory || process.cwd());
 		this.doneGateNudged = false;
 		this.outputGate = new OutputGate(
 			userMessage,
@@ -4496,6 +4509,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				content: result.text,
 				ledger: this.turnToolLedger,
 				workingDirectory: this.config.workingDirectory || process.cwd(),
+				repo: this.turnRepoDelta(),
 			});
 			gatedNative.content = this.settleOutputGate(gatedNative.content);
 			this.settleDoneGate(gatedNative.content);
