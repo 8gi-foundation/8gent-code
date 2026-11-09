@@ -4,7 +4,7 @@
  * empty again once the command is done.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { killLiveShells, liveShellCount } from "./live-shells";
@@ -50,5 +50,26 @@ describe("run_command and the live shell registry", () => {
 	test("a command that finishes on its own leaves nothing registered", async () => {
 		await executor.runCommand("true", 30);
 		expect(liveShellCount()).toBe(0);
+	});
+
+	test("a backgrounded command with redirected output stays registered after run_command returns, and quit ends it", async () => {
+		const pidFile = join(ws, "bg.pid");
+		await executor.runCommand(`sh -c 'sleep 64 >/dev/null 2>&1 & echo $! > ${pidFile}'`, 30);
+		const bg = Number.parseInt(readFileSync(pidFile, "utf8").trim(), 10);
+		expect(bg).toBeGreaterThan(1);
+		const alive = () => {
+			try {
+				process.kill(bg, 0);
+				return true;
+			} catch {
+				return false;
+			}
+		};
+		expect(alive()).toBe(true);
+		expect(liveShellCount()).toBe(1);
+		killLiveShells("SIGTERM");
+		const end = Date.now() + 3000;
+		while (alive() && Date.now() < end) await new Promise((r) => setTimeout(r, 25));
+		expect(alive()).toBe(false);
 	});
 });

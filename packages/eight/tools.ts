@@ -286,7 +286,7 @@ import { isErrorToolResult } from "./honesty";
 import { downscaleNote, imageMaxSide } from "./image-fit";
 import { IssueBlameGate, issueBodyOf } from "./issue-blame";
 import { layoutMeasureLine } from "./layout-measure";
-import { trackShell, untrackShell } from "./live-shells";
+import { settleShell, trackShell, untrackShell } from "./live-shells";
 import { MESSAGE_BOARDROOM_TOOL_DEF, messageBoardroom } from "./message-boardroom";
 import { moduleHintFor } from "./module-hint";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
@@ -3190,7 +3190,8 @@ export class ToolExecutor {
 
 			case "batch":
 				// Each call takes the owner's item gate, then re-enters execute(), as run_batch items do.
-				if (!this.itemGate) return "Error: batch has no per-item gate in this session. Nothing was run.";
+				if (!this.itemGate)
+					return "Error: batch has no per-item gate in this session. Nothing was run.";
 				return runReadBatch(args.calls, (t, a) => this.runGatedItem("batch", t, a));
 
 			case "run_batch":
@@ -4077,7 +4078,7 @@ export class ToolExecutor {
 
 			// Registered so quitting the TUI ends it, whatever its timer does (live-shells.ts).
 			trackShell(proc.pid);
-			proc.once("close", () => untrackShell(proc.pid));
+			proc.once("close", () => settleShell(proc.pid));
 			proc.once("error", () => untrackShell(proc.pid));
 
 			let stdout = "";
