@@ -10,6 +10,9 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { safePath } from "../../../../packages/eight/tools.js";
+import { cleanOutput } from "./bang-command.js";
+import { sanitizeForTerminal } from "./telegram-tab.js";
 
 /** Tools whose success means a file on disk may have changed. */
 export const FILE_WRITE_TOOLS = new Set(["write_file", "edit_file"]);
@@ -129,6 +132,16 @@ export function diffBody(
 	return { body, stat };
 }
 
+/**
+ * Everything drawn passes through here. File bytes are not ours: a .env value
+ * must not reach the screen (pilot recordings are sent on), and an ESC or OSC
+ * sequence in a file must not drive the terminal. Redact secrets, drop every
+ * escape and control byte, then the C1 and format characters cleanOutput keeps.
+ */
+export function safeForScreen(text: string): string {
+	return sanitizeForTerminal(cleanOutput(text).text);
+}
+
 function readOrNull(abs: string): string | null {
 	try {
 		const st = fs.statSync(abs);
@@ -151,16 +164,20 @@ export class SessionChanges {
 
 	constructor(private readonly cwd: () => string) {}
 
-	private resolve(p: string): string {
-		return path.isAbsolute(p) ? p : path.join(this.cwd(), p);
-	}
-
 	/** Call at tool start. Ignores tools that do not write files. */
 	begin(callId: string, tool: string, args: Record<string, unknown> | undefined): void {
 		if (!FILE_WRITE_TOOLS.has(tool)) return;
 		const p = args?.path;
 		if (typeof p !== "string" || !p) return;
-		const abs = this.resolve(p);
+		// The model's path, read before the tool's own check has run: apply the
+		// same check first, and read nothing the tool would refuse (outside the
+		// workspace, a symlink out of it, a credential file).
+		let abs: string;
+		try {
+			abs = safePath(p, this.cwd(), "write");
+		} catch {
+			return;
+		}
 		this.pending.set(callId, { abs, before: readOrNull(abs) });
 	}
 
@@ -178,7 +195,9 @@ export class SessionChanges {
 		this.files.set(p.abs, { before: prev ? prev.before : p.before, after });
 		const { body, stat } = diffBody(p.before, after);
 		if (body.length === 0) return null;
-		return [this.header(p.abs, stat, p.before === null), ...clip(body, INLINE_MAX_LINES)].join("\n");
+		return safeForScreen(
+			[this.header(p.abs, stat, p.before === null), ...clip(body, INLINE_MAX_LINES)].join("\n"),
+		);
 	}
 
 	private header(abs: string, stat: DiffStat, created: boolean): string {
@@ -200,7 +219,7 @@ export class SessionChanges {
 			parts.push(this.header(abs, stat, rec.before === null), ...body);
 		}
 		if (files === 0) return "No file changes in this session yet.";
-		return clip(parts, REPORT_MAX_LINES).join("\n");
+		return safeForScreen(clip(parts, REPORT_MAX_LINES).join("\n"));
 	}
 }
 

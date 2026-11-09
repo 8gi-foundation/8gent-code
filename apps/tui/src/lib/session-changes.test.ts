@@ -75,6 +75,59 @@ describe("/diff report", () => {
 	});
 });
 
+describe("what is drawn is safe (security review of #109)", () => {
+	const SECRET = "hunter2hunter2xyz";
+
+	test("a secret value in a file is never drawn, inline or in /diff", () => {
+		fs.writeFileSync(path.join(dir, "app.env.txt"), "DEBUG=1\n");
+		const inline = edit("1", "app.env.txt", `DEBUG=1\nDATABASE_PASSWORD=${SECRET}\nAPI_KEY=abcd1234efgh5678ijkl\n`);
+		expect(inline).not.toBeNull();
+		expect(inline).not.toContain(SECRET);
+		expect(inline).not.toContain("abcd1234efgh5678ijkl");
+		expect(inline).toContain("[REDACTED");
+		const report = sc.report();
+		expect(report).not.toContain(SECRET);
+		expect(report).toContain("[REDACTED");
+	});
+
+	test("a workspace .env is never drawn", () => {
+		fs.writeFileSync(path.join(dir, ".env"), "A=1\n");
+		const out = edit("1", ".env", `A=1\nDATABASE_PASSWORD=${SECRET}\n`);
+		expect(out ?? "").not.toContain(SECRET);
+		expect(sc.report()).not.toContain(SECRET);
+	});
+
+	test("an ESC, OSC or C1 byte in a file is never drawn", () => {
+		fs.writeFileSync(path.join(dir, "n.txt"), "a\n");
+		const evil = "\x1b]0;pwned\x07\x1b[31mred\x1b[0m\u009b2J\x1b]8;;http://x\x1b\\link\u202e\n";
+		const inline = edit("1", "n.txt", evil) as string;
+		expect(inline).not.toBeNull();
+		for (const bad of ["\x1b", "\x07", "\u009b", "\u202e"]) {
+			expect(inline).not.toContain(bad);
+			expect(sc.report()).not.toContain(bad);
+		}
+	});
+
+	test("a ../ path, an absolute outside path and a symlink out are never read", () => {
+		const outside = fs.mkdtempSync(path.join(os.tmpdir(), "session-outside-"));
+		try {
+			const target = path.join(outside, "x.ts");
+			fs.writeFileSync(target, "one\n");
+			fs.symlinkSync(outside, path.join(dir, "link"));
+			const rel = path.relative(dir, target);
+			for (const p of [rel, target, "link/x.ts"]) {
+				sc.begin("c", "edit_file", { path: p });
+				fs.writeFileSync(target, `two-${p.length}\n`);
+				// A read at begin() would have recorded "one" and produced a diff here.
+				expect(sc.finish("c", true)).toBeNull();
+			}
+			expect(sc.report()).toBe("No file changes in this session yet.");
+		} finally {
+			fs.rmSync(outside, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("diffBody", () => {
 	test("keeps two lines of context and numbers the hunk", () => {
 		const a = Array.from({ length: 20 }, (_, i) => `l${i}`).join("\n");
