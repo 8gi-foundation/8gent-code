@@ -37,7 +37,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - plain copy for the launch notice and the slash menu rows ([#14](https://github.com/8gi-foundation/8gent-code/pull/14))
 
 ### Fixed
-- daemon: a message sent to a busy session now waits in a queue of up to 20 instead of being lost, and a repeated message id is ignored ([#16](https://github.com/8gi-foundation/8gent-code/pull/16))
+- daemon: a message sent to a busy session now waits in a queue of up to 20, and a repeated message id is ignored ([#16](https://github.com/8gi-foundation/8gent-code/pull/16))
 - tui: clicks and drag-to-copy both work by default on macOS (#5317) ([#15](https://github.com/8gi-foundation/8gent-code/pull/15))
 
 ### Internal
@@ -149,7 +149,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - tui: busy input placeholder says what Enter and Alt+Enter do; cursor no longer covers its first letter ([#5075](https://github.com/8gi-foundation/8gent-code/pull/5075))
 
 ### Internal
-- board runtimes can use MiniMax directly, with a provider and model set per runtime ([#5089](https://github.com/8gi-foundation/8gent-code/pull/5089))
+- a long-running 8gent process that answers for one board officer can use MiniMax directly, with the provider and model set separately for each officer ([#5089](https://github.com/8gi-foundation/8gent-code/pull/5089))
 
 ## [0.20.34] - 2026-10-25
 
