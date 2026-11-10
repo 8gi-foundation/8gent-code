@@ -12,6 +12,8 @@ import { join } from "node:path";
 import { rmRetry } from "../../tests/rm-retry";
 
 let Agent: typeof import("./agent").Agent;
+let enableInfiniteMode: () => void;
+let disableInfiniteMode: () => void;
 const saved: Record<string, string | undefined> = {};
 const ENV: Record<string, string> = {
 	EIGHT_TOOL_CAPABILITY_GATE: "0",
@@ -23,6 +25,8 @@ let repo: string;
 let server: ReturnType<typeof Bun.serve>;
 let calls = 0;
 let command = "";
+let callId = "";
+let seq = 0;
 
 function completion(message: Record<string, unknown>, finish: string) {
 	return Response.json({
@@ -46,6 +50,10 @@ beforeAll(async () => {
 		process.env[k] = v;
 	}
 	({ Agent } = await import("./agent"));
+	// run_command must really run: whether echo is auto-allowed depends on permission state
+	// other test files in the same process can change, so pin it here.
+	({ enableInfiniteMode, disableInfiniteMode } = await import("../permissions"));
+	enableInfiniteMode();
 	server = Bun.serve({
 		port: 0,
 		async fetch(req) {
@@ -58,7 +66,7 @@ beforeAll(async () => {
 						content: null,
 						tool_calls: [
 							{
-								id: "call_1",
+								id: callId,
 								type: "function",
 								function: { name: "run_command", arguments: JSON.stringify({ command }) },
 							},
@@ -78,6 +86,7 @@ afterEach(() => {
 });
 
 afterAll(() => {
+	disableInfiniteMode?.();
 	server?.stop(true);
 	for (const [k, v] of Object.entries(saved)) {
 		if (v === undefined) delete process.env[k];
@@ -90,6 +99,7 @@ afterAll(() => {
 
 async function run(cmd: string) {
 	command = cmd;
+	callId = `call_${++seq}`;
 	const ends: Array<{ toolName: string; success: boolean; resultPreview?: string }> = [];
 	const agent = new Agent({
 		model: "m",
@@ -116,9 +126,14 @@ async function run(cmd: string) {
 		.flatMap((f) => readFileSync(join(dir, f), "utf8").trim().split("\n"))
 		.map((l) => JSON.parse(l) as Record<string, any>);
 	const recorded = lines.filter(
-		(l) => (l.type === "tool_result" || l.type === "tool_error") && l.toolCallId === "call_1",
+		(l) => (l.type === "tool_result" || l.type === "tool_error") && l.toolCallId === callId,
 	);
-	return { ends: ends.filter((e) => e.toolName === "run_command"), post, recorded };
+	const shown = ends.filter((e) => e.toolName === "run_command");
+	// The command must have run: a permission refusal would make the checks below say nothing.
+	expect(shown).toHaveLength(1);
+	expect(shown[0].resultPreview ?? "").toContain("_");
+	expect(shown[0].resultPreview ?? "").not.toContain("PERMISSION DENIED");
+	return { ends: shown, post, recorded };
 }
 
 describe("native path outcome (#150)", () => {
