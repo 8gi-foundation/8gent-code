@@ -268,8 +268,8 @@ import {
 	GREETINGS,
 	PERSONALITY,
 	flavorResponse,
-	wantsBareReply,
 	voice as personalityVoice,
+	wantsBareReply,
 } from "../personality/voice.js";
 import {
 	CONTEXT_NOTE_HEADER,
