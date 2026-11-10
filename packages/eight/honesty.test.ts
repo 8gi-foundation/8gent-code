@@ -44,8 +44,14 @@ describe("isErrorToolResult", () => {
 	it("ERR: result is not a success", () => {
 		expect(isErrorToolResult('ERR: session "x" is not running.')).toBe(true);
 		expect(isErrorToolResult("  \n ERR: no such session")).toBe(true);
-		// The marker is case sensitive by design: a lowercase "err:" is ordinary output.
-		expect(isErrorToolResult("err: x")).toBe(false);
+	});
+
+	it("err: marker is case-insensitive, needs the colon right after the letters", () => {
+		expect(isErrorToolResult("err: x")).toBe(true);
+		expect(isErrorToolResult("Err: x")).toBe(true);
+		expect(isErrorToolResult("  ERR: x")).toBe(true);
+		expect(isErrorToolResult("errand: done")).toBe(false);
+		expect(isErrorToolResult("ok, no ERR: here")).toBe(false);
 	});
 
 	it("a success that only contains ERR: after the start stays a success", () => {
