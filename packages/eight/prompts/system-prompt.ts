@@ -336,6 +336,13 @@ export const FOLDER_NOTE =
 export const TICKET_FILE_NOTE =
 	"**Ticket naming the file at fault: name only the one to change, no neighbours.**";
 
+/**
+ * A run asked to send text to a terminal tab ran the command in its own shell with run_command,
+ * then said it had typed into the tab. Only these tools reach a tab or a session.
+ */
+export const TERMINAL_TAB_NOTE =
+	"**Terminal tabs: only `write_terminal` types into a tab and only `read_terminal` reads one (`term_send` and `term_read` do the same for `term_spawn` sessions). `run_command` runs in a separate shell and never reaches a tab: if you used it, say so, never say you typed into the tab.**";
+
 /** #4368: an unblock checklist ran 330-429 words and told the person to use options their setup lacks. */
 export const UNBLOCK_NOTE =
 	"**Unblocking: under 180 words, only steps their stated setup can run.**";
@@ -476,7 +483,7 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 		UNBLOCK_NOTE,
 		environmentNote({ cwd: opts.cwd }),
 	);
-	lines.push(SLIDES_TO_VIDEO_NOTE, REVIEW_FOCUS_NOTE);
+	lines.push(SLIDES_TO_VIDEO_NOTE, REVIEW_FOCUS_NOTE, TERMINAL_TAB_NOTE);
 
 	return lines.join("\n");
 }

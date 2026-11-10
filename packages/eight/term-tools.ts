@@ -263,7 +263,7 @@ export function getTermToolDefs(): object[] {
 			function: {
 				name: "term_send",
 				description:
-					"[ORCHESTRATION] Sends text as keystrokes to the running session sessionId (from term_spawn) via tmux send-keys. Pair with term_read after a short delay to see the response. By default Enter is appended so the prompt is submitted.",
+					"[ORCHESTRATION] Sends text as keystrokes to the running session sessionId (from term_spawn) via tmux send-keys. For a terminal tab in the 8gent window use write_terminal instead; run_command never reaches a terminal session or tab. Pair with term_read after a short delay to see the response. By default Enter is appended so the prompt is submitted.",
 				parameters: {
 					type: "object",
 					properties: {

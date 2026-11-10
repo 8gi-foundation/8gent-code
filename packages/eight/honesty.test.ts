@@ -1014,3 +1014,41 @@ describe("round 8: unreal actions still read 'could not confirm' without any att
 		}
 	});
 });
+
+describe("terminal tab claims", () => {
+	const ran = (name: string): ToolLedgerEntry => ({ name, success: true });
+	const note = (reply: string, ledger: ToolLedgerEntry[]) => unbackedActionClaims(reply, ledger);
+
+	it("flags typing into a tab when only run_command ran", () => {
+		for (const reply of [
+			"I typed `echo hi` into the terminal tab.",
+			"Sent the text to the terminal tab.",
+			"I read the output from the terminal tab.",
+			"I ran the command in the terminal tab.",
+		]) {
+			expect(note(reply, [ran("run_command")])).toHaveLength(1);
+			expect(note(reply, [])).toHaveLength(1);
+		}
+	});
+
+	it("passes when write_terminal, read_terminal, term_send or term_read ran", () => {
+		for (const tool of ["write_terminal", "read_terminal", "term_send", "term_read"]) {
+			expect(note("I typed `ls` into the terminal tab.", [ran(tool)])).toEqual([]);
+		}
+	});
+
+	it("a failed terminal call does not back the claim", () => {
+		const failed: ToolLedgerEntry = { name: "write_terminal", success: false };
+		expect(note("I sent it to the terminal tab.", [failed])).toHaveLength(1);
+	});
+
+	it("does not flag negations, questions or plain mentions", () => {
+		for (const reply of [
+			"I did not send anything to the terminal tab.",
+			"Want me to type it into the terminal tab?",
+			"The terminal tab is open.",
+		]) {
+			expect(note(reply, [])).toEqual([]);
+		}
+	});
+});

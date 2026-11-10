@@ -131,6 +131,7 @@ interface BridgeMessage {
 	data?: string;
 	code?: number;
 	signal?: number | null;
+	error?: string;
 }
 
 export class PtySession {
@@ -143,6 +144,8 @@ export class PtySession {
 	private _exitCode: number | null = null;
 	private _exitSignal: number | null = null;
 	private _alive = false;
+	private _exitSeen = false;
+	private _lastError: string | null = null;
 	private readyResolver?: () => void;
 	readonly ready: Promise<void>;
 
@@ -164,15 +167,21 @@ export class PtySession {
 		this._alive = true;
 
 		// Read stdout: line-delimited JSON
-		this.consumeStdout(this.proc.stdout);
+		const stdoutDone = this.consumeStdout(this.proc.stdout);
 
-		// Drain stderr quietly to avoid back-pressure on the bridge
-		void this.proc.stderr
-			.getReader()
-			.read()
-			.catch(() => {});
+		// Drain stderr to avoid back-pressure on the bridge, keeping the tail:
+		// when the bridge dies without a word it is the only reason there is.
+		const stderrDone = this.drainStderr(this.proc.stderr);
 
-		this.exited = this.proc.exited.then(() => {
+		this.exited = this.proc.exited.then(async (code) => {
+			await Promise.all([stdoutDone, stderrDone]);
+			// The bridge died without sending an exit message (node crashed, the
+			// binary is not node, the script is missing): without this the tab
+			// would sit at "starting" forever, so say it ended and why.
+			if (!this._exitSeen) {
+				this._lastError = this._lastError ?? (this.stderrTail.trim() || `exit code ${code}`);
+				this.finish(typeof code === "number" ? code : null, null);
+			}
 			this._alive = false;
 			this._pid = null;
 			return this._exitCode;
@@ -185,6 +194,44 @@ export class PtySession {
 
 	get isAlive(): boolean {
 		return this._alive;
+	}
+
+	/** Why the bridge or the pty failed to start or ended badly, when it said. */
+	get lastError(): string | null {
+		return this._lastError;
+	}
+
+	private stderrTail = "";
+
+	private async drainStderr(stream: ReadableStream<Uint8Array>): Promise<void> {
+		const reader = stream.getReader();
+		const decoder = new TextDecoder();
+		try {
+			while (true) {
+				const { value, done } = await reader.read();
+				if (done) break;
+				if (value)
+					this.stderrTail = (this.stderrTail + decoder.decode(value, { stream: true })).slice(
+						-2000,
+					);
+			}
+		} catch {
+			/* stream ended */
+		}
+	}
+
+	private finish(code: number | null, signal: number | null): void {
+		this._exitSeen = true;
+		this._exitCode = code;
+		this._exitSignal = signal;
+		this._alive = false;
+		for (const fn of this.exitHandlers) {
+			try {
+				fn(code, signal);
+			} catch {
+				/* swallow */
+			}
+		}
 	}
 
 	get lastExitCode(): number | null {
@@ -284,16 +331,8 @@ export class PtySession {
 				}
 				break;
 			case "exit":
-				this._exitCode = msg.code ?? null;
-				this._exitSignal = msg.signal ?? null;
-				this._alive = false;
-				for (const fn of this.exitHandlers) {
-					try {
-						fn(this._exitCode, this._exitSignal);
-					} catch {
-						/* swallow */
-					}
-				}
+				if (typeof msg.error === "string" && msg.error) this._lastError = msg.error;
+				this.finish(msg.code ?? null, msg.signal ?? null);
 				break;
 		}
 	}
