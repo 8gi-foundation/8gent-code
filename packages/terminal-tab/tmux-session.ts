@@ -85,11 +85,29 @@ export function newTmuxRun(dir: string = TMUX_SOCKET_DIR, pid: number = process.
 	};
 }
 
-const currentRun = newTmuxRun();
+let currentRun = newTmuxRun();
 
 /** This process's run. */
 export function thisTmuxRun(): TmuxRun {
 	return currentRun;
+}
+
+/** Tests only: point this process at a run under a scratch directory, never the real home. */
+export function setTmuxRunForTest(run: TmuxRun): void {
+	currentRun = run;
+}
+
+/**
+ * Exact-match targets (#146 review). A bare name lets tmux fall back to a
+ * prefix or pattern match, so an id whose session has died could reach a
+ * look-alike that a nested program made. `=id` matches the session name
+ * exactly; pane commands need the `=id:` form.
+ */
+export function exactSession(id: string): string {
+	return `=${id}`;
+}
+export function exactPane(id: string): string {
+	return `=${id}:`;
 }
 
 /** Prefix a tmux argv with a run's private socket (this run's by default). */
@@ -216,10 +234,16 @@ export function removeSessionLog(logPath: string): void {
 	}
 }
 
+/** The only log name term_spawn makes: the app prefix plus 12 hex digits. */
+const APP_LOG_NAME = /^8gent-term-[0-9a-f]{12}\.log$/;
+
 /**
- * Startup backstop for logs a crash left behind: in `dir`, a `.log` older
- * than LOG_MAX_AGE_MS is deleted; a younger one that an older version left
- * readable by others is tightened to 0600. Returns what it did.
+ * Startup sweep of session logs in `dir`, regular files only. A `.log` that
+ * is not one the app now makes (the pre-#146 `term-<ts>-<rand>.log` files,
+ * which hold echoed bytes) is deleted whatever its age and never read. An
+ * app log that a crash left behind is deleted once older than
+ * LOG_MAX_AGE_MS, and tightened to 0600 if it is readable by others.
+ * Returns what it did.
  */
 export function sweepSessionLogs(
 	dir: string = SESSIONS_LOG_DIR,
@@ -238,7 +262,7 @@ export function sweepSessionLogs(
 		try {
 			const st = lstatSync(p);
 			if (!st.isFile()) continue;
-			if (now - st.mtimeMs > LOG_MAX_AGE_MS) {
+			if (!APP_LOG_NAME.test(n) || now - st.mtimeMs > LOG_MAX_AGE_MS) {
 				rmSync(p, { force: true });
 				out.deleted.push(n);
 			} else if ((st.mode & 0o077) !== 0) {
@@ -307,7 +331,10 @@ export function buildTmuxNewSessionArgs(args: BuildNewSessionArgs): string[] {
 	const cols = args.cols ?? 200;
 	const rows = args.rows ?? 50;
 	// tmux's last positional is "shell-command": a single string it runs through sh.
-	const composed = composeShellCommand(args.command, cmdArgs);
+	// The gate judges `composed`; the fixed prefix only drops TMUX and TMUX_PANE,
+	// which tmux sets in the pane (after any -e), so the program cannot drive
+	// sibling sessions on this run's server by reading them (#146 item 4).
+	const composed = `${NO_TMUX_ENV}${composeShellCommand(args.command, cmdArgs)}`;
 	return [
 		"new-session",
 		"-d",
@@ -323,6 +350,9 @@ export function buildTmuxNewSessionArgs(args: BuildNewSessionArgs): string[] {
 	];
 }
 
+/** Prefix of every session's shell command: the program never sees this run's server. */
+export const NO_TMUX_ENV = "unset TMUX TMUX_PANE; ";
+
 export interface BuildSendKeysOpts {
 	appendEnter?: boolean;
 }
@@ -336,19 +366,19 @@ export interface BuildSendKeysOpts {
  * as a command separator, so the two are never chained into one argv.
  */
 export function buildSendKeysArgs(sessionId: string, text: string): string[] {
-	return ["send-keys", "-t", sessionId, "-l", "--", text];
+	return ["send-keys", "-t", exactPane(sessionId), "-l", "--", text];
 }
 
 /** Argv for pressing the Enter key (a key name, so no `-l`). */
 export function buildEnterKeyArgs(sessionId: string): string[] {
-	return ["send-keys", "-t", sessionId, "Enter"];
+	return ["send-keys", "-t", exactPane(sessionId), "Enter"];
 }
 
 export function buildPipePaneArgs(sessionId: string, logPath: string): string[] {
 	// `-o` keeps the pipe enabled across new commands inside the pane.
 	// We use `>>` so reattach/resume doesn't truncate the existing log.
 	const shell = `cat >> ${shellSingleQuote(logPath)}`;
-	return ["pipe-pane", "-t", sessionId, "-o", shell];
+	return ["pipe-pane", "-t", exactPane(sessionId), "-o", shell];
 }
 
 /** Tail the log file from `byteOffset`. Returns clean lines + new offset. */
@@ -428,7 +458,7 @@ async function startSession(
 	// 3. Probe pid of the running command (the pane's foreground pid)
 	let pid = 0;
 	try {
-		const { stdout } = await tmux(["list-panes", "-t", sessionId, "-F", "#{pane_pid}"]);
+		const { stdout } = await tmux(["list-panes", "-t", exactPane(sessionId), "-F", "#{pane_pid}"]);
 		pid = Number.parseInt(stdout.trim().split("\n")[0] ?? "0", 10) || 0;
 	} catch {
 		/* leave pid=0 */
@@ -449,7 +479,7 @@ async function startSession(
 export async function attachInTerminal(sessionId: string): Promise<void> {
 	// Terminal.app runs this line in its own shell, so it is the one string form.
 	// Every part is app made: this run's socket path and a generated session id.
-	const cmd = `tmux -S ${shellSingleQuote(currentRun.socketPath)} attach -t ${shellSingleQuote(sessionId)}`;
+	const cmd = `tmux -S ${shellSingleQuote(currentRun.socketPath)} attach -t ${shellSingleQuote(exactSession(sessionId))}`;
 	const escaped = cmd.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 	const osa = [
 		'tell application "Terminal"',
@@ -471,7 +501,7 @@ export async function sendKeys(
 
 export async function hasSession(sessionId: string): Promise<boolean> {
 	try {
-		await tmux(["has-session", "-t", sessionId]);
+		await tmux(["has-session", "-t", exactSession(sessionId)]);
 		return true;
 	} catch {
 		return false;
@@ -480,7 +510,7 @@ export async function hasSession(sessionId: string): Promise<boolean> {
 
 export async function killTmuxSession(sessionId: string): Promise<void> {
 	try {
-		await tmux(["kill-session", "-t", sessionId]);
+		await tmux(["kill-session", "-t", exactSession(sessionId)]);
 	} catch {
 		/* already gone */
 	}

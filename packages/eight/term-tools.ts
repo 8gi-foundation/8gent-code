@@ -141,7 +141,8 @@ export function endOwnedSessions(
 	const hadSessions = owned.size > 0;
 	for (const s of [...owned.values()]) {
 		try {
-			run(tmuxArgv(["kill-session", "-t", s.target], termRun));
+			// `=` makes the target an exact name, never a prefix or pattern.
+			run(tmuxArgv(["kill-session", "-t", `=${s.target}`], termRun));
 		} catch {
 			/* already gone */
 		}
@@ -151,7 +152,16 @@ export function endOwnedSessions(
 		try {
 			run(tmuxArgv(["kill-server"], termRun));
 		} catch {
-			/* already stopped */
+			/* already stopped, or the stop failed: the probe below decides */
+		}
+		// Release the socket and owner record only once the server is gone. A
+		// server that outlived its socket file could never be found again; kept,
+		// the next start's sweep stops it once this process is dead.
+		try {
+			run(tmuxArgv(["list-sessions"], termRun));
+			return; // still answering: keep the socket and record
+		} catch {
+			/* no server on this socket */
 		}
 	}
 	try {
@@ -424,7 +434,7 @@ export function getTermToolDefs(): object[] {
 			function: {
 				name: "term_spawn",
 				description:
-					"[ORCHESTRATION] Spawns command (a CLI binary on $PATH) in a real Terminal.app window via tmux. Returns a sessionId you can use with term_send / term_read. The sessionId is generated; label is display text only. Sessions end when 8gent closes. Examples of valid commands: 'claude', 'openclaw', 'pi', '/bin/sh'. Use this when delegating a task to a different agent CLI is cheaper than answering yourself, or when you want to parallelise work across multiple sub-agents.",
+					"[ORCHESTRATION] Spawns command (a CLI binary on $PATH) in a real Terminal.app window via tmux. Returns a sessionId you can use with term_send / term_read. The sessionId is generated; label is display text only. Sessions end when 8gent closes normally or is stopped by a signal it can catch; after a crash or SIGKILL they keep running until the next start cleans them up. The approval gate covers these tools only, not other programs run by the same user. Examples of valid commands: 'claude', 'openclaw', 'pi', '/bin/sh'. Use this when delegating a task to a different agent CLI is cheaper than answering yourself, or when you want to parallelise work across multiple sub-agents.",
 				parameters: {
 					type: "object",
 					properties: {

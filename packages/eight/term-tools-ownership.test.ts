@@ -116,18 +116,24 @@ async function spawn(extra: Record<string, unknown> = {}): Promise<string> {
 	return out.sessionId;
 }
 
-/** A fake synchronous tmux that answers list-sessions with `left`. */
-function fakeRunner(left: string) {
+/**
+ * A fake synchronous tmux. After kill-server, list-sessions throws (no server)
+ * unless `serverSurvives`, which models a stop that did not take.
+ */
+function fakeRunner(serverSurvives = false) {
 	const argvs: string[][] = [];
+	let stopped = false;
 	const run = (argv: string[]) => {
 		argvs.push(argv);
-		return argv.includes("list-sessions") ? left : "";
+		if (argv.includes("kill-server")) stopped = !serverSurvives;
+		if (argv.includes("list-sessions") && stopped) throw new Error("no server running");
+		return "";
 	};
 	return { argvs, run };
 }
 
 beforeEach(() => {
-	endOwnedSessions(() => "");
+	endOwnedSessions(fakeRunner().run);
 	tmuxCalls.length = 0;
 	spawnedTargets.length = 0;
 	tmuxPresent = true;
@@ -223,12 +229,13 @@ describe("quitting ends the sessions this run started", () => {
 	test("cleanup kills each registered session on this run's socket, then stops this run's server", async () => {
 		const a = await spawn();
 		const b = await spawn();
-		const { argvs, run } = fakeRunner("");
+		const { argvs, run } = fakeRunner();
 		endOwnedSessions(run);
 		expect(argvs).toEqual([
-			[...SOCKET, "kill-session", "-t", a],
-			[...SOCKET, "kill-session", "-t", b],
+			[...SOCKET, "kill-session", "-t", `=${a}`],
+			[...SOCKET, "kill-session", "-t", `=${b}`],
 			[...SOCKET, "kill-server"],
+			[...SOCKET, "list-sessions"],
 		]);
 		expect(ownedSessions()).toEqual([]);
 		expect(existsSync(runB.ownerPath)).toBe(false);
@@ -244,15 +251,28 @@ describe("quitting ends the sessions this run started", () => {
 			throw new Error("no server");
 		});
 		expect(argvs.map((x) => x.slice(2, 5))).toEqual([
-			["kill-session", "-t", a],
-			["kill-session", "-t", b],
+			["kill-session", "-t", `=${a}`],
+			["kill-session", "-t", `=${b}`],
 			["kill-server"],
+			["list-sessions"],
 		]);
 		expect(ownedSessions()).toEqual([]);
 	});
 
+	test("the socket and owner record are kept while the server still answers after kill-server", async () => {
+		await spawn();
+		const { run } = fakeRunner(true);
+		endOwnedSessions(run);
+		expect(ownedSessions()).toEqual([]);
+		// Released only once the server is confirmed gone, so the next start's sweep can find it.
+		expect(existsSync(runB.ownerPath)).toBe(true);
+		const gone = fakeRunner();
+		endOwnedSessions(gone.run);
+		expect(existsSync(runB.ownerPath)).toBe(false);
+	});
+
 	test("with nothing registered, cleanup calls no tmux at all", () => {
-		const { argvs, run } = fakeRunner("");
+		const { argvs, run } = fakeRunner();
 		endOwnedSessions(run);
 		expect(argvs).toEqual([]);
 	});
@@ -328,7 +348,7 @@ describe("one tmux socket per run", () => {
 		const runA = realTerminalTab.newTmuxRun(SOCK_DIR, process.pid);
 		layDown(runA, `${process.pid}\n`);
 		await spawn();
-		const { argvs, run } = fakeRunner("");
+		const { argvs, run } = fakeRunner();
 		endOwnedSessions(run);
 		expect(argvs.length).toBeGreaterThan(0);
 		for (const argv of argvs) {
@@ -488,6 +508,26 @@ describe("session logs", () => {
 		expect(existsSync("/dev/null")).toBe(true);
 	});
 
+	test("startup sweep deletes every pre-#146 log whatever its age, and never touches other files", () => {
+		const dir = join(TMP, "legacy");
+		realTerminalTab.ensurePrivateDir(dir);
+		const legacy = [
+			"term-mabc123-x1y2z3.log",
+			"term-1-2.log",
+			"8gent-term-ABCDEF123456.log",
+			"x.log",
+		];
+		for (const n of legacy) writeFileSync(join(dir, n), "echoed secret", { mode: 0o600 });
+		const fresh = join(dir, "8gent-term-0123456789ab.log");
+		writeFileSync(fresh, "", { mode: 0o600 });
+		writeFileSync(join(dir, "s.json"), "{}");
+		const out = realTerminalTab.sweepSessionLogs(dir, Date.now());
+		expect(out.deleted.sort()).toEqual([...legacy].sort());
+		for (const n of legacy) expect(existsSync(join(dir, n))).toBe(false);
+		expect(existsSync(fresh)).toBe(true);
+		expect(existsSync(join(dir, "s.json"))).toBe(true);
+	});
+
 	test("startup age sweep: over 30 days deleted, loose and younger tightened, the rest untouched", () => {
 		const dir = join(TMP, "sweep");
 		realTerminalTab.ensurePrivateDir(dir);
@@ -501,14 +541,17 @@ describe("session logs", () => {
 			utimesSync(p, t, t);
 			return p;
 		};
-		const oldLoose = make("old-loose.log", 0o644, 31);
-		const oldTight = make("old-tight.log", 0o600, 40);
-		const youngLoose = make("young-loose.log", 0o644, 2);
-		const youngTight = make("young-tight.log", 0o600, 29);
+		const oldLoose = make("8gent-term-00000000000a.log", 0o644, 31);
+		const oldTight = make("8gent-term-00000000000b.log", 0o600, 40);
+		const youngLoose = make("8gent-term-00000000000c.log", 0o644, 2);
+		const youngTight = make("8gent-term-00000000000d.log", 0o600, 29);
 		const notLog = make("s.json", 0o644, 90);
 		const out = realTerminalTab.sweepSessionLogs(dir, now);
-		expect(out.deleted.sort()).toEqual(["old-loose.log", "old-tight.log"]);
-		expect(out.tightened).toEqual(["young-loose.log"]);
+		expect(out.deleted.sort()).toEqual([
+			"8gent-term-00000000000a.log",
+			"8gent-term-00000000000b.log",
+		]);
+		expect(out.tightened).toEqual(["8gent-term-00000000000c.log"]);
 		expect(existsSync(oldLoose)).toBe(false);
 		expect(existsSync(oldTight)).toBe(false);
 		expect(mode(youngLoose)).toBe(0o600);

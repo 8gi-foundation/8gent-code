@@ -9,10 +9,11 @@
 
 import { afterAll, describe, expect, it } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	NO_TMUX_ENV,
 	buildEnterKeyArgs,
 	buildPipePaneArgs,
 	buildSendKeysArgs,
@@ -21,10 +22,12 @@ import {
 	hasSession,
 	killTmuxSession,
 	listTmuxSessions,
+	newTmuxRun,
 	parseLogTail,
 	readSessionLog,
 	releaseRun,
 	sendKeys,
+	setTmuxRunForTest,
 	spawnTmuxSession,
 	thisTmuxRun,
 	tmuxArgv,
@@ -39,7 +42,36 @@ const tmuxAvailable = (() => {
 	}
 })();
 
-const live = tmuxAvailable && process.env.TMUX_INTEGRATION === "1";
+// Live tests never touch the real home: this run's socket and owner record
+// live in a scratch directory for the whole file, and every log is a temp path.
+// Kept short so the socket path fits the unix socket length limit.
+const TMP = mkdtempSync(join(tmpdir(), "8t-"));
+const realRun = thisTmuxRun();
+setTmuxRunForTest(newTmuxRun(join(TMP, "term")));
+const tmpLog = (name: string) => join(TMP, `${name}.log`);
+
+/**
+ * tmux can start a server here. `tmux -V` alone is not enough: a sandbox may
+ * have tmux and still refuse to create a server. Probed on a scratch socket.
+ */
+const tmuxServes = (() => {
+	if (!tmuxAvailable) return false;
+	const sock = join(TMP, "probe.sock");
+	try {
+		execFileSync("tmux", ["-S", sock, "new-session", "-d", "-s", "probe", "sleep 5"], {
+			stdio: "ignore",
+			timeout: 3000,
+		});
+		execFileSync("tmux", ["-S", sock, "kill-server"], { stdio: "ignore", timeout: 3000 });
+		return true;
+	} catch {
+		return false;
+	} finally {
+		rmSync(sock, { force: true });
+	}
+})();
+
+const live = tmuxServes && process.env.TMUX_INTEGRATION === "1";
 
 describe("buildTmuxNewSessionArgs", () => {
 	it("builds detached new-session with size and command", () => {
@@ -61,7 +93,7 @@ describe("buildTmuxNewSessionArgs", () => {
 		expect(args).toContain("50");
 		expect(args).toContain("-c");
 		expect(args).toContain("/Users/me");
-		expect(args[args.length - 1]).toBe("claude");
+		expect(args[args.length - 1]).toBe("unset TMUX TMUX_PANE; claude");
 	});
 
 	it("appends shell-quoted args when cmdArgs is non-empty", () => {
@@ -84,7 +116,7 @@ describe("buildSendKeysArgs", () => {
 		expect(buildSendKeysArgs("term-x", "hello world")).toEqual([
 			"send-keys",
 			"-t",
-			"term-x",
+			"=term-x:",
 			"-l",
 			"--",
 			"hello world",
@@ -106,7 +138,7 @@ describe("buildSendKeysArgs", () => {
 			"echo hi;",
 		]) {
 			const args = buildSendKeysArgs("term-x", text);
-			expect(args.slice(0, 5)).toEqual(["send-keys", "-t", "term-x", "-l", "--"]);
+			expect(args.slice(0, 5)).toEqual(["send-keys", "-t", "=term-x:", "-l", "--"]);
 			expect(args).toHaveLength(6);
 			expect(args[5]).toBe(text);
 		}
@@ -119,7 +151,7 @@ describe("buildSendKeysArgs", () => {
 
 describe("buildEnterKeyArgs", () => {
 	it("presses Enter as a key, in its own call", () => {
-		expect(buildEnterKeyArgs("term-x")).toEqual(["send-keys", "-t", "term-x", "Enter"]);
+		expect(buildEnterKeyArgs("term-x")).toEqual(["send-keys", "-t", "=term-x:", "Enter"]);
 	});
 });
 
@@ -128,7 +160,8 @@ describe("buildPipePaneArgs", () => {
 		const args = buildPipePaneArgs("term-x", "/tmp/x.log");
 		expect(args[0]).toBe("pipe-pane");
 		expect(args).toContain("-t");
-		expect(args).toContain("term-x");
+		// An exact pane target: never a prefix or pattern match.
+		expect(args).toContain("=term-x:");
 		expect(args).toContain("-o");
 		// Last arg is the shell command "cat >> /tmp/x.log"
 		expect(args[args.length - 1]).toContain("/tmp/x.log");
@@ -189,6 +222,8 @@ afterAll(() => {
 		/* no server */
 	}
 	releaseRun();
+	setTmuxRunForTest(realRun);
+	rmSync(TMP, { recursive: true, force: true });
 });
 
 describe("spawnTmuxSession — live", () => {
@@ -199,6 +234,7 @@ describe("spawnTmuxSession — live", () => {
 				command: "/bin/sh",
 				args: ["-i"],
 				cwd: process.cwd(),
+				logPath: tmpLog("keyname"),
 			});
 			liveSessions.push(handle.sessionId);
 			await sendKeys(handle.sessionId, "echo KEYNAME-C-u-BSpace-Up", { appendEnter: false });
@@ -222,6 +258,7 @@ describe("spawnTmuxSession — live", () => {
 				cwd: process.cwd(),
 				cols: 100,
 				rows: 30,
+				logPath: tmpLog("marker"),
 			});
 			liveSessions.push(handle.sessionId);
 
@@ -270,13 +307,41 @@ describe("private tmux socket", () => {
 		]);
 	});
 
-	if (!tmuxAvailable) {
+	if (!tmuxServes) {
 		console.log(
-			"[tmux-session.test] SKIP real-tmux socket test: tmux was not found on this machine. The fake-runner tests in packages/eight/term-tools-ownership.test.ts still run.",
+			`[tmux-session.test] SKIP real-tmux tests: ${tmuxAvailable ? "tmux is installed but could not start a server here" : "tmux was not found on this machine"}. The fake-runner tests in packages/eight/term-tools-ownership.test.ts still run.`,
 		);
 	}
 
-	it.if(tmuxAvailable)(
+	it.if(tmuxServes)(
+		"the program in a session does not see TMUX or TMUX_PANE",
+		async () => {
+			const out = tmpLog("env");
+			const handle = await spawnTmuxSession({
+				command: "sh",
+				args: [
+					"-c",
+					`printenv TMUX TMUX_PANE > '${out}.env'; echo "rc=$?" >> '${out}.env'; sleep 30`,
+				],
+				cwd: process.cwd(),
+				logPath: out,
+			});
+			try {
+				let text = "";
+				for (let i = 0; i < 30 && !text.includes("rc="); i++) {
+					await new Promise((r) => setTimeout(r, 100));
+					text = existsSync(`${out}.env`) ? readFileSync(`${out}.env`, "utf-8") : "";
+				}
+				// printenv prints nothing and exits 1 when neither variable is set.
+				expect(text).toBe("rc=1\n");
+			} finally {
+				await killTmuxSession(handle.sessionId);
+			}
+		},
+		10000,
+	);
+
+	it.if(tmuxServes)(
 		"a session on the default tmux server is not listed and cannot be sent to or killed",
 		async () => {
 			const name = `user-own-${process.pid}-${Date.now().toString(36)}`;
@@ -303,7 +368,7 @@ describe("private tmux socket", () => {
 					command: "sleep",
 					args: ["60"],
 					cwd: process.cwd(),
-					logPath: join(tmpdir(), `${name}-spawn.log`),
+					logPath: tmpLog(`${name}-spawn`),
 				});
 				ours = handle.sessionId;
 				expect(await hasSession(ours)).toBe(true);
@@ -344,7 +409,8 @@ describe("composeShellCommand", () => {
 			["sh", ["-c", "echo $HOME"]],
 		] as [string, string[]][]) {
 			const argv = buildTmuxNewSessionArgs({ sessionId: "x", command, cmdArgs, cwd: "/" });
-			expect(argv[argv.length - 1]).toBe(composeShellCommand(command, cmdArgs));
+			// The judged string, behind a fixed prefix that only drops TMUX and TMUX_PANE.
+			expect(argv[argv.length - 1]).toBe(`${NO_TMUX_ENV}${composeShellCommand(command, cmdArgs)}`);
 		}
 	});
 });
