@@ -66,6 +66,8 @@ beforeAll(async () => {
 });
 
 afterEach(() => {
+	// The hook manager is shared by every test file in the run: drop the wrappers this file put on it.
+	Reflect.deleteProperty((current as any).hookManager, "executeHooks");
 	mode = "ok";
 	Reflect.deleteProperty(process.env, "EIGHT_TURN_TIMEOUT_MS");
 });
@@ -241,4 +243,11 @@ describe("a normal turn", () => {
 		]);
 		for (const ctx of fired) expect(ctx.status).toBeUndefined();
 	}, 30_000);
+});
+
+describe("this file's own cleanup", () => {
+	test("the shared hook manager carries none of this file's wrappers (runs last, after the afterEach of the test before it)", async () => {
+		const { getHookManager } = await import("../hooks");
+		expect(Object.hasOwn(getHookManager(), "executeHooks")).toBe(false);
+	});
 });
