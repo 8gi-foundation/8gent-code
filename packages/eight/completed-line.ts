@@ -5,8 +5,8 @@
  *
  * A line that already fits is returned untouched. One that does not is cut to
  * its first sentence plus the state word. Nothing is invented: the state word
- * comes from the model's own line, and only when it named none is the plain
- * word "done" used. Other lines in the reply are never touched.
+ * comes from the model's own line, and when it named none the line is cut
+ * without one (#156). Other lines in the reply are never touched.
  */
 
 export const COMPLETED_STATES = ["pushed", "deployed", "blocked", "failed", "done"] as const;
@@ -72,14 +72,17 @@ export function fixCompletedLine(reply: string): CompletedFix {
 		first = reason && !isState ? `${first}. ${reason}` : first;
 		state = lead;
 	}
-	state ??= "done";
 	const kept = first
 		.split(/\s+/)
 		.slice(0, MAX_WORDS - 1)
 		.join(" ");
-	const line = kept.toLowerCase() === state ? `${head} ${kept}.` : `${head} ${kept}. ${state}.`;
+	// No state named means none is added: the outcome stays unstated.
+	const line =
+		state === undefined || kept.toLowerCase() === state
+			? `${head} ${kept}.`
+			: `${head} ${kept}. ${state}.`;
 	console.debug(
-		`[completed-gate] trimmed COMPLETED line from ${words(rawBody)} to ${words(`${kept} ${state}`)} words`,
+		`[completed-gate] trimmed COMPLETED line from ${words(rawBody)} to ${words(`${kept} ${state ?? ""}`)} words`,
 	);
 	return { text: reply.replace(whole, line), trimmed: true };
 }
