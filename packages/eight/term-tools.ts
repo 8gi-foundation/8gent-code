@@ -556,15 +556,45 @@ async function termSpawn(args: Record<string, unknown>): Promise<string> {
 	const denied = await gateInput("term_spawn", composeShellCommand(command, cmdArgs));
 	if (denied) return denied;
 
+	let opened: OwnedSession;
+	try {
+		opened = await openOwnedSession({ command, args: cmdArgs, label });
+	} catch (err) {
+		return `ERR: term_spawn could not start the session: ${err instanceof Error ? err.message : String(err)}`;
+	}
+	return JSON.stringify({
+		ok: true,
+		sessionId: opened.target,
+		pid: opened.pid,
+		logPath: opened.logPath,
+		label: opened.label,
+		command: opened.command,
+	});
+}
+
+/**
+ * Start `command` in a tmux session on this run's private server, register it as
+ * owned (so term_read, term_send and term_kill reach it, and nothing else is
+ * reachable), and open a Terminal.app window attached to it. Shared by term_spawn
+ * (after its gates) and by /term, where the person's own command is the consent.
+ * Throws when the session could not start; a session half made is ended first.
+ */
+export async function openOwnedSession(o: {
+	command: string;
+	args?: string[];
+	label?: string;
+	cwd?: string;
+}): Promise<OwnedSession> {
 	// The tmux target is app made; the label is shown, never used as a target.
 	const target = newOwnedTarget();
+	const label = o.label ?? o.command;
 	hookExitOnce();
 	let handle: Awaited<ReturnType<typeof spawnTmuxSession>>;
 	try {
 		handle = await spawnTmuxSession({
-			command,
-			args: cmdArgs,
-			cwd: process.cwd(),
+			command: o.command,
+			args: o.args ?? [],
+			cwd: o.cwd ?? process.cwd(),
 			cols: 200,
 			rows: 50,
 			sessionId: target,
@@ -572,9 +602,9 @@ async function termSpawn(args: Record<string, unknown>): Promise<string> {
 	} catch (err) {
 		// new-session may have run before a later step failed: end it.
 		await killTmuxSession(target);
-		return `ERR: term_spawn could not start the session: ${err instanceof Error ? err.message : String(err)}`;
+		throw err;
 	}
-	owned.set(target, {
+	const session: OwnedSession = {
 		target,
 		label,
 		command: handle.command,
@@ -582,7 +612,8 @@ async function termSpawn(args: Record<string, unknown>): Promise<string> {
 		pid: handle.pid,
 		logPath: handle.logPath,
 		createdAt: handle.startedAt,
-	});
+	};
+	owned.set(target, session);
 
 	// Open a Terminal.app window so the human can watch / take over.
 	try {
@@ -592,7 +623,7 @@ async function termSpawn(args: Record<string, unknown>): Promise<string> {
 	}
 
 	// Persist for cross-restart reconnection.
-	const session: WindowSession = {
+	const record: WindowSession = {
 		sessionId: target,
 		command: handle.command,
 		args: handle.args,
@@ -602,16 +633,8 @@ async function termSpawn(args: Record<string, unknown>): Promise<string> {
 		startedAt: handle.startedAt,
 		source: "preset",
 	};
-	saveSession(session);
-
-	return JSON.stringify({
-		ok: true,
-		sessionId: target,
-		pid: handle.pid,
-		logPath: handle.logPath,
-		label,
-		command: handle.command,
-	});
+	saveSession(record);
+	return session;
 }
 
 async function termSend(args: Record<string, unknown>): Promise<string> {
