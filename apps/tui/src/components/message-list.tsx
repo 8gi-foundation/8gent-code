@@ -445,6 +445,19 @@ export function MessageList({
 		setScrollOffset(back.offset);
 	}
 
+	// A terminal tab unmounts this list without a tabId change, so park the shown
+	// tab's position on unmount too. The refs are read at cleanup time.
+	useEffect(
+		() => () => {
+			memory.set(shownTabRef.current, {
+				offset: scrollOffsetRef.current,
+				pinned: autoScrollRef.current,
+				total: prevCountRef.current,
+			});
+		},
+		[memory],
+	);
+
 	// Walk back from the latest message, fitting as many as the row budget
 	// allows. This is the single source of truth for "what fits on screen".
 	// It also tells us the deepest valid scrollOffset — the offset where the

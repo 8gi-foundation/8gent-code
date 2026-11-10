@@ -61,13 +61,19 @@ afterEach(() => {
 	instance = null;
 });
 
-function mount(first: Message[], tabId = "t1", rowBudget = 24) {
+function mount(
+	first: Message[],
+	tabId = "t1",
+	rowBudget = 24,
+	scrollMemory?: Map<string, { offset: number; pinned: boolean; total: number }>,
+) {
 	const stdin = new FakeStdin();
 	const stdout = makeStdout();
 	const el = (messages: Message[], id: string, turnRunning = false) => (
 		<MessageList
 			messages={messages}
 			tabId={id}
+			scrollMemory={scrollMemory}
 			animateTyping={false}
 			showAnimations={false}
 			turnRunning={turnRunning}
@@ -128,6 +134,27 @@ describe("MessageList across tab switches", () => {
 		expect(m.frame()).toBe(scrolledFrame);
 		await m.show(tab2, "t2");
 		expect(m.frame()).toContain("b-line-40");
+	});
+
+	test("scroll position survives a trip through a terminal tab (list unmounts)", async () => {
+		const tab1 = many("a", 40);
+		const tab2 = many("b", 40);
+		const memory = new Map<string, { offset: number; pinned: boolean; total: number }>();
+		const first = mount(tab1, "t1", 8, memory);
+		await tick();
+		first.stdin.feed(PAGE_UP);
+		await tick();
+		expect(first.frame()).not.toContain("a-line-40");
+		const scrolledFrame = first.frame();
+		// Terminal tab shown: the app renders something else, the list unmounts.
+		instance?.unmount();
+		instance = null;
+		expect(memory.get("t1")).toBeDefined();
+		// Back to chat: the list mounts with the last id it knew, then t1 is shown.
+		const second = mount(tab2, "t2", 8, memory);
+		await tick();
+		await second.show(tab1, "t1");
+		expect(second.frame()).toBe(scrolledFrame);
 	});
 
 	test("ten round trips do not duplicate or drop rows", async () => {
