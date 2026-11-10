@@ -12,13 +12,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.20.45] - 2026-11-09
 
 ### Added
-- 8llm: read-only planner and device measurer (slice 1) ([#103](https://github.com/8gi-foundation/8gent-code/pull/103))
-- eight: batch tool for read-only calls ([#76](https://github.com/8gi-foundation/8gent-code/pull/76))
-- extensions: out-of-process extensions, off until enabled ([#45](https://github.com/8gi-foundation/8gent-code/pull/45))
-- benchmarks: Harbor adapter for Terminal-Bench 2.1 and the Harness Leaderboard ([#40](https://github.com/8gi-foundation/8gent-code/pull/40))
+- `8llm plan` reads a model file's header and your device memory and prints a read-only plan of how the model's layers would fit; `--measure`, off by default, also reads up to 2 GB of the file to report disk read speed, or reports no number if it cannot bypass the file cache ([#103](https://github.com/8gi-foundation/8gent-code/pull/103))
+- the model can run up to 8 independent read-only calls (read, search and list files, outlines, symbols, git log) in one turn with the new `batch` tool; a write, shell or network call refuses the whole batch ([#76](https://github.com/8gi-foundation/8gent-code/pull/76))
+- extensions can run as separate processes; they stay off until you enable one, and the prompt defaults to No ([#45](https://github.com/8gi-foundation/8gent-code/pull/45))
 
 ### Changed
-- tui: provider picker harness waits for the picker to listen before typing the filter (#105) ([#106](https://github.com/8gi-foundation/8gent-code/pull/106))
 - product-focused README ([#37](https://github.com/8gi-foundation/8gent-code/pull/37))
 - user and contributor wiki ([#38](https://github.com/8gi-foundation/8gent-code/pull/38))
 
@@ -26,37 +24,45 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - providers: failover skips hosted providers with no API key ([#64](https://github.com/8gi-foundation/8gent-code/pull/64))
 - privacy: local by default, web tools ask first, headless denies ([#39](https://github.com/8gi-foundation/8gent-code/pull/39))
 
+### Internal
+- benchmarks: an adapter that runs 8gent on an external terminal-task benchmark (2.1) and a public harness leaderboard, installing one pinned version ([#40](https://github.com/8gi-foundation/8gent-code/pull/40))
+- tui: the provider picker test waits until the picker is ready before typing the filter (#105) ([#106](https://github.com/8gi-foundation/8gent-code/pull/106))
+
 ## [0.20.44] - 2026-11-05
 
 ### Added
-- schema: 8gent-schema slice 1, compiled JSON Schema checks, zero deps ([#13](https://github.com/8gi-foundation/8gent-code/pull/13))
+- schema: 8gent-schema checks tool-call arguments against their declared schema with no new dependencies; off by default, set EIGHT_SCHEMA_CHECK=1 to turn it on, and it only logs, never blocks ([#13](https://github.com/8gi-foundation/8gent-code/pull/13))
 
 ### Changed
 - plain copy for the launch notice and the slash menu rows ([#14](https://github.com/8gi-foundation/8gent-code/pull/14))
-- make main green (host and cross-file leaks) ([#35](https://github.com/8gi-foundation/8gent-code/pull/35))
 
 ### Fixed
-- daemon: a busy session queues messages by default, dedupes by message id, caps at 20 ([#16](https://github.com/8gi-foundation/8gent-code/pull/16))
+- daemon: a message sent to a busy session now waits in a queue of up to 20 instead of being lost, and a repeated message id is ignored ([#16](https://github.com/8gi-foundation/8gent-code/pull/16))
 - tui: clicks and drag-to-copy both work by default on macOS (#5317) ([#15](https://github.com/8gi-foundation/8gent-code/pull/15))
+
+### Internal
+- tests: tests no longer depend on the machine they run on or leak state between files ([#35](https://github.com/8gi-foundation/8gent-code/pull/35))
 
 ## [0.20.42] - 2026-10-27
 
 ### Changed
-- telegram bridge: strip reasoning, voice on request, group commands must name the bot, no startup card in a group (#5221) ([#5222](https://github.com/8gi-foundation/8gent-code/pull/5222))
+- telegram bridge: replies leave out the model's reasoning, voice replies come on request, group commands must name the bot, and no startup card is posted in a group (#5221) ([#5222](https://github.com/8gi-foundation/8gent-code/pull/5222))
 - approval card wraps a long command after a path mark, not mid-word ([#5218](https://github.com/8gi-foundation/8gent-code/pull/5218))
-- day8 turns refuse approval-needing calls, day8 session cap 3 and 10 minute idle (#5203) ([#5204](https://github.com/8gi-foundation/8gent-code/pull/5204))
 - no-model compact card breaks only after a comma at narrow widths ([#5211](https://github.com/8gi-foundation/8gent-code/pull/5211))
 - tab bar grab hint takes its own row on narrow bars so every tab stays visible ([#5212](https://github.com/8gi-foundation/8gent-code/pull/5212))
 - footer keeps a word for the unverified flag at 40 columns ([#5210](https://github.com/8gi-foundation/8gent-code/pull/5210))
 - Control tab groups sit flush under 30 rows, headers carry counts ([#5209](https://github.com/8gi-foundation/8gent-code/pull/5209))
-- cloud metadata hosts are never a fetch (#5198) ([#5200](https://github.com/8gi-foundation/8gent-code/pull/5200))
+- web fetches refuse cloud metadata addresses (#5198) ([#5200](https://github.com/8gi-foundation/8gent-code/pull/5200))
 - command palette ignores a typed leading slash (/mod finds 16 of 92, was 0) ([#5208](https://github.com/8gi-foundation/8gent-code/pull/5208))
 - settings categories become one strip row under 60 columns ([#5202](https://github.com/8gi-foundation/8gent-code/pull/5202))
-- accept the day8 channel with api scope ([#5195](https://github.com/8gi-foundation/8gent-code/pull/5195))
 - compact activity line keeps label, ellipsis and step count readable ([#5179](https://github.com/8gi-foundation/8gent-code/pull/5179))
 
 ### Fixed
-- agent: a native reply that is a text tool call runs on the text protocol ([#5193](https://github.com/8gi-foundation/8gent-code/pull/5193))
+- a model reply that is a tool call written out as text now runs as a tool call ([#5193](https://github.com/8gi-foundation/8gent-code/pull/5193))
+
+### Internal
+- one remote chat channel: its turns refuse calls that need approval, at most 3 sessions run at once, and a session ends after 10 idle minutes (#5203) ([#5204](https://github.com/8gi-foundation/8gent-code/pull/5204))
+- the daemon accepts that remote chat channel when it connects with API scope ([#5195](https://github.com/8gi-foundation/8gent-code/pull/5195))
 
 ## [0.20.41] - 2026-10-26
 
@@ -66,7 +72,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - activity rail task labels wrap to two rows instead of being cut ([#5167](https://github.com/8gi-foundation/8gent-code/pull/5167))
 - footer keeps the sandbox reason in full at 100 columns ([#5166](https://github.com/8gi-foundation/8gent-code/pull/5166))
 - palette more lines name PgUp and PgDn ([#5165](https://github.com/8gi-foundation/8gent-code/pull/5165))
-- EIGHT_TTS_VOICE pins the speak tool to the cell's Kitten voice; fix Boardroom officer voice map ([#5169](https://github.com/8gi-foundation/8gent-code/pull/5169))
+- EIGHT_TTS_VOICE pins the speak tool to one Kitten voice, and a wrong voice assignment for named speakers is fixed ([#5169](https://github.com/8gi-foundation/8gent-code/pull/5169))
 - wrapped notices drop their rule rows under 60 columns ([#5164](https://github.com/8gi-foundation/8gent-code/pull/5164))
 - settings field labels wrap whole under 60 columns ([#5163](https://github.com/8gi-foundation/8gent-code/pull/5163))
 - slash menu names a no-match word before Enter clears it ([#5161](https://github.com/8gi-foundation/8gent-code/pull/5161))
@@ -84,10 +90,12 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.20.39] - 2026-10-26
 
 ### Changed
-- Factory loop slice 1: factory/v1 event log and cell heartbeat ([#5147](https://github.com/8gi-foundation/8gent-code/pull/5147))
 - no-model card wraps its lead under the label at narrow widths ([#5146](https://github.com/8gi-foundation/8gent-code/pull/5146))
 - Control rows size name and stage to content, mark every cut with an ellipsis ([#5144](https://github.com/8gi-foundation/8gent-code/pull/5144))
 - footer notice keeps the status whole or drops it (4 of 8 frames cut mid-word -> 0) ([#5143](https://github.com/8gi-foundation/8gent-code/pull/5143))
+
+### Internal
+- an optional local event log: with EIGHT_EVENTS_FILE set, each event is appended as one JSON line to that file and the daemon heartbeat writes a line to it too; with it unset nothing is written ([#5147](https://github.com/8gi-foundation/8gent-code/pull/5147))
 
 ## [0.20.38] - 2026-10-26
 
@@ -117,8 +125,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.20.36] - 2026-10-25
 
 ### Added
-- daemon: MiniMax as a daemon runtime, fail closed on the live model list (Refs #5100) ([#5101](https://github.com/8gi-foundation/8gent-code/pull/5101))
-- dj: fetch pinned mpv, yt-dlp and ffmpeg on first use, one question, default No (Refs #5096, #4916, #4938) ([#5097](https://github.com/8gi-foundation/8gent-code/pull/5097))
+- daemon: MiniMax can run as a daemon runtime, and it fails closed when the live model list is unavailable (Refs #5100) ([#5101](https://github.com/8gi-foundation/8gent-code/pull/5101))
+- dj: on first use it can download pinned versions of mpv, yt-dlp and ffmpeg after one question that defaults to No (Refs #5096, #4916, #4938) ([#5097](https://github.com/8gi-foundation/8gent-code/pull/5097))
 
 ### Changed
 - select and copy text on macOS terminals, mouse reporting off by default ([#5095](https://github.com/8gi-foundation/8gent-code/pull/5095))
@@ -131,7 +139,6 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 - passport: skills and plugs in one self-issued file you hold (slice 1 of #5086) ([#5090](https://github.com/8gi-foundation/8gent-code/pull/5090))
-- board-vessel: officer vessels on MiniMax direct, per-officer provider and model ([#5089](https://github.com/8gi-foundation/8gent-code/pull/5089))
 - control: every running loop writes one job file (#5073, slice 2 of #5067) ([#5081](https://github.com/8gi-foundation/8gent-code/pull/5081))
 - tui: read-only Control tab and LOOPS side-panel block (#5062, slice 1 of #5067) ([#5072](https://github.com/8gi-foundation/8gent-code/pull/5072))
 
@@ -140,6 +147,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 - tui: busy input placeholder says what Enter and Alt+Enter do; cursor no longer covers its first letter ([#5075](https://github.com/8gi-foundation/8gent-code/pull/5075))
+
+### Internal
+- board runtimes can use MiniMax directly, with a provider and model set per runtime ([#5089](https://github.com/8gi-foundation/8gent-code/pull/5089))
 
 ## [0.20.34] - 2026-10-25
 
