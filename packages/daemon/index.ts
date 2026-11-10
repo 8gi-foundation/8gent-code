@@ -10,7 +10,11 @@
  *   - Optional Telegram bridge auto-starts when EIGHT_TELEGRAM_LOCAL=1.
  *
  * Required env vars for the local Telegram bridge:
- *   - TELEGRAM_BOT_TOKEN              Bot token for the local bridge.
+ *   - telegram-bot-token              Bot token for the local bridge, as a systemd
+ *                                     credential ($CREDENTIALS_DIRECTORY) or the 0600 file
+ *                                     ~/.8gent/secrets/telegram-bot-token. Held in memory only
+ *                                     (bot-token.ts). A TELEGRAM_BOT_TOKEN env var still works,
+ *                                     is deleted from process.env at start, and logs a warning.
  *   - TELEGRAM_AUTHORIZED_CHAT_IDS    Comma-separated chat_id allowlist.
  *                                     Only James's chat_id should appear here.
  *   - EIGHT_TELEGRAM_LOCAL=1          Opt-in to auto-starting the bridge.
@@ -23,7 +27,7 @@
  * too. Intended for single-user local daemons only: do not enable it on a
  * shared or multi-tenant host.
  *
- * Secrets are read from process.env or any pre-loaded env file. The daemon
+ * Other secrets are read from process.env or any pre-loaded env file. The daemon
  * never prints token contents. See `packages/daemon/scripts/start-local.ts`
  * for the canonical launcher.
  */
@@ -35,6 +39,7 @@ import { type TaskPayload, type TaskResult, VesselMesh } from "../orchestration/
 import { installFlowTap } from "../telemetry/flow-stream";
 import { AgentPool, loadPoolConfig } from "./agent-pool";
 import { addJob, getJobs, startCron, stopCron } from "./cron";
+import { loadBotToken } from "./bot-token";
 import { getDataDir } from "./data-dir";
 import {
 	type DispatchExecutor,
@@ -210,6 +215,19 @@ export async function configuredPort(): Promise<number> {
 }
 
 export async function main(): Promise<void> {
+	// Bot tokens go into memory and out of process.env before anything else
+	// runs or spawns (#97). The bridge reads them back with loadBotToken.
+	for (const [envVar, credentialName] of [
+		["TELEGRAM_BOT_TOKEN", "telegram-bot-token"],
+		["EIGHT_BOT_TOKEN", "eight-bot-token"],
+	]) {
+		try {
+			loadBotToken({ envVar, credentialName });
+		} catch (err) {
+			console.error(`[daemon] ${envVar}: ${(err as Error).message}`);
+		}
+	}
+
 	const localMode = isLocalMode(process.argv.slice(2));
 	if (localMode) {
 		// Set both env vars so child modules (gateway, telegram-bridge,
