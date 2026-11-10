@@ -191,7 +191,8 @@ describe("SessionPickerView", () => {
 		});
 		expect(out).toContain("SESSIONS");
 		expect(out).toContain("this folder");
-		expect(out).toContain(`untitled ${ids.anon}`);
+		expect(out).toContain("hello from nobody");
+		expect(out).not.toContain(`untitled ${ids.anon}`);
 		expect(out).toContain("auth fix");
 		expect(out).toContain("1 msgs");
 		expect(out).toContain("2h");

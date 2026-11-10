@@ -1,5 +1,8 @@
-import { getProviderManager, resolveModel } from "../../../../packages/providers/index.js";
-import { isHostedChatProvider } from "../../../../packages/providers/key-resolver.js";
+import { type ProviderManager, getProviderManager, resolveModel } from "../../../../packages/providers/index.js";
+import {
+	declaresKeyWithNone,
+	isHostedChatProvider,
+} from "../../../../packages/providers/key-resolver.js";
 
 /**
  * Pick a sensible default chat model from provider lists (avoid embedding / rerank models).
@@ -415,6 +418,32 @@ export function startupModelSeed(opts: {
 	if (cliModel) return cliModel;
 	const switched = !!opts.cliProvider && opts.cliProvider !== opts.savedProvider;
 	return switched ? "" : opts.savedModel;
+}
+
+/**
+ * Whether the launch tab keeps the provider and model saved in providers.json
+ * instead of taking its role-registry default (pilot break 10).
+ *
+ * #4720 pinned only a saved HOSTED provider with a key. A saved local choice
+ * lost to the Orchestrator role default at every launch, so a /model pick was
+ * forgotten on relaunch and the role's cold model loaded each day. A
+ * saved model for the provider now in use is the person's choice and wins, unless
+ * that provider is a cloud one with no key.
+ * `savedModel` is what was on disk at launch, never a detected default.
+ */
+export function savedChoiceIsPinned(opts: {
+	savedProvider: string;
+	savedModel: string;
+	savedHostedWithKey: boolean;
+	currentProvider: string;
+	providers?: Pick<ProviderManager, "getProvider" | "getApiKey">;
+}): boolean {
+	if (!opts.savedProvider || opts.currentProvider !== opts.savedProvider) return false;
+	if (opts.savedHostedWithKey) return true;
+	// A provider that declares a key and has none cannot answer, whatever its wire
+	// format: its saved model is not a choice that may displace the role default (8SO on #123).
+	if (declaresKeyWithNone(opts.savedProvider, opts.providers)) return false;
+	return opts.savedModel.trim().length > 0;
 }
 
 /**

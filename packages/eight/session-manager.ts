@@ -37,12 +37,18 @@ export interface SessionInfo {
 	messageCount: number;
 	createdAt: string;
 	lastActiveAt: string;
+	/** First user prompt, one line: the label for a session with no name. */
+	title?: string;
 	/** Surface that owns it when shared through the daemon ("tui", "browser", ...). */
 	channel?: string;
 }
 
 type Msg = { role: string; content: string };
-type SessionWithMessages = SessionInfo & { messages: Msg[] };
+type SessionWithMessages = SessionInfo & {
+	messages: Msg[];
+	/** When each message was written (ISO), same order; absent for a pre-tree-store file. */
+	times?: string[];
+};
 
 interface LegacyFile extends SessionInfo {
 	messages: Msg[];
@@ -98,7 +104,13 @@ export class SessionManager {
 	get(id: string): SessionWithMessages | null {
 		if (!isSessionId(id)) return null;
 		const store = SessionStore.open(id, this.dir);
-		if (store) return { ...this.infoOf(store), messages: store.messages() as Msg[] };
+		if (store) {
+			return {
+				...this.infoOf(store),
+				messages: store.messages() as Msg[],
+				times: store.messageTimes(),
+			};
+		}
 		return this.readLegacy(id);
 	}
 
@@ -164,7 +176,7 @@ export class SessionManager {
 	): void {
 		// One shape for every saver (TUI autosave keeps system lines, /share and
 		// the daemon do not): without this each alternation would branch.
-		store.syncTranscript(chatMessages(messages));
+		const synced = store.syncTranscript(chatMessages(messages));
 		const changed: Partial<Pick<SessionInfo, "model" | "provider" | "branch" | "channel">> = {};
 		if (meta.channel && meta.channel !== store.channel) changed.channel = meta.channel;
 		if (meta.model && meta.model !== store.model) changed.model = meta.model;
@@ -173,9 +185,12 @@ export class SessionManager {
 			changed.branch = meta.branch;
 		}
 		store.setInfo(changed);
-		// lastActiveAt is the file's mtime: touch it even when nothing new was appended.
-		const now = new Date();
-		fs.utimesSync(store.file, now, now);
+		// lastActiveAt is the file's mtime. Touch it only when something was written:
+		// opening a session and saving it back unchanged must keep its real time.
+		if (synced.appended > 0 || synced.branched || Object.keys(changed).length > 0) {
+			const now = new Date();
+			fs.utimesSync(store.file, now, now);
+		}
 	}
 
 	private infoOf(store: SessionStore): SessionInfo {
@@ -250,6 +265,7 @@ function toInfo(s: SessionListItem): SessionInfo {
 		messageCount: s.messageCount,
 		createdAt: s.createdAt,
 		lastActiveAt: s.lastActiveAt,
+		...(s.title ? { title: s.title } : {}),
 		...(s.channel ? { channel: s.channel } : {}),
 	};
 }

@@ -25,6 +25,7 @@ import {
 	normalizeProviderId,
 	pickBestChatModel,
 	providerToRuntime,
+	savedChoiceIsPinned,
 	specForActivatedTab,
 	tabAgentRole,
 } from "./model-selection.js";
@@ -494,5 +495,120 @@ describe("filterChatCapable (#3548)", () => {
 			`${root}/api/show qwen3.5:14b`,
 		]);
 		expect(calls.filter((c) => c.endsWith(" down:3b")).length).toBe(2);
+	});
+});
+
+/**
+ * Pilot break 10: a /model pick was saved to providers.json but the Orchestrator
+ * role default (ollama qwen3.6:27b) replaced it at every launch, because only a
+ * saved hosted provider with a key was pinned.
+ */
+describe("savedChoiceIsPinned", () => {
+	const base = {
+		savedProvider: "ollama",
+		savedModel: "qwen3.5:9b-32k",
+		savedHostedWithKey: false,
+		currentProvider: "ollama",
+	};
+
+	test("a saved local model is pinned, so the role default cannot replace it", () => {
+		expect(savedChoiceIsPinned(base)).toBe(true);
+	});
+
+	test("the pinned launch tab then keeps the saved spec through specForActivatedTab", () => {
+		const pin = { tabId: "tab-orchestrator", spec: { provider: "ollama", model: base.savedModel } };
+		const roleDefault = { provider: "ollama", model: "qwen3.6:27b" };
+		expect(specForActivatedTab("tab-orchestrator", pin, roleDefault)).toEqual(pin.spec);
+	});
+
+	test("nothing saved at launch (a detected default) is not a choice", () => {
+		expect(savedChoiceIsPinned({ ...base, savedProvider: "", savedModel: "" })).toBe(false);
+		expect(savedChoiceIsPinned({ ...base, savedModel: "  " })).toBe(false);
+	});
+
+	test("a saved hosted provider with its key is pinned even with no model yet", () => {
+		expect(
+			savedChoiceIsPinned({
+				savedProvider: "openrouter",
+				savedModel: "",
+				savedHostedWithKey: true,
+				currentProvider: "openrouter",
+			}),
+		).toBe(true);
+	});
+
+	test("a cloud provider with no key is not pinned, even with a saved model (8SO)", () => {
+		expect(
+			savedChoiceIsPinned({
+				savedProvider: "openrouter",
+				savedModel: "m",
+				savedHostedWithKey: false,
+				currentProvider: "openrouter",
+			}),
+		).toBe(false);
+	});
+
+	test("a keyless provider of any wire shape is not pinned (anthropic-compat)", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pin-keyless-"));
+		const file = path.join(dir, "providers.json");
+		fs.writeFileSync(
+			file,
+			JSON.stringify({
+				providers: {
+					claudelike: {
+						baseUrl: "https://claude.example.test/v1",
+						compat: "anthropic",
+						apiKeyEnv: "CLAUDELIKE_TEST_KEY_NOT_SET",
+					},
+				},
+			}),
+		);
+		const saved = process.env.CLAUDELIKE_TEST_KEY_NOT_SET;
+		Reflect.deleteProperty(process.env, "CLAUDELIKE_TEST_KEY_NOT_SET");
+		try {
+			const pm = new ProviderManager(file);
+			const opts = {
+				savedProvider: "claudelike",
+				savedModel: "m",
+				savedHostedWithKey: false,
+				currentProvider: "claudelike",
+				providers: pm,
+			};
+			expect(savedChoiceIsPinned(opts)).toBe(false);
+			process.env.CLAUDELIKE_TEST_KEY_NOT_SET = "sk-test-0123456789abcdef";
+			expect(savedChoiceIsPinned(opts)).toBe(true);
+		} finally {
+			if (saved === undefined) Reflect.deleteProperty(process.env, "CLAUDELIKE_TEST_KEY_NOT_SET");
+			else process.env.CLAUDELIKE_TEST_KEY_NOT_SET = saved;
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("a local provider that declares no key still pins", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pin-local-"));
+		const file = path.join(dir, "providers.json");
+		fs.writeFileSync(
+			file,
+			JSON.stringify({
+				providers: { myrig: { baseUrl: "http://127.0.0.1:9999/v1", compat: "openai" } },
+			}),
+		);
+		try {
+			expect(
+				savedChoiceIsPinned({
+					savedProvider: "myrig",
+					savedModel: "m",
+					savedHostedWithKey: false,
+					currentProvider: "myrig",
+					providers: new ProviderManager(file),
+				}),
+			).toBe(true);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("a different provider in use is not the saved choice", () => {
+		expect(savedChoiceIsPinned({ ...base, currentProvider: "lmstudio" })).toBe(false);
 	});
 });

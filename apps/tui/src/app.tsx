@@ -27,6 +27,7 @@ import { answerFromLine } from "../../../packages/eight/android-setup.js";
 import { sanitizeForDisplay } from "../../../packages/eight/changelog-view.js";
 import { killLiveShells } from "../../../packages/eight/live-shells.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
+import { chatMessages } from "../../../packages/eight/session-messages.js";
 import {
 	type SessionListItem,
 	SessionStore,
@@ -170,6 +171,7 @@ import { startProviderHealthPolling } from "./lib/provider-health-schedule.js";
 import { probeProviders } from "./lib/provider-health.js";
 import { TelegramTab, type TelegramTabHost } from "./lib/telegram-tab.js";
 import { isUserThemeId } from "./lib/user-themes.js";
+import { createWaitNoticeGate } from "./lib/wait-notice.js";
 import {
 	type ThemeChoice,
 	applyDesignSystem,
@@ -251,6 +253,7 @@ import {
 	deriveTools,
 	fallbackFromChain,
 	planStepsFromText,
+	routeSnapshot,
 } from "./lib/activity-rail-derivation.js";
 import * as bgPool from "./lib/background-pool.js";
 import {
@@ -545,6 +548,7 @@ import {
 	pickBestChatModel,
 	planAgentBuild,
 	providerToRuntime,
+	savedChoiceIsPinned,
 	specForActivatedTab,
 	startupModelSeed,
 	tabAgentRole,
@@ -711,6 +715,12 @@ async function detectBestLocalProviderUntraced(): Promise<{ provider: string; mo
 
 loadEnvFile();
 const _savedProviderSettings = loadProviderSettings();
+// What was on disk at launch, before auto-detection below fills gaps. Only this is the
+// person's choice; a detected default is not (break 10).
+const _launchSavedChoice = {
+	provider: _savedProviderSettings.provider,
+	model: _savedProviderSettings.model,
+};
 // If no saved provider/model, auto-detect the best available local provider. Awaited
 // here, once, so the first frame still knows it; computeCliOverrides reuses the answer.
 // A saved HOSTED provider whose key is present wins over the local default, even
@@ -916,6 +926,26 @@ interface AppProps {
 	cliModel?: string;
 	/** Non-interactive: skip onboarding when --yes / -y */
 	cliAutoApprove?: boolean;
+}
+
+/**
+ * A stored session as chat bubbles. Each bubble keeps the time its message was
+ * written; the resume time is only a fallback for a file that has none.
+ */
+export function storedToBubbles(
+	stored: ReadonlyArray<{ role: string; content: unknown }>,
+	times?: ReadonlyArray<string>,
+): Message[] {
+	const stamp = Date.now();
+	return stored.map((m, i) => {
+		const written = times?.[i] ? new Date(times[i]) : null;
+		return {
+			id: `restored-${stamp}-${i}`,
+			role: (m.role === "user" || m.role === "assistant" ? m.role : "system") as Message["role"],
+			content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+			timestamp: written && !Number.isNaN(written.getTime()) ? written : new Date(),
+		};
+	});
 }
 
 export interface Message {
@@ -1557,13 +1587,8 @@ export function App({
 			if (resumed) {
 				setActiveSessionId(resumed.id);
 				if (resumed.messages.length > 0) {
-					const restored = resumed.messages.map((m, i) => ({
-						id: `restored-${i}`,
-						role: m.role as "user" | "assistant" | "system",
-						content: m.content,
-						timestamp: new Date(),
-					}));
-					setMessages(restored as Message[]);
+					setMessages(storedToBubbles(resumed.messages, resumed.times));
+					seedAgentHistory(activeTabIdRef.current, resumed.messages);
 				}
 				addSystemMessage(
 					`Resumed session: "${resumed.name || resumed.id}" (${resumed.messageCount} messages)`,
@@ -1700,6 +1725,26 @@ export function App({
 	// the foreground UI; other tabs' work continues in the background and
 	// shows up in tabMessagesRef when their chat() resolves.
 	const perTabAgents = usePerTabAgents();
+	// A resumed chat is painted AND handed to the model. The agent may not exist yet
+	// (launch with --resume builds it after this runs, or a model switch rebuilds it),
+	// so the history waits here for the tab's agent and is applied the moment it exists.
+	const restoredHistoryRef = useRef<{
+		tabId: string;
+		messages: Array<{ role: string; content: string }>;
+	} | null>(null);
+	const seedAgentHistory = (
+		tabId: string,
+		stored: ReadonlyArray<{ role: string; content: unknown }>,
+	) => {
+		restoredHistoryRef.current = { tabId, messages: chatMessages([...stored]) };
+		applyRestoredHistory(tabId, perTabAgents.getAgent(tabId));
+	};
+	const applyRestoredHistory = (tabId: string, target: Agent | null | undefined) => {
+		const pending = restoredHistoryRef.current;
+		if (!pending || pending.tabId !== tabId || !target) return;
+		restoredHistoryRef.current = null;
+		target.restoreFromCheckpoint(pending.messages);
+	};
 	const isProcessing = perTabAgents.isTabProcessing(activeTabId);
 	// Folded trace (#5170): while a turn runs, its steps sit behind one status row.
 	// The setting is read when a turn starts or a view changes, not on every render.
@@ -1808,7 +1853,12 @@ export function App({
 		if (
 			(cliProviderRequestedRef.current ||
 				cliModelRequestedRef.current ||
-				(_savedHostedWithKey && currentProvider === _savedProviderSettings.provider)) &&
+				savedChoiceIsPinned({
+					savedProvider: _launchSavedChoice.provider,
+					savedModel: _launchSavedChoice.model,
+					savedHostedWithKey: _savedHostedWithKey,
+					currentProvider,
+				})) &&
 			cliPinRef.current === null
 		) {
 			cliPinRef.current = {
@@ -2265,6 +2315,8 @@ export function App({
 
 	// Each fallback line is said once per session, not once per turn (#4754).
 	const fallbackNoticeGateRef = useRef(createFallbackNoticeGate());
+	// One "model has gone quiet" line per quiet spell per tab (break 12).
+	const waitNoticeGateRef = useRef(createWaitNoticeGate());
 	// After model list loads: ensure currentModel is valid for the active provider.
 	// If the model isn't in the fetched list (e.g. Ollama model on OpenRouter), auto-select.
 	// react-doctor-disable-next-line react-doctor/no-effect-chain
@@ -3876,7 +3928,16 @@ export function App({
 					toolTrail: toTrailEntry(event),
 				});
 			},
-			onStall: ({ silentSeconds }) => {
+			onStall: ({ silentSeconds, model }) => {
+				// Say which model is quiet, once per quiet spell (break 12).
+				const waitLine = waitNoticeGateRef.current(tabId, { silentSeconds, model });
+				if (waitLine)
+					appendToTabLatest.current(tabId, {
+						id: messageId("wait"),
+						role: "system",
+						content: waitLine,
+						timestamp: new Date(),
+					});
 				if (tabId !== activeTabId) return;
 				setNarratorText(
 					silentSeconds === null
@@ -4340,6 +4401,7 @@ export function App({
 				// own error. Local providers still gate.
 				if (_check.ok || !shouldGateOnReadiness(currentProvider)) {
 					perTabAgents.setAgent(_initTabId, newAgent);
+					applyRestoredHistory(_initTabId, newAgent);
 					setAgent(newAgent);
 					setAgentReady(true);
 					built();
@@ -4592,19 +4654,9 @@ export function App({
 		return sessionMgr.store(activeSessionId);
 	}, [activeSessionId, messages, sessionMgr, currentModel, currentProvider]);
 
-	/** Stored messages as chat bubbles. */
-	const restoredBubbles = (stored: ReadonlyArray<{ role: string; content: unknown }>): Message[] =>
-		stored.map((m, i) => ({
-			id: `restored-${Date.now()}-${i}`,
-			role: (m.role === "user" || m.role === "assistant" ? m.role : "system") as Message["role"],
-			content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
-			timestamp: new Date(),
-		}));
-
 	/**
-	 * Make a stored session the active one and show its transcript (E3). The
-	 * 8gent's own context is not reloaded: the Agent has no history setter
-	 * yet, so the line says what was restored and nothing more.
+	 * Make a stored session the active one: show its transcript and hand the
+	 * same turns to the model, so the next request carries them.
 	 */
 	const openStoredSession = useCallback(
 		(id: string): boolean => {
@@ -4614,7 +4666,8 @@ export function App({
 				return false;
 			}
 			setActiveSessionId(found.id);
-			setMessages(restoredBubbles(found.messages));
+			setMessages(storedToBubbles(found.messages, found.times));
+			seedAgentHistory(activeTabIdRef.current, found.messages);
 			lastSaveCount.current = found.messages.length;
 			addSystemMessage(
 				`Resumed "${found.name || found.id}": ${found.messageCount} messages, ${found.model}, ${found.cwd}. Transcript restored.`,
@@ -5089,8 +5142,10 @@ export function App({
 					} else if (sub === "switch" && args[1]) {
 						try {
 							store.branch(args[1]);
-							setMessages(restoredBubbles(store.messages(args[1])));
-							lastSaveCount.current = store.messages(args[1]).length;
+							const onBranch = store.messages(args[1]);
+							setMessages(storedToBubbles(onBranch, store.messageTimes()));
+							seedAgentHistory(activeTabIdRef.current, onBranch);
+							lastSaveCount.current = onBranch.length;
 							addSystemMessage(`Continuing from entry ${args[1]}.`);
 						} catch (e) {
 							addSystemMessage(`Branch error: ${e instanceof Error ? e.message : String(e)}`);
@@ -5335,7 +5390,7 @@ export function App({
 							addSystemMessage("No saved sessions.");
 						} else {
 							const lines = sessions.map((s) => {
-								const label = s.name || `Session ${s.createdAt.slice(0, 10)}`;
+								const label = s.name || s.title || `Session ${s.createdAt.slice(0, 10)}`;
 								const ago = Math.floor((Date.now() - new Date(s.lastActiveAt).getTime()) / 60000);
 								const timeStr = ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`;
 								return `  ${s.id}  ${label.slice(0, 30).padEnd(30)}  ${s.messageCount} msgs  ${timeStr}`;
@@ -5348,13 +5403,8 @@ export function App({
 						if (resumed) {
 							setActiveSessionId(resumed.id);
 							if (resumed.messages.length > 0) {
-								const restored = resumed.messages.map((m, i) => ({
-									id: `restored-${i}`,
-									role: m.role as "user" | "assistant" | "system",
-									content: m.content,
-									timestamp: new Date(),
-								}));
-								setMessages(restored as Message[]);
+								setMessages(storedToBubbles(resumed.messages, resumed.times));
+								seedAgentHistory(activeTabIdRef.current, resumed.messages);
 							}
 							addSystemMessage(
 								`Resumed: "${resumed.name || resumed.id}" (${resumed.messageCount} messages)`,
@@ -5538,13 +5588,8 @@ export function App({
 						break;
 					}
 					setActiveSessionId(resumedLast.id);
-					const restoredMsgs = resumedLast.messages.map((m, i) => ({
-						id: `restored-${i}`,
-						role: m.role as "user" | "assistant" | "system",
-						content: m.content,
-						timestamp: new Date(),
-					}));
-					setMessages(restoredMsgs as Message[]);
+					setMessages(storedToBubbles(resumedLast.messages, resumedLast.times));
+					seedAgentHistory(activeTabIdRef.current, resumedLast.messages);
 					addSystemMessage(
 						`Restored: "${resumedLast.name || resumedLast.id}"\n  ${resumedLast.messageCount} messages - ${resumedLast.model}\n  Last active: ${new Date(resumedLast.lastActiveAt).toLocaleString()}\n\nContext restored. Continue where you left off.`,
 					);
@@ -8772,7 +8817,8 @@ export function App({
 							try {
 								store.branch(entryId);
 								const onPath = store.messages(entryId);
-								setMessages(restoredBubbles(onPath));
+								setMessages(storedToBubbles(onPath, store.messageTimes()));
+								seedAgentHistory(activeTabIdRef.current, onPath);
 								lastSaveCount.current = onPath.length;
 								addSystemMessage(
 									`Continuing from entry ${entryId} (${onPath.length} messages on this path).`,
@@ -9178,13 +9224,19 @@ export function App({
 		turnError,
 	});
 	readinessRef.current = readiness;
-	const providerRows = deriveProviders({
-		primary: currentModel
-			? { name: `${shownProvider}:${shownModel.ran}`, asked: shownModel.asked }
-			: { name: currentProvider },
-		fallback: railFallback(shownProvider, shownModel.ran),
-		offline: null,
-	});
+	const providerRows = deriveProviders(
+		currentModel
+			? routeSnapshot({
+					canAnswer: readiness.state !== "none",
+					route: { name: `${shownProvider}:${shownModel.ran}`, asked: shownModel.asked },
+					fallback: railFallback(shownProvider, shownModel.ran),
+				})
+			: {
+					primary: { name: currentProvider },
+					fallback: railFallback(shownProvider, shownModel.ran),
+					offline: null,
+				},
+	);
 	const orchestrationAgents: OrchestrationAgentSnapshot[] = orchestration.agents.map((a) => ({
 		id: a.id,
 		name: a.name,
