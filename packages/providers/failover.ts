@@ -182,12 +182,27 @@ export function hostedAllowed(env: Record<string, string | undefined> = process.
 }
 
 /** EIGHT_PROVIDERS_ALLOW as a lowercase list; null when unset or empty (no filtering). */
-function allowFromEnv(): string[] | null {
-	const list = (process.env.EIGHT_PROVIDERS_ALLOW ?? "")
+function allowFromEnv(env: Record<string, string | undefined> = process.env): string[] | null {
+	const list = (env.EIGHT_PROVIDERS_ALLOW ?? "")
 		.split(",")
 		.map((p) => p.trim().toLowerCase())
 		.filter(Boolean);
 	return list.length > 0 ? list : null;
+}
+
+/**
+ * The allowlist a chain applies, for one provider picked outside a chain (the
+ * small role, #73): hosted needs EIGHT_ALLOW_HOSTED=1, and EIGHT_PROVIDERS_ALLOW,
+ * when set, must name it.
+ */
+export function providerAllowed(
+	provider: string,
+	env: Record<string, string | undefined> = process.env,
+): boolean {
+	const p = provider.trim().toLowerCase();
+	if (isHostedProvider(p, env) && !hostedAllowed(env)) return false;
+	const explicit = allowFromEnv(env);
+	return !explicit || explicit.includes(p);
 }
 
 export interface ModelFailoverOptions {

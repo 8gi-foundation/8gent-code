@@ -94,6 +94,7 @@ import {
 	NoCredentialedProviderError,
 } from "../providers/failover";
 import { decideRoute, readPolicyState, recordCall } from "../providers/locality";
+import { describeRoles } from "../providers/roles";
 import { callLocalModelWithReroute, resolveToolCapableModel } from "../providers/model-reroute";
 import { extractBranchName, extractCommitHash } from "../reporting";
 import { type RunLogEntry, appendRun } from "../reporting/runlog";
@@ -131,6 +132,7 @@ import {
 	compactHistoryNow,
 	estimateMessageTokens,
 } from "./compaction";
+import { smallRoleConfigFor } from "./role-model";
 import { fixCompletedLine } from "./completed-line";
 import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
 import { recordRanCommand } from "./done-gate";
@@ -5097,7 +5099,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			const pass = await compactHistory({
 				engine: this.compaction,
 				history: this.messageHistory,
-				model: createModel(providerConfig),
+				model: createModel(this.smallRoleConfig(providerConfig)),
 				recorder: this.compactionRecorder,
 			});
 			if (!pass) return;
@@ -5111,6 +5113,31 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		} catch (err) {
 			console.error("  [COMPRESSION] Failed:", (err as Error).message);
 		}
+	}
+
+	/**
+	 * The `small` role (#73): compaction and summaries run on it when
+	 * models.roles.small is set, its provider has credentials, and the main
+	 * call's gates let it have the history (routing policy, provider allowlist,
+	 * privacy gate). Otherwise the session's own config, held local after a
+	 * sensitive read exactly as the main call is.
+	 */
+	private smallRoleConfig(session: ProviderConfig): ProviderConfig {
+		return smallRoleConfigFor(readSettingsFileSync()?.models?.roles, session, getProviderManager(), {
+			policy: readPolicyState(),
+			recentFilePaths: this.recentFilePaths,
+			runsLocal: (cfg) => runsOnBox(cfg.name, cfg.baseURL),
+		});
+	}
+
+	/** One line per role for /status: what main, small and slow run on right now. */
+	describeRoles(): string[] {
+		const pm = getProviderManager();
+		return describeRoles(
+			readSettingsFileSync()?.models?.roles,
+			{ provider: this.config.runtime as string, model: this.config.model },
+			(p) => pm.hasCredentials(p),
+		);
 	}
 
 	/**
@@ -5129,7 +5156,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const pass = await compactHistoryNow({
 			engine: this.compaction,
 			history: this.messageHistory,
-			model: createModel(providerConfig),
+			model: createModel(this.smallRoleConfig(providerConfig)),
 			recorder: this.compactionRecorder,
 		});
 		if (!pass) return null;

@@ -60,8 +60,30 @@ export interface ModelTabsSettings {
 	qa: ModelTabSetting;
 }
 
+/** What a role runs on: a provider and one of its models. */
+export interface RoleTarget {
+	provider: string;
+	model: string;
+}
+
+/** One target, or a chain tried in order; entries whose provider has no credentials are skipped. */
+export type RoleSetting = RoleTarget | RoleTarget[];
+
+/**
+ * Role-based model routing (#73). `main` is the work, `small` is compaction and
+ * summaries, `slow` is hard plans. Every key is optional; with none set the
+ * session's own provider and model do everything, as before.
+ */
+export interface RolesSettings {
+	main?: RoleSetting;
+	small?: RoleSetting;
+	slow?: RoleSetting;
+}
+
 export interface ModelsSettings {
 	tabs: ModelTabsSettings;
+	/** Optional role routing. Absent = unchanged behaviour. Global settings only. */
+	roles?: RolesSettings;
 }
 
 export interface ProviderEndpoint {
