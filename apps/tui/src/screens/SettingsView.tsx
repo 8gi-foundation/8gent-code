@@ -27,6 +27,7 @@ import {
 	looksLikeSecret,
 	saveSettings,
 } from "../../../../packages/settings/index.js";
+import { mouseCaptureOn } from "../lib/mouse-input.js";
 import { isAndroidHost } from "../../../../packages/voice/termux.js";
 import { AppText, Heading, MutedText } from "../components/primitives/AppText.js";
 import { Divider } from "../components/primitives/Divider.js";
@@ -371,7 +372,7 @@ const CATEGORIES: Category[] = [
 				description:
 					"On: click key caps and tabs, and drag to select text inside the TUI (copied on release). Off: the terminal selects and copies, key caps are not clickable. Takes effect on restart.",
 				kind: "toggle",
-				get: (s) => s.ui.mouseCapture ?? (isAndroidHost() || process.platform === "darwin"),
+				get: (s) => mouseCaptureOn(s.ui.mouseCapture, isAndroidHost()),
 				set: (s, v) => ({ ...s, ui: { ...s.ui, mouseCapture: Boolean(v) } }),
 			},
 			{

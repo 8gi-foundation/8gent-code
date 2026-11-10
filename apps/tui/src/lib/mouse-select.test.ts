@@ -16,6 +16,7 @@ import {
 	_disposeMouse,
 	arrowsToWheel,
 	installMouse,
+	mouseCaptureOn,
 	mouseMode,
 	onMouse,
 	setWheelInputEmpty,
@@ -275,5 +276,26 @@ describe("wheel as arrows", () => {
 		});
 		stdin.push(`${UP}${UP}`);
 		expect(drain(stdin)).toBe(`${UP}${UP}`);
+	});
+});
+
+describe("Settings row default (#181)", () => {
+	test("with no setting stored the row reads Off on macOS and On on Termux", () => {
+		expect(mouseCaptureOn(undefined, false)).toBe(false);
+		expect(mouseCaptureOn(undefined, true)).toBe(true);
+	});
+	test("one press from the unset macOS state turns clicks On", () => {
+		const shown = mouseCaptureOn(undefined, false);
+		const afterPress = mouseCaptureOn(!shown, false);
+		expect(afterPress).toBe(true);
+		expect(mouseMode(TTY, true, null, afterPress, false, "darwin")).toBe("full");
+	});
+	test("the row and mouseMode agree for every stored value and host", () => {
+		for (const stored of [undefined, true, false]) {
+			for (const android of [false, true]) {
+				const mode = mouseMode(TTY, true, null, stored, android, "darwin");
+				expect(mouseCaptureOn(stored, android)).toBe(mode === "full");
+			}
+		}
 	});
 });

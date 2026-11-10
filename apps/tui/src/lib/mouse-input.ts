@@ -202,6 +202,15 @@ export class MouseFilter {
 	}
 }
 
+/**
+ * Whether click capture is on when the owner has not chosen: only Termux (touch
+ * has no native selection there). The one place this default lives; the
+ * Settings row reads it too, so the row shows the state the process runs in.
+ */
+export function mouseCaptureOn(settingCapture: boolean | undefined, android: boolean): boolean {
+	return settingCapture ?? android;
+}
+
 /** Which mouse mode this process runs, or "off" when the layer stays out. */
 export function mouseMode(
 	env: Record<string, string | undefined> = process.env,
@@ -226,8 +235,7 @@ export function mouseMode(
 	// selection there). Desktops, macOS included, keep the terminal's own select
 	// and copy: reporting stays off unless EIGHT_MOUSE or the setting turns it on.
 	void platform;
-	if (settingCapture === undefined) return android ? "full" : "select";
-	return settingCapture ? "full" : "select";
+	return mouseCaptureOn(settingCapture, android) ? "full" : "select";
 }
 
 /** Whether the mouse layer turns on, in either mode, for this process. */
