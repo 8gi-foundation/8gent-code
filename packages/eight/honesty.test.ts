@@ -1014,3 +1014,250 @@ describe("round 8: unreal actions still read 'could not confirm' without any att
 		}
 	});
 });
+
+// A recorded live run: one small edit and two tests, then a summary that also claimed
+// tests for undefined and null. Those tests did not exist.
+describe("claims about files written and tests added", () => {
+	const CWD = "/work/repo";
+	const NOT_TESTS = "Not done in this turn: tests";
+	const run = (content: string, ledger: ToolLedgerEntry[]) =>
+		unbackedActionClaims(content, ledger, undefined, CWD);
+	const addTwo = ok("edit_file", {
+		path: "src/math.test.ts",
+		oldText: 'import { sum } from "./math";',
+		newText:
+			'import { sum } from "./math";\nit("adds", () => {});\nit("adds negatives", () => {});',
+	});
+
+	it("flags a file claim when no write or edit touched the path", () => {
+		const notes = run("I edited src/other.ts and fixed the bug.", [
+			ok("edit_file", { path: "src/math.ts" }),
+		]);
+		expect(notes).toEqual(["Not done in this turn: a change to src/other.ts."]);
+	});
+
+	it("passes a file claim after normalising ./ and absolute paths", () => {
+		const rel = ok("write_file", { path: "src/a.ts", content: "x" });
+		const abs = ok("write_file", { path: `${CWD}/src/a.ts`, content: "x" });
+		expect(run("Created ./src/a.ts.", [rel])).toEqual([]);
+		expect(run("Wrote src/a.ts.", [abs])).toEqual([]);
+		expect(run(`Wrote ${CWD}/src/a.ts.`, [rel])).toEqual([]);
+	});
+
+	it("does not count a failed write as touching the path", () => {
+		const failed: ToolLedgerEntry = {
+			name: "write_file",
+			args: { path: "a.ts" },
+			success: false,
+			result: "Error: x",
+		};
+		const other = ok("write_file", { path: "b.ts", content: "" });
+		expect(run("I created a.ts.", [failed, other])).toHaveLength(1);
+	});
+
+	it("does not flag a file written through a shell redirect in the same turn", () => {
+		const sh = ok(
+			"run_command",
+			{ command: "echo 'export const a = 1' > src/a.ts" },
+			"Exit code 0",
+		);
+		expect(run("I created src/a.ts.", [sh])).toEqual([]);
+	});
+
+	it("does not flag future, negated or other-voice file wording", () => {
+		const ledger = [ok("edit_file", { path: "x.ts" })];
+		expect(run("I could edit src/other.ts next.", ledger)).toEqual([]);
+		expect(run("I did not edit src/other.ts.", ledger)).toEqual([]);
+		expect(run("Alice updated src/other.ts yesterday.", ledger)).toEqual([]);
+	});
+
+	it("flags the recorded case: claims null and undefined tests that were never written", () => {
+		const reply = "Edited src/math.ts and added tests for null and undefined edge cases.";
+		const out = enforceAgenticHonesty({
+			content: reply,
+			ledger: [ok("edit_file", { path: "src/math.ts" }), addTwo],
+			workingDirectory: CWD,
+		});
+		expect(out.violated).toBe(true);
+		expect(out.content.startsWith(reply)).toBe(true);
+		expect(out.content).toContain("[harness] Not done in this turn: tests for null and undefined.");
+	});
+
+	it("passes a topic claim when the topic word is in an added test", () => {
+		const edit = ok("edit_file", {
+			path: "src/math.test.ts",
+			oldText: "",
+			newText: 'it("handles null", () => {});\nit("handles undefined", () => {});',
+		});
+		expect(run("Added tests for null and undefined.", [edit])).toEqual([]);
+	});
+
+	it("flags a stated number above the number added, and passes an exact number", () => {
+		const four = ["Not done in this turn: 4 tests (2 added)."];
+		expect(run("I wrote 4 tests.", [addTwo])).toEqual(four);
+		expect(run("I wrote four tests.", [addTwo])).toEqual(four);
+		expect(run("I added two tests.", [addTwo])).toEqual([]);
+		expect(run("I wrote 2 tests.", [addTwo])).toEqual([]);
+	});
+
+	it("flags a tests claim when no test declaration was added", () => {
+		const src = ok("edit_file", { path: "src/math.ts", oldText: "a", newText: "b" });
+		expect(run("Added edge-case tests.", [src])).toEqual([`${NOT_TESTS}.`]);
+		expect(run("Added tests.", [])).toEqual([`${NOT_TESTS}.`]);
+	});
+
+	it("counts only new declarations: an edit that keeps old tests adds none", () => {
+		const reword = ok("edit_file", {
+			path: "a.test.ts",
+			oldText: 'it("old", () => {});',
+			newText: 'it("old renamed", () => {});',
+		});
+		expect(run("I added a test.", [reword])).toEqual([`${NOT_TESTS}.`]);
+	});
+
+	it("counts .each, .skip and .only declarations", () => {
+		const forms = ok("write_file", {
+			path: "a.test.ts",
+			content:
+				'test.each([1])("x", () => {});\nit.skip("y", () => {});\ndescribe.only("z", () => {});',
+		});
+		expect(run("I added 3 tests.", [forms])).toEqual([]);
+		expect(run("I added 4 tests.", [forms])).toHaveLength(1);
+	});
+
+	it("does not flag tests that already existed, a denial, or future wording", () => {
+		expect(run("The file already has 5 tests for null.", [])).toEqual([]);
+		expect(run("There are tests covering undefined in math.test.ts.", [])).toEqual([]);
+		expect(run("I did not add tests.", [])).toEqual([]);
+		expect(run("I have not added tests for null.", [])).toEqual([]);
+		expect(run("I could add tests for null.", [])).toEqual([]);
+		expect(run("Next I would add tests for undefined.", [])).toEqual([]);
+	});
+
+	it("does not flag tests added through a shell command that writes a test file", () => {
+		const sh = ok(
+			"run_command",
+			{ command: "cat > math.test.ts <<'EOF'\nit('a', () => {})\nEOF" },
+			"Exit code 0",
+		);
+		expect(run("I added 3 tests.", [sh])).toEqual([]);
+	});
+
+	it("is lexical: a topic word in a test name backs the claim even if the test checks nothing", () => {
+		const hollow = ok("edit_file", {
+			path: "a.test.ts",
+			oldText: "",
+			newText: 'it("null", () => {});',
+		});
+		expect(run("Added tests for null.", [hollow])).toEqual([]);
+	});
+
+	it("keeps the rest of the reply and appends the note", () => {
+		const reply = "All done.\nI wrote 3 tests.\nThanks.";
+		const out = enforceAgenticHonesty({
+			content: reply,
+			ledger: [ok("run_command", { command: "ls" }, "Exit code 0")],
+			workingDirectory: CWD,
+		});
+		expect(out.content.startsWith(reply)).toBe(true);
+		expect(out.content).toContain("[harness] Not done in this turn: tests.");
+	});
+
+	it("marks a result writtenOnly only when every note is a written-file or added-test note", () => {
+		const ledger = [ok("run_command", { command: "ls" }, "Exit code 0")];
+		const written = enforceAgenticHonesty({
+			content: "I wrote 3 tests.",
+			ledger,
+			workingDirectory: CWD,
+		});
+		expect(written.writtenOnly).toBe(true);
+		const mixed = enforceAgenticHonesty({
+			content: "Committed it. I wrote 3 tests.",
+			ledger,
+			workingDirectory: CWD,
+		});
+		expect(mixed.violated).toBe(true);
+		expect(mixed.writtenOnly).toBe(false);
+	});
+});
+
+describe("file and test claims: every writer counts, other languages are read or left alone", () => {
+	const CWD = "/work/repo";
+	const run = (content: string, ledger: ToolLedgerEntry[]) =>
+		unbackedActionClaims(content, ledger, undefined, CWD);
+
+	it("counts the document, media and notebook writers as writes", () => {
+		expect(run("I created report.pdf.", [ok("make_pdf", { markdown: "# x" })])).toEqual([]);
+		expect(run("I created deck.docx.", [ok("make_docx", { spec: {} })])).toEqual([]);
+		expect(
+			run("I created sheet.xlsx.", [ok("make_xlsx", { spec: {}, out: "sheet.xlsx" })]),
+		).toEqual([]);
+		expect(run("I created slides.pptx.", [ok("make_pptx", { spec: {} })])).toEqual([]);
+		expect(run("I created deck.mp4.", [ok("render_video_deck", { out: "deck.mp4" })])).toEqual([]);
+		expect(run("I wrote todo.md.", [ok("write_notes", { title: "t", content: "c" })])).toEqual([]);
+		expect(
+			run("I edited nb.ipynb.", [ok("notebook_edit_cell", { path: "nb.ipynb", cellIndex: 0 })]),
+		).toEqual([]);
+	});
+
+	it("still flags a document claim when no writer ran or it named another file", () => {
+		expect(run("I created report.pdf.", [ok("read_file", { path: "a.ts" })])).toHaveLength(1);
+		expect(run("I created b.xlsx.", [ok("make_xlsx", { spec: {}, out: "a.xlsx" })])).toHaveLength(
+			1,
+		);
+	});
+
+	it("counts Python, Go, Rust and Java test declarations", () => {
+		const py = ok("write_file", {
+			path: "tests/test_x.py",
+			content: "def test_empty():\n    pass\n\ndef test_b():\n    pass\n",
+		});
+		expect(run("I added two tests for empty input.", [py])).toEqual([]);
+		const go = ok("write_file", {
+			path: "x_test.go",
+			content: "func TestEmpty(t *testing.T) {}\n",
+		});
+		expect(run("I added a test for empty input.", [go])).toEqual([]);
+		const rs = ok("write_file", { path: "tests/x.rs", content: "#[test]\nfn empty() {}\n" });
+		expect(run("I added a test for empty input.", [rs])).toEqual([]);
+		expect(run("I added three tests.", [py])).toEqual([
+			"Not done in this turn: 3 tests (2 added).",
+		]);
+	});
+
+	it("stays silent for a test file in a language it cannot read", () => {
+		const lua = ok("write_file", { path: "tests/x_spec.lua", content: "check(1)\n" });
+		expect(run("I added tests for empty input.", [lua])).toEqual([]);
+	});
+
+	it("counts an assertion added inside an existing test", () => {
+		const edit = ok("edit_file", {
+			path: "src/f.test.ts",
+			oldText: "expect(f(1)).toBe(1);",
+			newText: "expect(f(1)).toBe(1);\n    expect(f(null)).toBe(0);",
+		});
+		expect(run("Added tests for null.", [edit])).toEqual([]);
+	});
+
+	it("counts a shell line sent to a terminal tab like a shell command", () => {
+		const tab = ok("write_terminal", { tabId: "default", input: "echo hi > a.txt" });
+		expect(run("I typed `echo hi > a.txt` into the terminal tab and wrote a.txt.", [tab])).toEqual(
+			[],
+		);
+		const send = ok("term_send", { sessionId: "s", text: "echo hi > b.txt" });
+		expect(run("I wrote b.txt.", [send])).toEqual([]);
+		const noWrite = ok("write_terminal", { tabId: "default", input: "ls" });
+		expect(run("I wrote a.txt.", [noWrite])).toHaveLength(1);
+	});
+
+	it("matches a shell write in another directory by its file name", () => {
+		const sh = ok("run_command", { command: "cd src && echo hi > out.txt" });
+		expect(run("I wrote src/out.txt.", [sh])).toEqual([]);
+	});
+
+	it("does not read a library name as a file", () => {
+		const add = ok("run_command", { command: "bun add next@15" });
+		expect(run("I updated to Next.js.", [add])).toEqual([]);
+		expect(run("I updated src/Next.js.", [add])).toHaveLength(1);
+	});
+});

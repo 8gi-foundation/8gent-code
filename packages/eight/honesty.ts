@@ -555,17 +555,275 @@ function clauseClaims(clause: string, says: RegExp): boolean {
 	return OWN_PASSIVE.test(`${before} `) || ARTICLE_ONLY.test(before);
 }
 
+// ── Written-file and added-test claims ───────────────────────────────────────
+//
+// Same idea as the claims above, read from the turn's write and edit calls instead of the
+// repo. This is a LEXICAL check on both sides: it reads words in the reply and text in the
+// tool arguments, and it cannot tell whether a test is meaningful. Known blind spots:
+// - A test that only mentions the topic word (a name, a comment) satisfies a topic claim.
+// - write_file carries no old content, so every declaration in a rewritten file counts as
+//   added. A rewrite of a file that already had tests can hide an overstated number.
+// - Only the first path or topic list in a clause is read; "a.ts, b.ts" checks a.ts.
+// - A file or test written through the shell is not read. A shell line that writes a path
+//   (redirect, tee, sed -i, cp, mv, patch, a package manager add) backs a file claim, and
+//   one that writes a test path makes test claims unverifiable, so they are not flagged.
+
+const FILE_SAYS =
+	/\b(?:created|wrote|written|added|edited|updated|modified)\s+(?:(?:the|a|an|new|existing|file|files|test|tests|unit|some|more|to|in|into)\s+)*([\w@./~-]*[\w-]\.[A-Za-z][A-Za-z0-9]{0,5})\b/i;
+
+const TOPIC_MOD =
+	"(?:null|undefined|empty|invalid|negative|boundary|error)(?:[- ](?:input|value|handling|case)s?)?";
+const TESTS_SAYS = new RegExp(
+	String.raw`\b(?:added|wrote|written|created|included)\s+((?:(?:the|a|an|some|more|new|extra|additional|several|few|unit|edge[- ]cases?|edge|regression|integration|failing|\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|[a-z]+-case|${TOPIC_MOD})\s+){0,5})tests?\b`,
+	"i",
+);
+const NUMBER_WORDS = [
+	"one",
+	"two",
+	"three",
+	"four",
+	"five",
+	"six",
+	"seven",
+	"eight",
+	"nine",
+	"ten",
+	"eleven",
+	"twelve",
+];
+const TOPIC_WORDS = [
+	"null",
+	"undefined",
+	"empty",
+	"error",
+	"invalid",
+	"negative",
+	"boundary",
+	"whitespace",
+	"timeout",
+	"unicode",
+];
+const EDGE_WORDS =
+	/(?:edge|boundary|empty|null|undefined|invalid|error|negative|zero|overflow|max|min)/i;
+
+const TEST_DECL = new RegExp(
+	[
+		String.raw`\b(?:test|it|describe)(?:\.(?:each|skip|only|todo|failing|concurrent|serial))*\s*[(\x60]`,
+		// Ruby: it "does x" do. Python: def test_x. Go: func TestX. Swift: func testX.
+		String.raw`\b(?:it|describe|test)\s+["']`,
+		String.raw`\bdef\s+test_?\w*`,
+		String.raw`\bfunc\s+(?:\([^)]*\)\s*)?[Tt]est\w*`,
+		// Rust: #[test], #[tokio::test]. Java and Kotlin: @Test. C#: [Fact], [Test], [TestMethod].
+		String.raw`#\[(?:\w+::)?test\b[^\]]*\]`,
+		String.raw`@(?:Parameterized)?Test\b`,
+		String.raw`\[(?:Fact|Theory|Test|TestMethod)\]`,
+		String.raw`\bfunction\s+test[A-Z_]\w*`,
+	].join("|"),
+	"g",
+);
+const TEST_PATH =
+	/(?:\.(?:test|spec)\.[cm]?[jt]sx?$|_test\.(?:go|py|ts|js|rs)$|(?:^|\/)test_[^/]*\.py$|_spec\.rb$|Tests?\.(?:java|kt|swift|cs|php)$|(?:^|\/)__tests__\/|(?:^|\/)tests?\/)/i;
+/** File types whose declarations the count above can read. A test file of any other type is not judged. */
+const PARSED_TEST_FILE = /\.(?:[cm]?[jt]sx?|py|go|rs|rb|java|kt|swift|cs|php)$/i;
+const ASSERT_LINE =
+	/\b(?:expect|assert\w*|should|require)\s*[.(]|\bt\.(?:Error|Fatal)\w*\(|\bassert!?\(/g;
+const SHELL_TEST_PATH =
+	/\.(?:test|spec)\.[cm]?[jt]sx?\b|_test\.\w|\btest_\w+\.py|__tests__\/|\btests?\//i;
+const TEST_RUNNER = /\b(?:bun:test|vitest|@jest|node:test)\b|#\[(?:cfg\()?test\b/;
+const SHELL_WRITES =
+	/>|<<|\btee\b|\bsed\s+-\w*i|\bperl\s+-\w*i|\btouch\b|\bcp\b|\bmv\b|\bpatch\b|\bgit\s+(?:apply|checkout|restore)\b|\b(?:bun|npm|pnpm|yarn)\s+(?:add|install|remove|i)\b/;
+
+const declCount = (text: string) => (text.match(TEST_DECL) ?? []).length;
+const strArg = (e: ToolLedgerEntry, key: string) =>
+	typeof e.args?.[key] === "string" ? (e.args[key] as string) : undefined;
+
+/** Relative, "./"-free, resolved against the working directory. */
+function normPath(p: string, cwd: string): string {
+	return resolvePath(cwd, p.replace(/^~\//, ""));
+}
+
+// Tools that write a file and the argument that names it. A tool with no entry here, or a call
+// that left the argument out, backs a claim by file type instead (see WRITER_EXTS).
+const WRITER_ARG: Record<string, string> = {
+	write_file: "path",
+	edit_file: "path",
+	notebook_edit_cell: "path",
+	notebook_insert_cell: "path",
+	notebook_delete_cell: "path",
+	speak: "out",
+	render_video_deck: "out",
+	make_docx: "out",
+	make_xlsx: "out",
+	make_pptx: "out",
+	make_pdf: "outName",
+	film_craft: "out",
+};
+// The file types a writer produces when it picks the name itself. write_notes writes a note into
+// the app's own store, so any note-like file claim stays unflagged.
+const WRITER_EXTS: Record<string, readonly string[]> = {
+	make_pdf: ["pdf"],
+	make_docx: ["docx"],
+	make_xlsx: ["xlsx"],
+	make_pptx: ["pptx"],
+	render_video_deck: ["mp4", "json", "vtt", "srt", "txt"],
+	speak: ["wav"],
+	film_craft: ["wav", "mp4", "json", "md", "txt"],
+	write_notes: ["md", "txt"],
+	notebook_edit_cell: ["ipynb"],
+	notebook_insert_cell: ["ipynb"],
+	notebook_delete_cell: ["ipynb"],
+};
+
+const extOf = (p: string) => /\.([A-Za-z0-9]+)$/.exec(p)?.[1]?.toLowerCase() ?? "";
+
+/** Does a successful writer call back a claim about this file? Exact path, or its type when the call chose the name. */
+function writerBacks(ledger: readonly ToolLedgerEntry[], claimed: string, cwd: string): boolean {
+	const want = normPath(claimed, cwd);
+	const ext = extOf(claimed);
+	const base = claimed.split("/").pop() ?? claimed;
+	for (const e of ledger) {
+		if (!ran(e)) continue;
+		const arg = WRITER_ARG[e.name];
+		const named = arg ? strArg(e, arg) : undefined;
+		if (named && normPath(named, cwd) === want) return true;
+		if (typeof e.result === "string" && WRITER_ARG[e.name] && e.result.includes(base)) return true;
+		const exts = WRITER_EXTS[e.name];
+		if (exts?.includes(ext) && (!named || e.name === "make_pdf" || e.name === "write_notes"))
+			return true;
+	}
+	return false;
+}
+
+/** Every tool that types a line into a shell, a terminal tab or a tmux session. */
+const SHELL_LINE_ARGS: Record<string, readonly string[]> = {
+	run_command: ["command"],
+	write_terminal: ["input"],
+	term_send: ["text"],
+};
+
+function shellWrites(ledger: readonly ToolLedgerEntry[], path: RegExp | string): boolean {
+	return ledger.some((e) => {
+		const keys = SHELL_LINE_ARGS[e.name];
+		if (!ran(e) || !keys) return false;
+		const cmd = keys.map((k) => strArg(e, k)).find((v) => v !== undefined);
+		if (!cmd || !SHELL_WRITES.test(cmd)) return false;
+		if (typeof path !== "string") return path.test(cmd);
+		// "cd src && echo hi > out.txt" names the file, not its directory: the name is enough.
+		return cmd.includes(path) || cmd.includes(path.split("/").pop() ?? path);
+	});
+}
+
+/** Test declarations the turn's writes and edits added, the assertions added, and the text they added. */
+function addedTests(ledger: readonly ToolLedgerEntry[]): {
+	count: number;
+	asserts: number;
+	unparsed: boolean;
+	text: string;
+} {
+	let count = 0;
+	let asserts = 0;
+	let unparsed = false;
+	let text = "";
+	const n = (t: string, re: RegExp) => (t.match(re) ?? []).length;
+	for (const e of ledger) {
+		const path = strArg(e, "path");
+		if (!ran(e) || !path) continue;
+		let before = "";
+		let after: string | undefined;
+		if (e.name === "write_file") after = strArg(e, "content");
+		else if (e.name === "edit_file") {
+			before = strArg(e, "oldText") ?? "";
+			after = strArg(e, "newText");
+		}
+		if (after === undefined || !(TEST_PATH.test(path) || TEST_RUNNER.test(after))) continue;
+		const found = declCount(after);
+		count += Math.max(0, found - declCount(before));
+		asserts += Math.max(0, n(after, ASSERT_LINE) - n(before, ASSERT_LINE));
+		// A test file in a language the count cannot read is not judged either way.
+		if (found === 0 && !PARSED_TEST_FILE.test(path)) unparsed = true;
+		text += `\n${after}`;
+	}
+	return { count, asserts, unparsed, text };
+}
+
+/** "Edited a.ts and added tests" is two reports: split before a second past-tense verb. */
+const splitAnd = (clauses: string[]) =>
+	clauses.flatMap((c) =>
+		c.split(/\s+and\s+(?=(?:also\s+)?(?:created|wrote|added|edited|updated|modified)\b)/i),
+	);
+
+/** "Next.js" and "Node.js" name a library, not a file. A bare capitalised name with a web-ish suffix is not judged. */
+const looksLikeFile = (p: string) =>
+	p.includes("/") || !/^[A-Z][\w-]*\.(?:js|ts|io|net|ai)$/.test(p);
+
+function fileClaimNotes(clauses: string[], ledger: readonly ToolLedgerEntry[], cwd: string) {
+	const notes = new Set<string>();
+	for (const cl of clauses) {
+		const clause = cl.replace(/[`*]/g, "");
+		const path = FILE_SAYS.exec(clause)?.[1];
+		if (!path || !clauseClaims(clause, FILE_SAYS)) continue;
+		if (!looksLikeFile(path)) continue;
+		if (writerBacks(ledger, path, cwd) || shellWrites(ledger, path)) continue;
+		notes.add(`Not done in this turn: a change to ${path}.`);
+	}
+	return [...notes];
+}
+
+function testClaimNotes(clauses: string[], ledger: readonly ToolLedgerEntry[]) {
+	if (shellWrites(ledger, SHELL_TEST_PATH)) return [];
+	const added = addedTests(ledger);
+	if (added.unparsed) return [];
+	for (const cl of clauses) {
+		const clause = cl.replace(/[`*]/g, "");
+		const m = TESTS_SAYS.exec(clause);
+		if (!m || !clauseClaims(clause, TESTS_SAYS)) continue;
+		const mods = (m[1] ?? "").toLowerCase();
+		const tail = clause.slice(m.index + m[0].length);
+		const forTail =
+			/^\s+(?:for|covering|around|on|of|to cover|that (?:cover|check|verify)|checking|handling)\b/i.test(
+				tail,
+			)
+				? tail.slice(0, 80)
+				: "";
+		const said = ` ${mods} ${forTail} `;
+		const vague = /\b(?:some|several|few|more)\b/.test(mods);
+		const n = vague
+			? undefined
+			: (/\b(\d+)\b/.exec(mods)?.[1] ??
+					NUMBER_WORDS.findIndex((w) => new RegExp(`\\b${w}\\b`).test(mods)) + 1) ||
+				(/\b(?:a|an)\b/.test(mods) ? 1 : undefined);
+		// An assertion added inside an existing test is a test change the declaration count cannot see.
+		const edited = added.count === 0 && added.asserts > 0;
+		if (added.count === 0 && !edited) return ["Not done in this turn: tests."];
+		if (!edited && n !== undefined && Number(n) > added.count)
+			return [`Not done in this turn: ${n} tests (${added.count} added).`];
+		const missing = TOPIC_WORDS.filter(
+			(w) => new RegExp(`\\b${w}`, "i").test(said) && !new RegExp(w, "i").test(added.text),
+		);
+		if (/\bedge\b/i.test(said) && !EDGE_WORDS.test(added.text)) missing.push("edge cases");
+		if (missing.length > 0) return [`Not done in this turn: tests for ${missing.join(" and ")}.`];
+	}
+	return [];
+}
+
 /** The notes for every action the reply reports that the turn's ledger does not back. */
 export function unbackedActionClaims(
 	content: string,
 	ledger: readonly ToolLedgerEntry[],
 	repo?: RepoDelta,
+	workingDirectory?: string,
 ): string[] {
 	if (!content) return [];
 	const clauses = replyClauses(content);
-	return ACTION_CLAIMS.filter(
-		(c) => clauses.some((cl) => clauseClaims(cl, c.says)) && !c.backed(ledger, repo),
-	).map((c) => c.note(ledger, repo));
+	const parts = splitAnd(clauses);
+	const cwd = workingDirectory ?? repo?.before?.cwd ?? process.cwd();
+	return [
+		...ACTION_CLAIMS.filter(
+			(c) => clauses.some((cl) => clauseClaims(cl, c.says)) && !c.backed(ledger, repo),
+		).map((c) => c.note(ledger, repo)),
+		...fileClaimNotes(parts, ledger, cwd),
+		...testClaimNotes(parts, ledger),
+	];
 }
 
 export interface HonestyGateResult {
@@ -573,6 +831,8 @@ export interface HonestyGateResult {
 	violated: boolean;
 	/** True when every failed action was a permission or sandbox refusal (#3899). */
 	denied?: boolean;
+	/** Every note is a written-file or added-test claim; the loop's own unverified reason may decide the exit status. */
+	writtenOnly?: boolean;
 	reason?: string;
 }
 
@@ -591,10 +851,10 @@ export function enforceAgenticHonesty(opts: {
 	const { content, ledger, workingDirectory, repo } = opts;
 	const actions = ledger.filter((e) => ACTION_TOOLS.has(e.name));
 	if (actions.some((e) => e.success)) {
-		return actionClaimGate(content, ledger, repo);
+		return actionClaimGate(content, ledger, repo, workingDirectory);
 	}
 	if (!claimsCompletion(content)) {
-		return actionClaimGate(content, ledger, repo);
+		return actionClaimGate(content, ledger, repo, workingDirectory);
 	}
 	const failed = actions.filter((e) => !e.success);
 	if (failed.length > 0) {
@@ -617,12 +877,14 @@ function actionClaimGate(
 	content: string,
 	ledger: ToolLedgerEntry[],
 	repo?: RepoDelta,
+	workingDirectory?: string,
 ): HonestyGateResult {
-	const notes = unbackedActionClaims(content, ledger, repo);
+	const notes = unbackedActionClaims(content, ledger, repo, workingDirectory);
 	if (notes.length === 0) return { content, violated: false };
 	return {
 		content: `${content.trimEnd()}\n\n${notes.map((n) => `[harness] ${n}`).join("\n")}`,
 		violated: true,
+		writtenOnly: notes.every((n) => n.startsWith("Not done in this turn:")),
 		reason: `action claim without a matching successful call: ${notes.join(" ")}`,
 	};
 }
