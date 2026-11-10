@@ -273,7 +273,7 @@ function buildControlPanel(agent: any): { text: string; keyboard: any } {
 
 function buildModelMenu(): { text: string; keyboard: any } {
 	const text =
-		"🧠 *Select a model:*\n\n_Choose your provider and model. The agent will switch immediately._";
+		"🧠 *Select a model:*\n\n_Choose your provider and model. 8gent will switch immediately._";
 
 	const keyboard = {
 		inline_keyboard: [
@@ -660,8 +660,8 @@ export class TelegramBot {
 				"*/btw <question>* — Side question (no tools)",
 				"*/run <cmd>* — Execute shell command",
 				"",
-				"Or just type any message to chat with the agent.",
-				"The agent has full tool access (file read/write, git, web, etc.)",
+				"Or just type any message to chat with 8gent.",
+				"8gent has full tool access (file read/write, git, web, etc.)",
 			].join("\n");
 			await sendMsg(this.config.token, chat.id, helpText);
 			return;
