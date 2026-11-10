@@ -268,8 +268,8 @@ import {
 	GREETINGS,
 	PERSONALITY,
 	flavorResponse,
-	wantsBareReply,
 	voice as personalityVoice,
+	wantsBareReply,
 } from "../personality/voice.js";
 import {
 	CONTEXT_NOTE_HEADER,
@@ -2513,10 +2513,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			console.log(`[honesty] blocked fabricated completion: ${gated.reason}`);
 			this.honestyFired = true;
 			this.friction.count("honestyNudges");
-			this.lastTurnFailure = {
-				reason: gated.denied ? "denied" : "turn_failed",
-				message: gated.content,
-			};
+			// A written-file or added-test note leaves the exit reason to the loop's own
+			// contradicted-claim result when it has one (denied, unverified).
+			if (!(gated.writtenOnly && agentResult.unverified.length > 0)) {
+				this.lastTurnFailure = {
+					reason: gated.denied ? "denied" : "turn_failed",
+					message: gated.content,
+				};
+			}
 		}
 
 		// Map into the exact shape chat() normally returns: flavored prose, pushed

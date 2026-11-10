@@ -742,6 +742,8 @@ export interface HonestyGateResult {
 	violated: boolean;
 	/** True when every failed action was a permission or sandbox refusal (#3899). */
 	denied?: boolean;
+	/** Every note is a written-file or added-test claim; the loop's own unverified reason may decide the exit status. */
+	writtenOnly?: boolean;
 	reason?: string;
 }
 
@@ -793,6 +795,7 @@ function actionClaimGate(
 	return {
 		content: `${content.trimEnd()}\n\n${notes.map((n) => `[harness] ${n}`).join("\n")}`,
 		violated: true,
+		writtenOnly: notes.every((n) => n.startsWith("Not done in this turn:")),
 		reason: `action claim without a matching successful call: ${notes.join(" ")}`,
 	};
 }

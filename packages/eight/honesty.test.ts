@@ -1162,4 +1162,21 @@ describe("claims about files written and tests added", () => {
 		expect(out.content.startsWith(reply)).toBe(true);
 		expect(out.content).toContain("[harness] Not done in this turn: tests.");
 	});
+
+	it("marks a result writtenOnly only when every note is a written-file or added-test note", () => {
+		const ledger = [ok("run_command", { command: "ls" }, "Exit code 0")];
+		const written = enforceAgenticHonesty({
+			content: "I wrote 3 tests.",
+			ledger,
+			workingDirectory: CWD,
+		});
+		expect(written.writtenOnly).toBe(true);
+		const mixed = enforceAgenticHonesty({
+			content: "Committed it. I wrote 3 tests.",
+			ledger,
+			workingDirectory: CWD,
+		});
+		expect(mixed.violated).toBe(true);
+		expect(mixed.writtenOnly).toBe(false);
+	});
 });
