@@ -27,12 +27,12 @@ import {
 	looksLikeSecret,
 	saveSettings,
 } from "../../../../packages/settings/index.js";
-import { mouseCaptureOn } from "../lib/mouse-input.js";
 import { isAndroidHost } from "../../../../packages/voice/termux.js";
 import { AppText, Heading, MutedText } from "../components/primitives/AppText.js";
 import { Divider } from "../components/primitives/Divider.js";
 import { Stack } from "../components/primitives/Stack.js";
 import { fmtTokens } from "../lib/context-view.js";
+import { mouseCaptureOn } from "../lib/mouse-input.js";
 import { parseWindowInput } from "../lib/tab-context-window.js";
 import { KeyVaultScreen } from "./KeyVaultScreen.js";
 
