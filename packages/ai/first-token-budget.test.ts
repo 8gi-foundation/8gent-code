@@ -15,6 +15,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import {
+	FIRST_OUTPUT_GRACE_MS,
 	PREFILL_FLOOR_TOKENS_PER_S,
 	TurnTimeoutError,
 	resolveFirstTokenMs,
@@ -101,43 +102,72 @@ afterAll(() => {
 describe("resolveFirstTokenMs", () => {
 	const idle = 300_000;
 	const ceiling = 1_200_000;
+	const prefillOf = (tokens: number) => Math.ceil((tokens / PREFILL_FLOOR_TOKENS_PER_S) * 1000);
 
-	it("an empty prompt gets exactly the idle gap, a short one only seconds more", () => {
-		expect(resolveFirstTokenMs({ idleMs: idle, promptChars: 0, ceilingMs: ceiling, env: {} })).toBe(idle);
-		// 500 tokens at the floor rate: 10 s, so a dead endpoint still fails over in about one gap.
-		expect(resolveFirstTokenMs({ idleMs: idle, promptChars: 2_000, ceilingMs: ceiling, env: {} })).toBe(
-			idle + 10_000,
+	it("an empty prompt gets the grace, not the 300 s idle gap (#133)", () => {
+		expect(resolveFirstTokenMs({ idleMs: idle, promptChars: 0, ceilingMs: ceiling, env: {} })).toBe(
+			FIRST_OUTPUT_GRACE_MS,
 		);
+		// 500 tokens at the floor rate: 10 s more.
+		expect(
+			resolveFirstTokenMs({ idleMs: idle, promptChars: 2_000, ceilingMs: ceiling, env: {} }),
+		).toBe(FIRST_OUTPUT_GRACE_MS + 10_000);
 	});
 
-	it("a long prompt adds prefill time at the conservative floor rate", () => {
-		// 30k tokens at the floor rate.
-		const promptChars = 30_000 * 4;
-		const prefillMs = Math.ceil((30_000 / PREFILL_FLOOR_TOKENS_PER_S) * 1000);
-		const got = resolveFirstTokenMs({ idleMs: idle, promptChars, ceilingMs: 10 * ceiling, env: {} });
-		expect(got).toBe(idle + prefillMs);
-		expect(got).toBeGreaterThan(idle);
+	it("a 14,020 token prompt is cut well under the old 411 s (#133)", () => {
+		const got = resolveFirstTokenMs({
+			idleMs: idle,
+			promptChars: 14_020 * 4,
+			ceilingMs: ceiling,
+			env: {},
+		});
+		expect(got).toBe(FIRST_OUTPUT_GRACE_MS + prefillOf(14_020));
+		expect(got).toBeLessThan(idle + prefillOf(14_020));
+		expect(got).toBeLessThan(411_000);
 	});
 
-	it("never exceeds the step ceiling, and never drops below the idle gap", () => {
+	it("a long prompt still earns its prefill time at the conservative floor rate", () => {
+		const got = resolveFirstTokenMs({
+			idleMs: idle,
+			promptChars: 30_000 * 4,
+			ceilingMs: 10 * ceiling,
+			env: {},
+		});
+		expect(got).toBe(FIRST_OUTPUT_GRACE_MS + prefillOf(30_000));
+	});
+
+	it("the old bound stays the upper limit: never above the step ceiling or idle gap plus prefill", () => {
 		expect(
 			resolveFirstTokenMs({ idleMs: idle, promptChars: 4_000_000, ceilingMs: ceiling, env: {} }),
-		).toBe(ceiling);
-		expect(
-			resolveFirstTokenMs({ idleMs: idle, promptChars: 4_000_000, ceilingMs: 60_000, env: {} }),
-		).toBe(idle);
+		).toBeLessThanOrEqual(ceiling);
+		// A small idle gap keeps its own, smaller, bound.
+		expect(resolveFirstTokenMs({ idleMs: 250, promptChars: 0, ceilingMs: 10_000, env: {} })).toBe(
+			250,
+		);
 	});
 
 	it("EIGHT_FIRST_TOKEN_MS overrides the estimate, with the 1 s floor", () => {
 		const env = { EIGHT_FIRST_TOKEN_MS: "900000" };
-		expect(resolveFirstTokenMs({ idleMs: idle, promptChars: 10, ceilingMs: ceiling, env })).toBe(900_000);
+		expect(resolveFirstTokenMs({ idleMs: idle, promptChars: 10, ceilingMs: ceiling, env })).toBe(
+			900_000,
+		);
 		expect(
-			resolveFirstTokenMs({ idleMs: idle, promptChars: 10, ceilingMs: ceiling, env: { EIGHT_FIRST_TOKEN_MS: "5" } }),
+			resolveFirstTokenMs({
+				idleMs: idle,
+				promptChars: 10,
+				ceilingMs: ceiling,
+				env: { EIGHT_FIRST_TOKEN_MS: "5" },
+			}),
 		).toBe(1_000);
 		// A typo falls back to the estimate, never to "no budget".
 		expect(
-			resolveFirstTokenMs({ idleMs: idle, promptChars: 0, ceilingMs: ceiling, env: { EIGHT_FIRST_TOKEN_MS: "soon" } }),
-		).toBe(idle);
+			resolveFirstTokenMs({
+				idleMs: idle,
+				promptChars: 0,
+				ceilingMs: ceiling,
+				env: { EIGHT_FIRST_TOKEN_MS: "soon" },
+			}),
+		).toBe(FIRST_OUTPUT_GRACE_MS);
 	});
 });
 
@@ -181,9 +211,12 @@ describe("modelFetch firstByteMs: prefill is not idle time", () => {
 			.catch((e: unknown) => e);
 		const elapsed = Date.now() - started;
 		expect(err).toBeInstanceOf(TurnTimeoutError);
-		expect((err as TurnTimeoutError).kind).toBe("idle");
+		expect((err as TurnTimeoutError).kind).toBe("first-output");
 		expect((err as TurnTimeoutError).timeoutMs).toBe(600);
 		expect((err as Error).message).toContain("first output");
+		expect((err as Error).message).toContain(
+			"Press Esc and send again, or pick a smaller model with /model.",
+		);
 		expect(elapsed).toBeGreaterThanOrEqual(550);
 		expect(elapsed).toBeLessThan(3_000);
 	});
@@ -222,7 +255,10 @@ describe("the first-token budget is documented with the values the code uses", (
 	it("VESSEL-ABILITIES names EIGHT_FIRST_TOKEN_MS and the floor rate, and no longer claims the gap covers prefill", async () => {
 		const { readFileSync } = await import("node:fs");
 		const { join } = await import("node:path");
-		const docs = readFileSync(join(import.meta.dir, "..", "..", "docs", "VESSEL-ABILITIES.md"), "utf8");
+		const docs = readFileSync(
+			join(import.meta.dir, "..", "..", "docs", "VESSEL-ABILITIES.md"),
+			"utf8",
+		);
 		const para = docs.split("\n").find((l) => l.startsWith("`EIGHT_STREAM_IDLE_MS`")) ?? "";
 		expect(para).toContain("`EIGHT_FIRST_TOKEN_MS`");
 		expect(para).toContain(`${PREFILL_FLOOR_TOKENS_PER_S} tokens per second`);

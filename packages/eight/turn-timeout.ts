@@ -53,12 +53,22 @@ export const DEFAULT_TURN_TIMEOUT_MS = 300_000;
 const MIN_TURN_TIMEOUT_MS = 1_000;
 
 /** Which limit fired: the wall-clock ceiling, or a quiet gap with no output. */
-export type TurnTimeoutKind = "ceiling" | "idle" | "request";
+export type TurnTimeoutKind = "ceiling" | "idle" | "request" | "first-output";
 
 export class TurnTimeoutError extends Error {
 	readonly timeoutMs: number;
 	readonly kind: TurnTimeoutKind;
 	constructor(timeoutMs: number, label?: string, kind: TurnTimeoutKind = "ceiling") {
+		if (kind === "first-output") {
+			// #133: nothing at all came back. Say what to do in one line.
+			super(
+				`Provider attempt timed out after ${timeoutMs}ms${label ? ` (${label})` : ""}: no first output for ${Math.round(timeoutMs / 1000)}s. Press Esc and send again, or pick a smaller model with /model.`,
+			);
+			this.name = "TurnTimeoutError";
+			this.timeoutMs = timeoutMs;
+			this.kind = kind;
+			return;
+		}
 		// #3855: say plainly which limit stopped the turn and which knob moves it.
 		const why =
 			kind === "request"
@@ -243,6 +253,17 @@ export function resolveStepCeilingMs(
  */
 export const PREFILL_FLOOR_TOKENS_PER_S = 50;
 
+/**
+ * Fixed allowance for the first byte, on top of prompt prefill (#133). Ollama
+ * sends nothing, not even headers, while it loads the model and prefills, and
+ * the client cannot tell the two apart (fetch resolves only when headers
+ * arrive). So the wait is bounded by this grace plus the prefill estimate
+ * instead of the 300 s idle gap plus prefill, which left a silent 411 s for a
+ * 14k token prompt. 90 s covers a cold load of a large local model from disk;
+ * a longer prompt still earns its prefill time. EIGHT_FIRST_TOKEN_MS overrides.
+ */
+export const FIRST_OUTPUT_GRACE_MS = 90_000;
+
 /** Characters per token used for the prompt-size estimate. */
 const CHARS_PER_TOKEN = 4;
 
@@ -251,8 +272,8 @@ const CHARS_PER_TOKEN = 4;
  * nothing, not even headers, until the whole prompt is prefilled, so the idle
  * gap must not count that time as silence. The budget is the idle gap plus
  * the prompt's estimated prefill time at PREFILL_FLOOR_TOKENS_PER_S, never
- * below the idle gap and never above the step ceiling. A short prompt gets
- * exactly the idle gap, so a dead endpoint still fails over in one gap.
+ * below the idle gap and never above the step ceiling, and never above
+ * FIRST_OUTPUT_GRACE_MS plus the prefill estimate (#133).
  * EIGHT_FIRST_TOKEN_MS (positive ms, 1 s floor) replaces the estimate; any
  * other value falls back to it.
  */
@@ -270,7 +291,9 @@ export function resolveFirstTokenMs(args: {
 	}
 	const tokens = Math.max(0, args.promptChars) / CHARS_PER_TOKEN;
 	const prefillMs = Math.ceil((tokens / PREFILL_FLOOR_TOKENS_PER_S) * 1000);
-	return clampTimerMs(Math.max(args.idleMs, Math.min(args.ceilingMs, args.idleMs + prefillMs)));
+	const bound = Math.max(args.idleMs, Math.min(args.ceilingMs, args.idleMs + prefillMs));
+	// The old bound stays the upper limit; the grace-based one is the lower, reported as "first-output".
+	return clampTimerMs(Math.min(bound, FIRST_OUTPUT_GRACE_MS + prefillMs));
 }
 
 /**

@@ -210,3 +210,14 @@ describe("real path: slow local server -> timeout message", () => {
 		expect(out.kind).toBe("unreachable");
 	});
 });
+
+describe("first-output timeout (#133)", () => {
+	it("tells the person what to do in one line", () => {
+		const err = new TurnTimeoutError(90_000, "ollama/m", "first-output");
+		const f = describeLocalTurnFailure(err, { endpoint: "http://localhost:11434", timeoutMs: 1 });
+		expect(f.kind).toBe("timeout");
+		expect(f.message).toContain("Press Esc and send again, or pick a smaller model with /model.");
+		expect(f.message).toContain("so the turn was stopped.");
+		expect(f.message).not.toContain("EIGHT_");
+	});
+});
