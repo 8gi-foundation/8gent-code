@@ -64,7 +64,7 @@ export const ACTION_TOOLS: ReadonlySet<string> = new Set([
  * agent.ts's tool wrappers so both paths classify results identically.
  */
 export function isErrorToolResult(result: string): boolean {
-	return /^(\[[A-Z_ ]*(BLOCKED|DENIED|ERROR)\]|Error:|Error running tool|Unknown tool:|Path blocked by path-guard|Path traversal blocked)/.test(
+	return /^(\[[A-Z_ ]*(BLOCKED|DENIED|ERROR)\]|Error:|ERR:|Error running tool|Unknown tool:|Path blocked by path-guard|Path traversal blocked)/.test(
 		result.trimStart(),
 	);
 }

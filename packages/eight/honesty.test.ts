@@ -41,6 +41,32 @@ describe("isErrorToolResult", () => {
 		expect(isErrorToolResult("Unknown tool: frobnicate")).toBe(true);
 	});
 
+	it("ERR: result is not a success", () => {
+		expect(isErrorToolResult('ERR: session "x" is not running.')).toBe(true);
+		expect(isErrorToolResult("  \n ERR: no such session")).toBe(true);
+	});
+
+	it("a success that only contains ERR: after the start stays a success", () => {
+		expect(isErrorToolResult("12 lines written, log had ERR: retry and then ok")).toBe(false);
+		expect(isErrorToolResult("grep result:\nERR: something in a file")).toBe(false);
+		expect(isErrorToolResult("ERROR_COUNT=0")).toBe(false);
+	});
+
+	it("ERR: result recorded as a failure makes the gate flag a success claim", () => {
+		const result = "ERR: no such session";
+		const ledger: ToolLedgerEntry[] = [
+			{ name: "write_file", args: { path: "a.txt" }, success: !isErrorToolResult(result), result },
+		];
+		expect(ledger[0].success).toBe(false);
+		expect(ledger[0].result).toBe(result);
+		const out = enforceAgenticHonesty({
+			content: "The file a.txt has been successfully created.",
+			ledger,
+		});
+		expect(out.violated).toBe(true);
+		expect(out.content).toContain("I could not complete that action.");
+	});
+
 	it("does not classify normal output as failure", () => {
 		expect(isErrorToolResult("File written: /tmp/x.txt (12 bytes)")).toBe(false);
 		expect(isErrorToolResult("ok")).toBe(false);
