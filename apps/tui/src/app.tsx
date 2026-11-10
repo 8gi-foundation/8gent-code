@@ -5317,6 +5317,9 @@ export function App({
 								setMessages((prev) => settleSetupTranscript(prev));
 							}
 						}
+					} else {
+						// Not in setup: say so, so the command is never a silent no-op.
+						addSystemMessage("Nothing to skip. Setup is not running.");
 					}
 					break;
 
