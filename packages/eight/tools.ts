@@ -271,7 +271,7 @@ import {
 import { formatFetchResult, formatSearchResults, webFetch, webSearch } from "../tools/web";
 import { isNoToolScope } from "./agent-scopes";
 import { ArtifactStore } from "./artifact-store";
-import { formatCommandOutput } from "./command-output";
+import { formatCommandOutput, signalExitCode } from "./command-output";
 import { CommitGate, type CommitTarget, parseGitCommit } from "./commit-gate";
 import { formatEditNotFound } from "./edit-hint";
 import { linksFooter } from "./file-links";
@@ -4111,12 +4111,12 @@ export class ToolExecutor {
 
 			proc.unref();
 
-			proc.on("close", (code) => {
+			proc.on("close", (code, signal) => {
 				clearTimeout(timeout);
 
 				this.hookManager.executeHooks("afterCommand", {
 					command: finalCommand,
-					exitCode: code ?? 0,
+					exitCode: code ?? signalExitCode(signal),
 					stdout,
 					stderr,
 					duration: Date.now() - startTime,
@@ -4130,6 +4130,7 @@ export class ToolExecutor {
 					finalCommand,
 					dir,
 					this.workingDirectory,
+					signal,
 				);
 				// Once per session, on a failure, say the environment is minimal (no names or values).
 				if (code !== 0 && !this.envHintShown && withheldAny()) {

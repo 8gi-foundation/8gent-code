@@ -312,7 +312,8 @@ export class CommitGate {
 			note: `[COMMIT GATE] \`${testCommand}\` ${why}, so this commit is not verified by the test suite.`,
 		});
 
-		// `Exit code null` is a suite killed by a signal: a crash, so red.
+		// A suite killed by a signal is a crash, so red: `Exit code 143: Killed by signal ...` now,
+		// `Exit code null` from older callers.
 		const exit = /^Exit code (-?\d+|null):\n?/.exec(text);
 		if (exit) {
 			// Scrub before any cut, so no secret survives as a fragment the scanner misses.
@@ -326,7 +327,8 @@ export class CommitGate {
 			if ((exit[1] === "126" || exit[1] === "127") && cannotStart)
 				return unverified(`could not run (${cannotStart.slice(0, 200)})`);
 			const tail = body.length > TAIL_CHARS ? `...\n${body.slice(-TAIL_CHARS)}` : body;
-			const how = exit[1] === "null" ? "was killed before it finished" : "fails";
+			const killed = exit[1] === "null" || /^ Killed by /.test(text.slice(exit[0].length));
+			const how = killed ? "was killed before it finished" : "fails";
 			const message = [
 				`[COMMIT BLOCKED] Not committed: \`${testCommand}\` ${how}. Fix the failing tests, run \`${testCommand}\` until it passes, then commit again.`,
 				`First failure: ${firstFailure(body)}`,
