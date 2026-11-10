@@ -24,7 +24,7 @@ import {
 import { resolveOllamaBaseUrl } from "../../../packages/ai/text-tool-endpoint.js";
 import { dropOllamaCloudNames } from "../../../packages/core/ollama-cloud.js";
 import { answerFromLine } from "../../../packages/eight/android-setup.js";
-import { sanitizeForDisplay } from "../../../packages/eight/changelog-view.js";
+import { changelogOutput, readBundledChangelog, sanitizeForDisplay } from "../../../packages/eight/changelog-view.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
 import {
 	type SessionListItem,
@@ -548,7 +548,6 @@ import {
 	tabAgentRole,
 } from "./lib/model-selection.js";
 import { routeOnScreen } from "./lib/model-truth.js";
-import { changelogOutput } from "./lib/changelog-reader.js";
 import { PACKAGE_ROOT, packageBinScript } from "./lib/package-scripts.js";
 
 let firstShellTraced = false;
@@ -4646,9 +4645,7 @@ export function App({
 					break;
 
 				case "changelog": {
-					const file = pathMod.join(PACKAGE_ROOT, "CHANGELOG.md");
-					const text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
-					addSystemMessage(changelogOutput(text, args[0], pkgInfo.version));
+					addSystemMessage(changelogOutput(readBundledChangelog(), args[0], pkgInfo.version));
 					break;
 				}
 
