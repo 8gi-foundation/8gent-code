@@ -261,7 +261,7 @@ export const PREFILL_FLOOR_TOKENS_PER_S = 50;
  * instead of the 300 s idle gap plus prefill, which left a silent 411 s for a
  * 14k token prompt. 90 s covers a cold load of a large local model from disk;
  * a longer prompt still earns its prefill time. Never below the idle gap, so a
- * short prompt waits as long as it did before. EIGHT_FIRST_TOKEN_MS overrides.
+ * short prompt still waits the full idle gap. EIGHT_FIRST_TOKEN_MS overrides.
  */
 export const FIRST_OUTPUT_GRACE_MS = 90_000;
 
@@ -273,8 +273,9 @@ const CHARS_PER_TOKEN = 4;
  * nothing, not even headers, until the whole prompt is prefilled, so the idle
  * gap must not count that time as silence. The budget is the idle gap plus
  * the prompt's estimated prefill time at PREFILL_FLOOR_TOKENS_PER_S, never
- * below the idle gap and never above the step ceiling, and never above
- * FIRST_OUTPUT_GRACE_MS plus the prefill estimate (#133).
+ * below the idle gap and never above the step ceiling, and never above the
+ * larger of the idle gap and FIRST_OUTPUT_GRACE_MS plus the prefill estimate
+ * (#133). It never decreases as the prompt grows.
  * EIGHT_FIRST_TOKEN_MS (positive ms, 1 s floor) replaces the estimate; any
  * other value falls back to it.
  */
@@ -293,14 +294,15 @@ export function resolveFirstTokenMs(args: {
 	const tokens = Math.max(0, args.promptChars) / CHARS_PER_TOKEN;
 	const prefillMs = Math.ceil((tokens / PREFILL_FLOOR_TOKENS_PER_S) * 1000);
 	const bound = Math.max(args.idleMs, Math.min(args.ceilingMs, args.idleMs + prefillMs));
-	// The old bound stays the upper limit. The grace-based bound never goes below
-	// the idle gap, so a short prompt keeps what main gave it (a cold load of a
-	// large model, or a thinking model, may stay silent past the grace). Only a
-	// prompt whose prefill estimate pushes past the idle gap is cut sooner.
+	// The old bound stays the upper limit. The grace-based bound is floored at
+	// the idle gap, so no prompt waits less than the idle gap (a cold load of a
+	// large model, or a thinking model, may stay silent past the grace), and the
+	// budget never decreases as the prompt grows: no cliff where grace plus
+	// prefill crosses the idle gap. Past that point it grows with prefill only.
 	// The estimate is chars/4 over string content: code is nearer 3 chars per
 	// token, so a dense prompt is undercounted; EIGHT_FIRST_TOKEN_MS moves it.
 	const graceBound = FIRST_OUTPUT_GRACE_MS + prefillMs;
-	return clampTimerMs(graceBound <= args.idleMs ? bound : Math.min(bound, graceBound));
+	return clampTimerMs(Math.min(bound, Math.max(args.idleMs, graceBound)));
 }
 
 /**

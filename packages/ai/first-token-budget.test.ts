@@ -104,18 +104,18 @@ describe("resolveFirstTokenMs", () => {
 	const ceiling = 1_200_000;
 	const prefillOf = (tokens: number) => Math.ceil((tokens / PREFILL_FLOOR_TOKENS_PER_S) * 1000);
 
-	it("a short prompt keeps the idle gap main gave it, the grace never lowers it (#133)", () => {
+	it("a short prompt gets the idle gap, the grace never lowers it below that (#133)", () => {
 		expect(resolveFirstTokenMs({ idleMs: idle, promptChars: 0, ceilingMs: ceiling, env: {} })).toBe(
 			idle,
 		);
-		// 500 tokens at the floor rate: 10 s more, as on main.
+		// 500 tokens: grace plus prefill is 100 s, under the idle gap, so the idle gap.
 		expect(
 			resolveFirstTokenMs({ idleMs: idle, promptChars: 2_000, ceilingMs: ceiling, env: {} }),
-		).toBe(idle + 10_000);
-		// 10,000 tokens: grace plus prefill is 290 s, still under the idle gap, so no cut.
+		).toBe(idle);
+		// 10,000 tokens: grace plus prefill is 290 s, still under the idle gap, so the idle gap.
 		expect(
 			resolveFirstTokenMs({ idleMs: idle, promptChars: 40_000, ceilingMs: ceiling, env: {} }),
-		).toBeGreaterThanOrEqual(idle);
+		).toBe(idle);
 	});
 
 	it("a 14,020 token prompt is cut well under the old 411 s (#133)", () => {
@@ -143,11 +143,46 @@ describe("resolveFirstTokenMs", () => {
 	it("the old bound stays the upper limit: never above the step ceiling or idle gap plus prefill", () => {
 		expect(
 			resolveFirstTokenMs({ idleMs: idle, promptChars: 4_000_000, ceilingMs: ceiling, env: {} }),
-		).toBeLessThanOrEqual(ceiling);
+		).toBe(ceiling);
+		expect(
+			resolveFirstTokenMs({ idleMs: idle, promptChars: 4_000_000, ceilingMs: 60_000, env: {} }),
+		).toBe(idle);
 		// A small idle gap keeps its own, smaller, bound.
 		expect(resolveFirstTokenMs({ idleMs: 250, promptChars: 0, ceilingMs: 10_000, env: {} })).toBe(
 			250,
 		);
+	});
+
+	const at = (tokens: number) =>
+		resolveFirstTokenMs({ idleMs: idle, promptChars: tokens * 4, ceilingMs: ceiling, env: {} });
+
+	it("the budget never decreases as the prompt grows, and has no cliff near 10,500 tokens", () => {
+		// One token adds at most its prefill time at the floor rate, plus 1 ms of rounding.
+		const perTokenMs = Math.ceil(1000 / PREFILL_FLOOR_TOKENS_PER_S) + 1;
+		let prev = at(9_000);
+		for (let tokens = 9_001; tokens <= 12_000; tokens++) {
+			const got = at(tokens);
+			expect(got).toBeGreaterThanOrEqual(prev);
+			expect(got - prev).toBeLessThanOrEqual(perTokenMs);
+			prev = got;
+		}
+		// The whole range, coarser: still never a step down.
+		let last = 0;
+		for (let tokens = 0; tokens <= 100_000; tokens += 50) {
+			const got = at(tokens);
+			expect(got).toBeGreaterThanOrEqual(last);
+			last = got;
+		}
+	});
+
+	it("the reviewer's sample points: never below the idle gap, cut to grace plus prefill past it", () => {
+		expect(at(10_000)).toBe(idle);
+		expect(at(10_500)).toBe(idle);
+		expect(at(10_501)).toBe(FIRST_OUTPUT_GRACE_MS + prefillOf(10_501));
+		expect(at(10_501)).toBeGreaterThanOrEqual(at(10_500));
+		expect(at(12_000)).toBe(FIRST_OUTPUT_GRACE_MS + prefillOf(12_000));
+		expect(at(14_020)).toBe(FIRST_OUTPUT_GRACE_MS + prefillOf(14_020));
+		expect(at(30_000)).toBe(FIRST_OUTPUT_GRACE_MS + prefillOf(30_000));
 	});
 
 	it("EIGHT_FIRST_TOKEN_MS overrides the estimate, with the 1 s floor", () => {
