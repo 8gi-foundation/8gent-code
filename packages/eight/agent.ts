@@ -1821,10 +1821,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			}
 			if (shouldDeclareTools(providerName, specs)) {
 				for (const t of specs) {
-					const fn =
-						this.config.headless === true
-							? { name: t.name, parameters: t.parameters }
-							: { name: t.name, description: t.description, parameters: t.parameters };
+					// Declared as the text-tool turn sends them: name and parameters only (#133).
+					const fn = { name: t.name, parameters: t.parameters };
 					tools.push({
 						name: t.name,
 						kind: kind(t.name),
