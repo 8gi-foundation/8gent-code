@@ -11,6 +11,8 @@
 export interface ScriptStep {
 	reply: string;
 	delayMs?: number;
+	/** Answer the request with this HTTP status and no completion (a provider failure). */
+	failStatus?: number;
 }
 
 export interface ScriptedModel {
@@ -60,7 +62,7 @@ export function serveScriptedModel(
 		const step = steps[Math.min(cursor, steps.length - 1)] ?? { reply: "" };
 		cursor++;
 		if (step.delayMs) await new Promise((r) => setTimeout(r, step.delayMs));
-		return { reply: step.reply, model: primary };
+		return { reply: step.reply, model: primary, failStatus: step.failStatus };
 	};
 	const server = Bun.serve({
 		port: 0,
@@ -79,7 +81,8 @@ export function serveScriptedModel(
 			}
 			if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
 				const body = (await req.json()) as ChatBody;
-				const { reply, model } = await next(body);
+				const { reply, model, failStatus } = await next(body);
+				if (failStatus) return new Response("scripted provider failure", { status: failStatus });
 				if (body.stream) return openAiStream(model, reply);
 				return Response.json({
 					id: "fake",
@@ -94,7 +97,8 @@ export function serveScriptedModel(
 			}
 			if (req.method === "POST" && url.pathname === "/api/chat") {
 				const body = (await req.json()) as ChatBody;
-				const { reply, model } = await next(body);
+				const { reply, model, failStatus } = await next(body);
+				if (failStatus) return new Response("scripted provider failure", { status: failStatus });
 				const done = {
 					model,
 					created_at: new Date(0).toISOString(),
