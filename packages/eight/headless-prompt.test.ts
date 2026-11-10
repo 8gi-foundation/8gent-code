@@ -5,9 +5,9 @@
  * call of a headless `--provider ollama` run, 3 to 41 calls per item. On a
  * local model that prefill is a large share of the wall time. This drives the
  * shipping chat() path against a fake Ollama endpoint, measures what goes over
- * the wire per section, and holds the headless request to at most 60% of the
- * interactive one while keeping every tool, its parameters, and the safety
- * rules.
+ * the wire per section, and holds the headless request below the interactive
+ * one while keeping every tool, its parameters, and the safety rules. Since
+ * #133 neither path declares tool descriptions (the system prompt lists them).
  *
  * $HOME is faked so the operator's real memories and ~/.claude files stay out.
  * Run with HEADLESS_PROMPT_REPORT=1 to print the per-section breakdown.
@@ -132,7 +132,7 @@ function sections(b: Body): Array<[string, number]> {
 }
 
 describe("headless prompt diet", () => {
-	test("the headless prefix is at most 60% of the interactive one", async () => {
+	test("the headless prefix stays smaller than the interactive one", async () => {
 		const [interactive] = await run(false);
 		const [headless] = await run(true);
 		if (process.env.HEADLESS_PROMPT_REPORT === "1") {
@@ -148,7 +148,13 @@ describe("headless prompt diet", () => {
 				}
 			}
 		}
-		expect(prefixChars(headless)).toBeLessThanOrEqual(prefixChars(interactive) * 0.6);
+		// The 60% bound held while only headless dropped the declared descriptions.
+		// Since #133 both paths declare name and parameters only, so the gap is the
+		// interactive tool catalog and persona; headless must stay below that.
+		expect(prefixChars(headless)).toBeLessThan(prefixChars(interactive));
+		// Neither path declares a description: the system prompt's tool list carries them.
+		for (const b of [interactive, headless])
+			expect((b.tools ?? []).some((t) => t.function.description !== undefined)).toBe(false);
 	}, 60_000);
 
 	test("headless keeps every tool and its parameters, declared and listed", async () => {
@@ -210,7 +216,21 @@ describe("headless prompt diet", () => {
 		const [a] = await run(false);
 		const sys = a.messages[0].content;
 		expect(sys).toContain("## TOOLS YOU HAVE");
-		expect(a.tools?.every((t) => typeof t.function.description === "string")).toBe(true);
+	}, 60_000);
+
+	test("an interactive turn declares each tool once, by name and parameters (#133)", async () => {
+		// The first answer of a fresh TUI session prefilled about 34 KB of declared
+		// tools, 16 KB of it descriptions the system prompt's tool list already
+		// carries. The parser needs only name and parameters to keep a native call.
+		const [a] = await run(false);
+		const sys = a.messages[0].content;
+		const declared = a.tools ?? [];
+		expect(declared.length).toBeGreaterThan(10);
+		for (const t of declared) {
+			expect(t.function.description).toBeUndefined();
+			expect(t.function.parameters).toBeDefined();
+			expect(sys).toContain(`\n${t.function.name}(`);
+		}
 	}, 60_000);
 
 	test("headless calls in one turn share a byte-identical prefix", async () => {
