@@ -1327,6 +1327,18 @@ class TelegramDaemonBridge {
 
 		switch (event) {
 			case "agent:stream":
+				// An empty final answer (nothing left after stripping) is a failed
+				// attempt, never a reply: advance the retry ladder instead of
+				// posting a blank or tagline-only message.
+				if (
+					payload.final &&
+					this.agentBusy &&
+					this._retryTimer &&
+					stripReasoning(String(payload.chunk ?? "")).trim() === ""
+				) {
+					this.failAttempt();
+					break;
+				}
 				if (payload.final && payload.chunk) {
 					this.agentBusy = false;
 					if (this._retryTimer) {
@@ -1334,6 +1346,7 @@ class TelegramDaemonBridge {
 						this._retryTimer = null;
 					}
 					const answer = stripReasoning(payload.chunk);
+					if (answer.trim() === "") break;
 					tgSend(this.config.telegramToken, this.replyChat(), answer);
 					this.maybeSpeak(answer)
 						.catch(() => {})
@@ -2722,6 +2735,7 @@ class TelegramDaemonBridge {
 	 */
 	private retryPrompt(originalText: string, attempt: number): void {
 		const _maxAttempts = 4;
+		this._retryState = { text: originalText, attempt };
 		const timeouts = [120_000, 90_000, 60_000, 30_000];
 		const timeout = timeouts[attempt - 1] || 30_000;
 
@@ -2773,6 +2787,19 @@ class TelegramDaemonBridge {
 	}
 
 	private _retryTimer: ReturnType<typeof setTimeout> | null = null;
+	private _retryState: { text: string; attempt: number } | null = null;
+
+	/** The current attempt came back empty: drop its timer and move to the next strategy. */
+	private failAttempt(): void {
+		const state = this._retryState;
+		if (this._retryTimer) {
+			clearTimeout(this._retryTimer);
+			this._retryTimer = null;
+		}
+		if (!state) return;
+		this.freshSession();
+		this.retryPrompt(state.text, state.attempt + 1);
+	}
 
 	/** The operator's private chat with the bot (a DM chat id is the user id). */
 	private operatorDm(): string | null {
