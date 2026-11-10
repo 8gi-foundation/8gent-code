@@ -40,6 +40,12 @@ mock.module("../terminal-tab/index.js", () => ({
 	sendTmuxKeys: async (_id: string, text: string) => {
 		sent.push(text);
 	},
+	realTmuxSync: () => "",
+	releaseRun: () => {},
+	removeSessionLog: () => {},
+	sweepDeadRuns: () => [],
+	sweepSessionLogs: () => ({ deleted: [], tightened: [] }),
+	thisTmuxRun: realTerminalTab.thisTmuxRun,
 	tmuxArgv: realTerminalTab.tmuxArgv,
 	spawnTmuxSession: async (o: { command: string; args: string[]; sessionId: string }) => {
 		spawned.push([o.command, ...o.args].join(" "));

@@ -22,32 +22,234 @@
  */
 
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import {
+	chmodSync,
+	closeSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	readdirSync,
+	rmSync,
+	statSync,
+	writeSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { stripControl } from "./ansi-strip.js";
+import { isPidAlive } from "./session-store.js";
 
 const execFileAsync = promisify(execFile);
 
-export const SESSIONS_LOG_DIR = join(homedir(), ".8gent", "sessions");
+const STATE_ROOT = join(homedir(), ".8gent");
+
+/** Session logs. Mode 0700; each log 0600, deleted when its session is removed. */
+export const SESSIONS_LOG_DIR = join(STATE_ROOT, "sessions");
+
+/** Where each run keeps its tmux socket and owner record. Mode 0700. */
+export const TMUX_SOCKET_DIR = join(STATE_ROOT, "term");
+
+/** Logs left by a crash are deleted at startup once older than this. */
+export const LOG_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
- * The app's own tmux server (#146). Every call goes through `-L` with this
- * name, so the term_* tools can never address the person's default tmux
- * server or the sessions they opened there, and quitting has one server to
- * clean up. tmux keeps the socket in its per-user directory (mode 0700).
+ * One app run's own tmux server (#146). The socket path carries a per-run id
+ * (process id plus a random suffix), so two copies of the app never share a
+ * server: one run's cleanup can never end another run's sessions, and the
+ * person's default tmux server is never addressed. Beside the socket sits an
+ * owner record holding the run's process id, so a startup sweep can tell a
+ * dead run's socket from a live one.
  */
-export const TMUX_SOCKET_NAME = "8gent-term";
-
-/** Prefix every tmux argv with the app's private socket. */
-export function tmuxArgv(args: string[]): string[] {
-	return ["-L", TMUX_SOCKET_NAME, ...args];
+export interface TmuxRun {
+	id: string;
+	pid: number;
+	dir: string;
+	socketPath: string;
+	ownerPath: string;
 }
 
-/** Run tmux on the app's private server, argv only, never a shell string. */
+const RUN_ID = /^(\d+)-[0-9a-f]{8}$/;
+
+/** A fresh run identity. Pure: nothing is written until claimRun. */
+export function newTmuxRun(dir: string = TMUX_SOCKET_DIR, pid: number = process.pid): TmuxRun {
+	const id = `${pid}-${randomBytes(4).toString("hex")}`;
+	return {
+		id,
+		pid,
+		dir,
+		socketPath: join(dir, `${id}.sock`),
+		ownerPath: join(dir, `${id}.pid`),
+	};
+}
+
+const currentRun = newTmuxRun();
+
+/** This process's run. */
+export function thisTmuxRun(): TmuxRun {
+	return currentRun;
+}
+
+/** Prefix a tmux argv with a run's private socket (this run's by default). */
+export function tmuxArgv(args: string[], run: TmuxRun = currentRun): string[] {
+	return ["-S", run.socketPath, ...args];
+}
+
+/** Run tmux on this run's private server, argv only, never a shell string. */
 function tmux(args: string[]) {
 	return execFileAsync("tmux", tmuxArgv(args));
+}
+
+/** Create `dir` if needed and set it to 0700 (an older version may have left it looser). */
+export function ensurePrivateDir(dir: string): void {
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
+	chmodSync(dir, 0o700);
+}
+
+/** Write the run's owner record (0600) in its 0700 directory. Safe to repeat. */
+export function claimRun(run: TmuxRun = currentRun): void {
+	ensurePrivateDir(run.dir);
+	const fd = openSync(run.ownerPath, "w", 0o600);
+	try {
+		writeSync(fd, `${run.pid}\n`);
+	} finally {
+		closeSync(fd);
+	}
+	chmodSync(run.ownerPath, 0o600);
+}
+
+/** Remove a run's socket file and owner record. */
+export function releaseRun(run: TmuxRun = currentRun): void {
+	rmSync(run.socketPath, { force: true });
+	rmSync(run.ownerPath, { force: true });
+}
+
+/** Runs tmux synchronously with an argv (never a shell string); throws on failure. */
+export type TmuxSyncRunner = (argv: string[]) => string;
+
+export const realTmuxSync: TmuxSyncRunner = (argv) =>
+	execFileSync("tmux", argv, {
+		encoding: "utf-8",
+		stdio: ["ignore", "pipe", "ignore"],
+		timeout: 3000,
+	});
+
+/**
+ * The process id a run's owner record names, or null when that cannot be
+ * read for sure: missing, unreadable, not a plain positive integer, or not
+ * the process id the run id was made from.
+ */
+function recordedOwner(dir: string, id: string): number | null {
+	const m = RUN_ID.exec(id);
+	if (!m) return null;
+	let text: string;
+	try {
+		text = readFileSync(join(dir, `${id}.pid`), "utf-8");
+	} catch {
+		return null;
+	}
+	if (!/^\d+\n?$/.test(text)) return null;
+	const pid = Number.parseInt(text, 10);
+	if (!(pid > 0) || String(pid) !== m[1]) return null;
+	return pid;
+}
+
+/**
+ * Startup sweep of other runs' sockets. A socket is removed (its server
+ * stopped, then the socket and owner record deleted) only when its owner
+ * record names a process that no longer exists. A missing or unreadable
+ * record, a live process, or this run's own id: left alone. Returns the ids
+ * swept.
+ */
+export function sweepDeadRuns(
+	dir: string = TMUX_SOCKET_DIR,
+	run: TmuxSyncRunner = realTmuxSync,
+	alive: (pid: number) => boolean = isPidAlive,
+	self: TmuxRun = currentRun,
+): string[] {
+	let names: string[];
+	try {
+		names = readdirSync(dir);
+	} catch {
+		return [];
+	}
+	const ids = new Set<string>();
+	for (const n of names) {
+		const m = /^(.+)\.(sock|pid)$/.exec(n);
+		if (m && RUN_ID.test(m[1])) ids.add(m[1]);
+	}
+	const swept: string[] = [];
+	for (const id of ids) {
+		if (id === self.id) continue;
+		const pid = recordedOwner(dir, id);
+		if (pid === null || alive(pid)) continue;
+		const socketPath = join(dir, `${id}.sock`);
+		if (existsSync(socketPath)) {
+			try {
+				run(["-S", socketPath, "kill-server"]);
+			} catch {
+				/* no server left on it */
+			}
+		}
+		rmSync(socketPath, { force: true });
+		rmSync(join(dir, `${id}.pid`), { force: true });
+		swept.push(id);
+	}
+	return swept;
+}
+
+/** Create a session log as an empty 0600 file (tmux appends to it, keeping the mode). */
+export function createSessionLog(logPath: string): void {
+	const fd = openSync(logPath, "a", 0o600);
+	closeSync(fd);
+	chmodSync(logPath, 0o600);
+}
+
+/** Delete a session log. Only a regular file is ever removed. */
+export function removeSessionLog(logPath: string): void {
+	try {
+		if (lstatSync(logPath).isFile()) rmSync(logPath, { force: true });
+	} catch {
+		/* already gone */
+	}
+}
+
+/**
+ * Startup backstop for logs a crash left behind: in `dir`, a `.log` older
+ * than LOG_MAX_AGE_MS is deleted; a younger one that an older version left
+ * readable by others is tightened to 0600. Returns what it did.
+ */
+export function sweepSessionLogs(
+	dir: string = SESSIONS_LOG_DIR,
+	now: number = Date.now(),
+): { deleted: string[]; tightened: string[] } {
+	const out = { deleted: [] as string[], tightened: [] as string[] };
+	let names: string[];
+	try {
+		names = readdirSync(dir);
+	} catch {
+		return out;
+	}
+	for (const n of names) {
+		if (!n.endsWith(".log")) continue;
+		const p = join(dir, n);
+		try {
+			const st = lstatSync(p);
+			if (!st.isFile()) continue;
+			if (now - st.mtimeMs > LOG_MAX_AGE_MS) {
+				rmSync(p, { force: true });
+				out.deleted.push(n);
+			} else if ((st.mode & 0o077) !== 0) {
+				chmodSync(p, 0o600);
+				out.tightened.push(n);
+			}
+		} catch {
+			/* gone or unreadable: skip */
+		}
+	}
+	return out;
 }
 
 // ---------------- Types ----------------
@@ -188,8 +390,26 @@ export async function spawnTmuxSession(opts: TmuxSpawnOpts): Promise<TmuxSession
 	const sessionId = opts.sessionId ?? generateSessionId();
 	const cwd = opts.cwd ?? process.cwd();
 	const logPath = opts.logPath ?? join(SESSIONS_LOG_DIR, `${sessionId}.log`);
-	ensureDir(dirname(logPath));
+	if (opts.logPath === undefined) ensurePrivateDir(SESSIONS_LOG_DIR);
+	else ensureDir(dirname(logPath));
+	// The log holds whatever the terminal echoes, secrets included: owner only.
+	createSessionLog(logPath);
+	claimRun();
 
+	try {
+		return await startSession(sessionId, cwd, logPath, opts);
+	} catch (err) {
+		removeSessionLog(logPath);
+		throw err;
+	}
+}
+
+async function startSession(
+	sessionId: string,
+	cwd: string,
+	logPath: string,
+	opts: TmuxSpawnOpts,
+): Promise<TmuxSessionHandle> {
 	// 1. Start the detached session
 	const newArgs = buildTmuxNewSessionArgs({
 		sessionId,
@@ -228,8 +448,8 @@ export async function spawnTmuxSession(opts: TmuxSpawnOpts): Promise<TmuxSession
 /** Open a Terminal.app window attached to the running tmux session. */
 export async function attachInTerminal(sessionId: string): Promise<void> {
 	// Terminal.app runs this line in its own shell, so it is the one string form.
-	// Every part is app made: the socket name and a generated session id.
-	const cmd = `tmux -L ${shellSingleQuote(TMUX_SOCKET_NAME)} attach -t ${shellSingleQuote(sessionId)}`;
+	// Every part is app made: this run's socket path and a generated session id.
+	const cmd = `tmux -S ${shellSingleQuote(currentRun.socketPath)} attach -t ${shellSingleQuote(sessionId)}`;
 	const escaped = cmd.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 	const osa = [
 		'tell application "Terminal"',

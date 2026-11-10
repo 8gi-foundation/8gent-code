@@ -16,12 +16,14 @@
  * window IDs. It just calls term_spawn / term_send / term_read.
  */
 
-import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { commandSegments } from "../permissions/command-policy.js";
 import { getPermissionManager } from "../permissions/index.js";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import {
+	type TmuxRun,
+	type TmuxSyncRunner,
 	type WindowSession,
 	attachInTerminal,
 	composeShellCommand,
@@ -31,9 +33,15 @@ import {
 	killTmuxSession,
 	listTmuxSessions,
 	readSessionLog,
+	realTmuxSync,
+	releaseRun,
+	removeSessionLog,
 	saveSession,
 	sendTmuxKeys,
 	spawnTmuxSession,
+	sweepDeadRuns,
+	sweepSessionLogs,
+	thisTmuxRun,
 	tmuxArgv,
 } from "../terminal-tab/index.js";
 
@@ -98,50 +106,78 @@ function resolveOwned(
 	return { session };
 }
 
-/** Runs tmux synchronously with an argv (never a shell string); throws on failure. */
-export type TmuxSyncRunner = (argv: string[]) => string;
-
-const realTmuxSync: TmuxSyncRunner = (argv) =>
-	execFileSync("tmux", argv, {
-		encoding: "utf-8",
-		stdio: ["ignore", "pipe", "ignore"],
-		timeout: 3000,
-	});
+export type { TmuxSyncRunner };
 
 /**
- * End every session this run started, then stop the app's tmux server if it
- * has no sessions left. Synchronous so it can run from an exit handler.
- * Safe to call more than once.
+ * Remove one session from this run: its log is deleted (it holds whatever the
+ * terminal echoed, secrets included), with its saved record and cursors. Used
+ * by term_kill and by exit cleanup. term_spawn sessions have no app tab:
+ * closing their Terminal.app window only detaches the viewer, so the session
+ * and its log stay until term_kill or the app quits. A program that exits on
+ * its own also leaves the log in place until then.
  */
-export function endOwnedSessions(run: TmuxSyncRunner = realTmuxSync): void {
-	if (owned.size === 0) return;
-	for (const s of owned.values()) {
+function forgetSession(s: OwnedSession): void {
+	removeSessionLog(s.logPath);
+	try {
+		deleteSession(s.target);
+	} catch {
+		/* best effort */
+	}
+	readOffsets.delete(s.target);
+	pendingInput.delete(s.target);
+	owned.delete(s.target);
+}
+
+/**
+ * End every session this run started, then stop this run's own tmux server
+ * and remove its socket and owner record (N1). Only `termRun`'s socket is
+ * ever addressed, so another copy of the app keeps its sessions.
+ * Synchronous so it can run from an exit handler. Safe to call more than once.
+ */
+export function endOwnedSessions(
+	run: TmuxSyncRunner = realTmuxSync,
+	termRun: TmuxRun = thisTmuxRun(),
+): void {
+	const hadSessions = owned.size > 0;
+	for (const s of [...owned.values()]) {
 		try {
-			run(tmuxArgv(["kill-session", "-t", s.target]));
+			run(tmuxArgv(["kill-session", "-t", s.target], termRun));
 		} catch {
 			/* already gone */
 		}
-		try {
-			deleteSession(s.target);
-		} catch {
-			/* best effort */
-		}
-		readOffsets.delete(s.target);
-		pendingInput.delete(s.target);
+		forgetSession(s);
 	}
-	owned.clear();
-	let left: string;
-	try {
-		left = run(tmuxArgv(["list-sessions", "-F", "#{session_name}"]));
-	} catch {
-		return; // no server running: nothing to stop
-	}
-	if (left.trim() === "") {
+	if (hadSessions || existsSync(termRun.socketPath)) {
 		try {
-			run(tmuxArgv(["kill-server"]));
+			run(tmuxArgv(["kill-server"], termRun));
 		} catch {
 			/* already stopped */
 		}
+	}
+	try {
+		releaseRun(termRun);
+	} catch {
+		/* best effort */
+	}
+}
+
+let swept = false;
+/**
+ * Once per run, at startup: stop and remove sockets whose owning run is
+ * provably dead, and apply the 30 day backstop to session logs a crash left.
+ */
+export function sweepTermStateOnce(): void {
+	if (swept) return;
+	swept = true;
+	try {
+		sweepDeadRuns();
+	} catch {
+		/* best effort */
+	}
+	try {
+		sweepSessionLogs();
+	} catch {
+		/* best effort */
 	}
 }
 
@@ -381,6 +417,7 @@ export async function gateTabRead(tabId: string): Promise<string | null> {
 // ---------------- Tool definitions ----------------
 
 export function getTermToolDefs(): object[] {
+	sweepTermStateOnce();
 	return [
 		{
 			type: "function",
@@ -485,6 +522,7 @@ export async function executeTermTool(
 	name: string,
 	args: Record<string, unknown>,
 ): Promise<string> {
+	sweepTermStateOnce();
 	if (!isTmuxAvailable()) {
 		return "ERR: terminal sessions are unavailable on this machine (tmux was not found). Nothing was started.";
 	}
@@ -645,9 +683,6 @@ async function termKill(args: Record<string, unknown>): Promise<string> {
 	if ("refusal" in found) return found.refusal;
 	const sessionId = found.session.target;
 	await killTmuxSession(sessionId);
-	owned.delete(sessionId);
-	deleteSession(sessionId);
-	readOffsets.delete(sessionId);
-	pendingInput.delete(sessionId);
+	forgetSession(found.session);
 	return JSON.stringify({ ok: true, sessionId, killed: true });
 }

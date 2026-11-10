@@ -9,11 +9,10 @@
 
 import { afterAll, describe, expect, it } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-	TMUX_SOCKET_NAME,
 	buildEnterKeyArgs,
 	buildPipePaneArgs,
 	buildSendKeysArgs,
@@ -24,8 +23,10 @@ import {
 	listTmuxSessions,
 	parseLogTail,
 	readSessionLog,
+	releaseRun,
 	sendKeys,
 	spawnTmuxSession,
+	thisTmuxRun,
 	tmuxArgv,
 } from "./tmux-session.js";
 
@@ -181,6 +182,13 @@ afterAll(() => {
 			/* already gone */
 		}
 	}
+	// Stop this run's own server and drop its socket and owner record.
+	try {
+		execFileSync("tmux", tmuxArgv(["kill-server"]), { stdio: "ignore" });
+	} catch {
+		/* no server */
+	}
+	releaseRun();
 });
 
 describe("spawnTmuxSession — live", () => {
@@ -229,6 +237,12 @@ describe("spawnTmuxSession — live", () => {
 			const tail = readSessionLog(handle.logPath, 0);
 			const concat = tail.lines.join("\n");
 			expect(concat).toContain("MARKER-TMUX-OK");
+			// tmux appended to the log the app created: still owner only.
+			expect(statSync(handle.logPath).mode & 0o777).toBe(0o600);
+			// This run's socket and owner record sit in a 0700 directory.
+			expect(statSync(thisTmuxRun().dir).mode & 0o777).toBe(0o700);
+			expect(existsSync(thisTmuxRun().socketPath)).toBe(true);
+			expect(readFileSync(thisTmuxRun().ownerPath, "utf-8")).toBe(`${process.pid}\n`);
 
 			// Kill it
 			await killTmuxSession(handle.sessionId);
@@ -244,11 +258,12 @@ describe("spawnTmuxSession — live", () => {
 // -------------------------------------------------------
 
 describe("private tmux socket", () => {
-	it("every tmux argv carries -L and the app's socket name first", () => {
-		expect(TMUX_SOCKET_NAME).toBe("8gent-term");
+	it("every tmux argv carries -S and this run's own socket path first", () => {
+		const run = thisTmuxRun();
+		expect(run.socketPath.endsWith(`${process.pid}-${run.id.split("-")[1]}.sock`)).toBe(true);
 		expect(tmuxArgv(["kill-session", "-t", "x"])).toEqual([
-			"-L",
-			"8gent-term",
+			"-S",
+			run.socketPath,
 			"kill-session",
 			"-t",
 			"x",

@@ -7,6 +7,18 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import {
+	chmodSync,
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // bun's mock.module outlives this file: keep the real barrel and put it back afterwards.
 const realTerminalTab = { ...(await import("../terminal-tab/index.js")) };
@@ -22,13 +34,24 @@ afterAll(() => {
 	if (savedHeadless === undefined) delete process.env.EIGHT_HEADLESS;
 	else process.env.EIGHT_HEADLESS = savedHeadless;
 	mock.module("../terminal-tab/index.js", () => realTerminalTab);
+	rmSync(TMP, { recursive: true, force: true });
 });
+
+/** Scratch state: sockets, owner records and logs live here, never in the real home. */
+const TMP = mkdtempSync(join(tmpdir(), "term-own-"));
+const SOCK_DIR = join(TMP, "term");
+const LOG_DIR = join(TMP, "sessions");
+/** The run these tests act as (run B when two runs are compared). */
+const runB = realTerminalTab.newTmuxRun(SOCK_DIR, process.pid);
+const mode = (p: string) => statSync(p).mode & 0o777;
 
 /** Every call that would have reached tmux, as [operation, target]. */
 const tmuxCalls: string[][] = [];
 const spawnedTargets: string[] = [];
 let tmuxPresent = true;
 let liveNames: string[] = [];
+/** What the fake tmux says about has-session: false once the program inside has exited. */
+let programRunning = true;
 
 mock.module("../terminal-tab/index.js", () => ({
 	attachInTerminal: async () => {},
@@ -36,7 +59,7 @@ mock.module("../terminal-tab/index.js", () => ({
 	deleteSession: () => {},
 	hasTmuxSession: async (id: string) => {
 		tmuxCalls.push(["has-session", id]);
-		return true;
+		return programRunning;
 	},
 	isTmuxAvailable: () => tmuxPresent,
 	killTmuxSession: async (id: string) => {
@@ -51,9 +74,20 @@ mock.module("../terminal-tab/index.js", () => ({
 	sendTmuxKeys: async (id: string) => {
 		tmuxCalls.push(["send-keys", id]);
 	},
-	tmuxArgv: realTerminalTab.tmuxArgv,
+	realTmuxSync: () => "",
+	releaseRun: realTerminalTab.releaseRun,
+	removeSessionLog: realTerminalTab.removeSessionLog,
+	sweepDeadRuns: () => [],
+	sweepSessionLogs: () => ({ deleted: [], tightened: [] }),
+	thisTmuxRun: () => runB,
+	tmuxArgv: (args: string[], run = runB) => realTerminalTab.tmuxArgv(args, run),
 	spawnTmuxSession: async (o: { command: string; args?: string[]; sessionId: string }) => {
 		spawnedTargets.push(o.sessionId);
+		// The real log creation, in the scratch directory.
+		realTerminalTab.ensurePrivateDir(LOG_DIR);
+		const logPath = join(LOG_DIR, `${o.sessionId}.log`);
+		realTerminalTab.createSessionLog(logPath);
+		realTerminalTab.claimRun(runB);
 		return {
 			sessionId: o.sessionId,
 			command: o.command,
@@ -61,7 +95,7 @@ mock.module("../terminal-tab/index.js", () => ({
 			pid: 1,
 			cwd: "/",
 			startedAt: new Date().toISOString(),
-			logPath: "/dev/null",
+			logPath,
 		};
 	},
 }));
@@ -74,7 +108,7 @@ import {
 	ownedSessions,
 } from "./term-tools";
 
-const SOCKET = ["-L", realTerminalTab.TMUX_SOCKET_NAME];
+const SOCKET = ["-S", runB.socketPath];
 
 async function spawn(extra: Record<string, unknown> = {}): Promise<string> {
 	const out = JSON.parse(await executeTermTool("term_spawn", { command: "cat", ...extra }));
@@ -98,6 +132,7 @@ beforeEach(() => {
 	spawnedTargets.length = 0;
 	tmuxPresent = true;
 	liveNames = [];
+	programRunning = true;
 });
 
 describe("term_spawn names its own sessions", () => {
@@ -185,7 +220,7 @@ describe("only sessions this run started are reachable", () => {
 });
 
 describe("quitting ends the sessions this run started", () => {
-	test("cleanup kills each registered session on the private socket, then stops an empty server", async () => {
+	test("cleanup kills each registered session on this run's socket, then stops this run's server", async () => {
 		const a = await spawn();
 		const b = await spawn();
 		const { argvs, run } = fakeRunner("");
@@ -193,18 +228,11 @@ describe("quitting ends the sessions this run started", () => {
 		expect(argvs).toEqual([
 			[...SOCKET, "kill-session", "-t", a],
 			[...SOCKET, "kill-session", "-t", b],
-			[...SOCKET, "list-sessions", "-F", "#{session_name}"],
 			[...SOCKET, "kill-server"],
 		]);
 		expect(ownedSessions()).toEqual([]);
+		expect(existsSync(runB.ownerPath)).toBe(false);
 		expect(await executeTermTool("term_send", { sessionId: a, text: "ls" })).toContain("[BLOCKED]");
-	});
-
-	test("the server is left running when it still has sessions (another run's)", async () => {
-		await spawn();
-		const { argvs, run } = fakeRunner("8gent-term-aaaaaaaaaaaa\n");
-		endOwnedSessions(run);
-		expect(argvs.some((a) => a.includes("kill-server"))).toBe(false);
 	});
 
 	test("a failing tmux does not stop the rest of the cleanup", async () => {
@@ -218,7 +246,7 @@ describe("quitting ends the sessions this run started", () => {
 		expect(argvs.map((x) => x.slice(2, 5))).toEqual([
 			["kill-session", "-t", a],
 			["kill-session", "-t", b],
-			["list-sessions", "-F", "#{session_name}"],
+			["kill-server"],
 		]);
 		expect(ownedSessions()).toEqual([]);
 	});
@@ -261,5 +289,231 @@ describe("no tmux on the machine", () => {
 			expect(out).not.toMatch(/install|brew|apt|dnf|pacman/i);
 		}
 		expect(spawnedTargets).toEqual([]);
+	});
+});
+
+// N1: one tmux socket per app run. Two runs, A and B, share a state directory.
+describe("one tmux socket per run", () => {
+	/** A process id that no longer exists: a child that has already exited. */
+	const deadPid = (() => {
+		const p = Bun.spawnSync(["true"]);
+		return p.pid;
+	})();
+	/** Lay down a run's socket file and owner record, as a live run would have. */
+	function layDown(run: ReturnType<typeof realTerminalTab.newTmuxRun>, owner?: string): void {
+		realTerminalTab.ensurePrivateDir(run.dir);
+		writeFileSync(run.socketPath, "");
+		if (owner !== undefined) writeFileSync(run.ownerPath, owner);
+	}
+
+	test("two runs get different sockets, each named for its run, under a 0700 directory", () => {
+		const a = realTerminalTab.newTmuxRun(SOCK_DIR, 4100);
+		const b = realTerminalTab.newTmuxRun(SOCK_DIR, 4100);
+		expect(a.socketPath).not.toBe(b.socketPath);
+		expect(a.id).toMatch(/^4100-[0-9a-f]{8}$/);
+		expect(a.socketPath).toBe(join(SOCK_DIR, `${a.id}.sock`));
+		expect(realTerminalTab.tmuxArgv(["ls"], a)).toEqual(["-S", a.socketPath, "ls"]);
+		// The default run is this process's own.
+		const self = realTerminalTab.thisTmuxRun();
+		expect(self.id.startsWith(`${process.pid}-`)).toBe(true);
+		expect(realTerminalTab.tmuxArgv(["ls"])).toEqual(["-S", self.socketPath, "ls"]);
+		realTerminalTab.claimRun(a);
+		expect(mode(SOCK_DIR)).toBe(0o700);
+		expect(mode(a.ownerPath)).toBe(0o600);
+		expect(readFileSync(a.ownerPath, "utf-8")).toBe("4100\n");
+		realTerminalTab.releaseRun(a);
+	});
+
+	test("run B's exit cleanup and startup sweep do not touch run A's live socket", async () => {
+		const runA = realTerminalTab.newTmuxRun(SOCK_DIR, process.pid);
+		layDown(runA, `${process.pid}\n`);
+		await spawn();
+		const { argvs, run } = fakeRunner("");
+		endOwnedSessions(run);
+		expect(argvs.length).toBeGreaterThan(0);
+		for (const argv of argvs) {
+			expect(argv.slice(0, 2)).toEqual(["-S", runB.socketPath]);
+			expect(argv).not.toContain(runA.socketPath);
+		}
+		expect(existsSync(runA.socketPath)).toBe(true);
+		expect(existsSync(runA.ownerPath)).toBe(true);
+
+		const sweepCalls: string[][] = [];
+		const swept = realTerminalTab.sweepDeadRuns(
+			SOCK_DIR,
+			(argv) => {
+				sweepCalls.push(argv);
+				return "";
+			},
+			realTerminalTab.isPidAlive,
+			runB,
+		);
+		expect(swept).toEqual([]);
+		expect(sweepCalls).toEqual([]);
+		expect(existsSync(runA.socketPath)).toBe(true);
+		expect(existsSync(runA.ownerPath)).toBe(true);
+		realTerminalTab.releaseRun(runA);
+	});
+
+	test("a socket whose recorded process is gone is swept: its server stopped, files removed", () => {
+		const dead = realTerminalTab.newTmuxRun(SOCK_DIR, deadPid);
+		layDown(dead, `${deadPid}\n`);
+		expect(realTerminalTab.isPidAlive(deadPid)).toBe(false);
+		const calls: string[][] = [];
+		const swept = realTerminalTab.sweepDeadRuns(
+			SOCK_DIR,
+			(argv) => {
+				calls.push(argv);
+				return "";
+			},
+			realTerminalTab.isPidAlive,
+			runB,
+		);
+		expect(swept).toEqual([dead.id]);
+		expect(calls).toEqual([["-S", dead.socketPath, "kill-server"]]);
+		expect(existsSync(dead.socketPath)).toBe(false);
+		expect(existsSync(dead.ownerPath)).toBe(false);
+	});
+
+	test("a missing, unreadable or malformed owner record is left alone", () => {
+		const missing = realTerminalTab.newTmuxRun(SOCK_DIR, deadPid);
+		layDown(missing);
+		const garbled = realTerminalTab.newTmuxRun(SOCK_DIR, deadPid);
+		layDown(garbled, "not a pid");
+		const mismatched = realTerminalTab.newTmuxRun(SOCK_DIR, deadPid);
+		layDown(mismatched, `${deadPid + 1}\n`);
+		const unreadable = realTerminalTab.newTmuxRun(SOCK_DIR, deadPid);
+		layDown(unreadable);
+		// A directory where the record should be cannot be read as one.
+		realTerminalTab.ensurePrivateDir(unreadable.ownerPath);
+		const calls: string[][] = [];
+		const swept = realTerminalTab.sweepDeadRuns(
+			SOCK_DIR,
+			(argv) => {
+				calls.push(argv);
+				return "";
+			},
+			() => false,
+			runB,
+		);
+		expect(swept).toEqual([]);
+		expect(calls).toEqual([]);
+		for (const r of [missing, garbled, mismatched, unreadable]) {
+			expect(existsSync(r.socketPath)).toBe(true);
+		}
+		for (const r of [missing, garbled, mismatched, unreadable]) {
+			rmSync(r.socketPath, { force: true });
+			rmSync(r.ownerPath, { recursive: true, force: true });
+		}
+	});
+
+	test("the sweep never removes this run's own socket", () => {
+		layDown(runB, `${deadPid}\n`);
+		expect(
+			realTerminalTab.sweepDeadRuns(
+				SOCK_DIR,
+				() => "",
+				() => false,
+				runB,
+			),
+		).toEqual([]);
+		expect(existsSync(runB.socketPath)).toBe(true);
+		realTerminalTab.releaseRun(runB);
+	});
+});
+
+// 9: session logs hold whatever the terminal echoed.
+describe("session logs", () => {
+	const logOf = (id: string) => ownedSessions().find((s) => s.target === id)?.logPath ?? "missing";
+
+	test("a log is created 0600 inside a 0700 directory", async () => {
+		const id = await spawn();
+		expect(mode(logOf(id))).toBe(0o600);
+		expect(mode(LOG_DIR)).toBe(0o700);
+	});
+
+	test("a pre-existing looser log and directory are tightened on create", () => {
+		const dir = join(TMP, "loose");
+		realTerminalTab.ensurePrivateDir(dir);
+		chmodSync(dir, 0o755);
+		const p = join(dir, "x.log");
+		writeFileSync(p, "old");
+		chmodSync(p, 0o644);
+		realTerminalTab.ensurePrivateDir(dir);
+		realTerminalTab.createSessionLog(p);
+		expect(mode(dir)).toBe(0o700);
+		expect(mode(p)).toBe(0o600);
+		expect(readFileSync(p, "utf-8")).toBe("old");
+	});
+
+	test("the log is kept while the session lives, even after the program inside exits", async () => {
+		const id = await spawn();
+		const p = logOf(id);
+		await executeTermTool("term_send", { sessionId: id, text: "ls" });
+		await executeTermTool("term_read", { sessionId: id });
+		await executeTermTool("term_list", {});
+		expect(existsSync(p)).toBe(true);
+		programRunning = false;
+		expect(await executeTermTool("term_send", { sessionId: id, text: "ls" })).toContain(
+			"not running",
+		);
+		expect(JSON.parse(await executeTermTool("term_read", { sessionId: id })).stillRunning).toBe(
+			false,
+		);
+		expect(existsSync(p)).toBe(true);
+	});
+
+	test("term_kill deletes the log", async () => {
+		const id = await spawn();
+		const p = logOf(id);
+		expect(existsSync(p)).toBe(true);
+		await executeTermTool("term_kill", { sessionId: id });
+		expect(existsSync(p)).toBe(false);
+	});
+
+	test("app exit deletes every session's log", async () => {
+		const a = logOf(await spawn());
+		const b = logOf(await spawn());
+		endOwnedSessions(() => "");
+		expect(existsSync(a)).toBe(false);
+		expect(existsSync(b)).toBe(false);
+	});
+
+	test("only a regular file is ever removed as a log", () => {
+		const dir = join(TMP, "notalog");
+		realTerminalTab.ensurePrivateDir(dir);
+		realTerminalTab.removeSessionLog(dir);
+		realTerminalTab.removeSessionLog("/dev/null");
+		expect(existsSync(dir)).toBe(true);
+		expect(existsSync("/dev/null")).toBe(true);
+	});
+
+	test("startup age sweep: over 30 days deleted, loose and younger tightened, the rest untouched", () => {
+		const dir = join(TMP, "sweep");
+		realTerminalTab.ensurePrivateDir(dir);
+		const now = Date.now();
+		const day = 24 * 60 * 60 * 1000;
+		const make = (name: string, perm: number, ageDays: number) => {
+			const p = join(dir, name);
+			writeFileSync(p, "secret");
+			chmodSync(p, perm);
+			const t = (now - ageDays * day) / 1000;
+			utimesSync(p, t, t);
+			return p;
+		};
+		const oldLoose = make("old-loose.log", 0o644, 31);
+		const oldTight = make("old-tight.log", 0o600, 40);
+		const youngLoose = make("young-loose.log", 0o644, 2);
+		const youngTight = make("young-tight.log", 0o600, 29);
+		const notLog = make("s.json", 0o644, 90);
+		const out = realTerminalTab.sweepSessionLogs(dir, now);
+		expect(out.deleted.sort()).toEqual(["old-loose.log", "old-tight.log"]);
+		expect(out.tightened).toEqual(["young-loose.log"]);
+		expect(existsSync(oldLoose)).toBe(false);
+		expect(existsSync(oldTight)).toBe(false);
+		expect(mode(youngLoose)).toBe(0o600);
+		expect(mode(youngTight)).toBe(0o600);
+		expect(existsSync(notLog)).toBe(true);
+		expect(mode(notLog)).toBe(0o644);
 	});
 });
