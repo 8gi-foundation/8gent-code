@@ -409,8 +409,8 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "history",
 		aliases: ["hist"],
-		description: "Browse all past sessions",
-		usage: "/history",
+		description: "Browse past sessions, or search them (local only)",
+		usage: "/history [search <words>|open <id>]",
 	},
 	{
 		name: "continue",

@@ -533,6 +533,14 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as pathMod from "node:path";
 import { bootTrace } from "./lib/boot-trace.js";
+import {
+	HISTORY_USAGE,
+	forgetTrashedSession,
+	formatHits,
+	parseHistoryArgs,
+	runHistorySearch,
+	withHistoryIndex,
+} from "./lib/history-search.js";
 import { createFallbackNoticeGate } from "./lib/fallback-notice-once.js";
 import {
 	type CliTabPin,
@@ -5549,6 +5557,31 @@ export function App({
 
 				case "history": {
 					historyPickDaemonRef.current = false;
+					const hist = parseHistoryArgs(args);
+					if (hist.kind === "usage") {
+						addSystemMessage(HISTORY_USAGE);
+						break;
+					}
+					if (hist.kind === "open") {
+						const target = sessionMgr.resume(hist.id);
+						if (!target) addSystemMessage(`Session "${hist.id}" not found. /history search finds them.`);
+						else openStoredSession(target.id);
+						break;
+					}
+					if (hist.kind === "search") {
+						try {
+							// Same local memory file as the agent's global store; nothing leaves the device.
+							addSystemMessage(
+								formatHits(
+									hist.query,
+									withHistoryIndex((db) => runHistorySearch(db, sessionMgr, hist.query)),
+								),
+							);
+						} catch (err) {
+							addSystemMessage(`History search failed: ${err instanceof Error ? err.message : String(err)}`);
+						}
+						break;
+					}
 					// Show local session history screen
 					const localSessions = sessionMgr.list(50);
 					if (localSessions.length === 0) {
@@ -8800,6 +8833,11 @@ export function App({
 						}}
 						onDelete={(id) => {
 							if (trashSession(id)) {
+								try {
+									forgetTrashedSession(id);
+								} catch {
+									// the next /history search prunes it from the index anyway
+								}
 								if (id === activeSessionId) setActiveSessionId(null);
 								addSystemMessage(`Session ${id} moved to the sessions trash folder.`);
 							}

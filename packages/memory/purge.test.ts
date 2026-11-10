@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { indexSessions, searchSessionTurns } from "./session-index.js";
 import { MemoryStore } from "./store.js";
 import type { EpisodicMemory } from "./types.js";
 
@@ -157,6 +158,44 @@ describe("MemoryStore.purge", () => {
 		const raw = Buffer.from(store.db.serialize());
 		expect(raw.includes("canaryone")).toBe(false);
 		expect(raw.includes("canarytwo")).toBe(false);
+	});
+
+	test("purge({all}) also removes the /history search transcripts", () => {
+		const dir = mkdtempSync(join(tmpdir(), "purge-turns-"));
+		dirs.push(dir);
+		const path = join(dir, "m.db");
+		const store = new MemoryStore(path);
+		seed(store, "userA", "canarymem");
+		indexSessions(store.db, [
+			{
+				id: "abcd1234",
+				lastActiveAt: "2026-11-01T10:00:00.000Z",
+				messages: [
+					{ role: "user", content: "canaryturn private question" },
+					{ role: "assistant", content: "canaryturn private answer" },
+				],
+			},
+		]);
+		expect(searchSessionTurns(store.db, "canaryturn")).toHaveLength(1);
+
+		const res = store.purge({ all: true });
+
+		expect(res.deleted.session_turns_fts).toBe(2);
+		expect(res.deleted.session_turns_state).toBe(1);
+		expect(res.remaining.session_turns_fts).toBe(0);
+		expect(res.remaining.session_turns_state).toBe(0);
+		expect(searchSessionTurns(store.db, "canaryturn")).toEqual([]);
+		store.close();
+		for (const f of readdirSync(dir))
+			expect(readFileSync(join(dir, f)).includes("canaryturn")).toBe(false);
+	});
+
+	test("purge({all}) on a store that never indexed sessions still works", () => {
+		const store = new MemoryStore(":memory:");
+		seed(store, "userA", "canarynoidx");
+		const res = store.purge({ all: true });
+		expect(res.deleted.session_turns_fts).toBeUndefined();
+		expect(Object.values(res.remaining).every((n) => n === 0)).toBe(true);
 	});
 
 	test("an entity shared with another person's memory survives", () => {
