@@ -53,8 +53,14 @@ afterEach(() => {
 });
 
 describe("mouseMode", () => {
-	test("default on macOS is full: clicks work and a drag selects and copies inside the TUI", () => {
-		expect(mouseMode(TTY, true, null, undefined, false, "darwin")).toBe("full");
+	test("default on macOS is select: Terminal.app and iTerm select and copy on their own (#181)", () => {
+		expect(mouseMode(TTY, true, null, undefined, false, "darwin")).toBe("select");
+	});
+	test("full reporting on macOS is still one switch away", () => {
+		expect(mouseMode({ ...TTY, EIGHT_MOUSE: "1" }, true, null, undefined, false, "darwin")).toBe(
+			"full",
+		);
+		expect(mouseMode(TTY, true, null, true, false, "darwin")).toBe("full");
 	});
 	test("default on other desktops stays select: the terminal selects and copies", () => {
 		expect(mouseMode(TTY, true, null, undefined, false, "linux")).toBe("select");
@@ -147,6 +153,57 @@ describe("escape sequences on start and exit", () => {
 			installMouse(new FakeStdin() as unknown as NodeJS.ReadStream, out, { mode: "off" }),
 		).toBeNull();
 		expect(out.written).toBe("");
+	});
+
+	test("the macOS default writes no reporting sequence at startup (#181)", () => {
+		const out = new FakeStdout();
+		installMouse(new FakeStdin() as unknown as NodeJS.ReadStream, out, {
+			mode: mouseMode(TTY, true, null, undefined, false, "darwin"),
+			processHooks: false,
+		});
+		for (const n of ["1000", "1002", "1003", "1006", "1015"]) {
+			expect(out.written).not.toContain(`?${n}h`);
+		}
+	});
+
+	// Each exit path writes the reset. A dummy listener keeps the layer from
+	// re-raising the signal at the test process once its own handler steps aside.
+	for (const sig of ["SIGTERM", "SIGINT", "SIGHUP", "SIGQUIT"]) {
+		for (const mode of ["select", "full"] as const) {
+			test(`${sig} restores the terminal in ${mode} mode`, () => {
+				const out = new FakeStdout();
+				const keep = () => {};
+				process.on(sig, keep);
+				try {
+					installMouse(new FakeStdin() as unknown as NodeJS.ReadStream, out, { mode });
+					(process as unknown as EventEmitter).emit(sig);
+					const off = mode === "full" ? DISABLE_MOUSE : DISABLE_SELECT;
+					expect(out.written.endsWith(off + off)).toBe(true);
+				} finally {
+					process.removeListener(sig, keep);
+				}
+			});
+		}
+	}
+
+	test("a normal exit restores the terminal, in both modes", () => {
+		for (const [mode, off] of [
+			["select", DISABLE_SELECT],
+			["full", DISABLE_MOUSE],
+		] as const) {
+			const out = new FakeStdout();
+			installMouse(new FakeStdin() as unknown as NodeJS.ReadStream, out, { mode });
+			(process as unknown as EventEmitter).emit("exit", 0);
+			expect(out.written.endsWith(off + off)).toBe(true);
+			_disposeMouse();
+		}
+	});
+
+	test("a crash restores the terminal in full mode too", () => {
+		const out = new FakeStdout();
+		installMouse(new FakeStdin() as unknown as NodeJS.ReadStream, out, { mode: "full" });
+		(process as unknown as EventEmitter).emit("uncaughtExceptionMonitor", new Error("boom"));
+		expect(out.written.endsWith(DISABLE_MOUSE + DISABLE_MOUSE)).toBe(true);
 	});
 
 	test("a crash restores the terminal in select mode too", () => {

@@ -293,7 +293,7 @@ import {
 	contextMeter,
 	stepContextUsed,
 } from "./lib/context-window.js";
-import { copyReply } from "./lib/copy-answer.js";
+import { copyReply, copyText, lastAnswer } from "./lib/copy-answer.js";
 import {
 	type Notice,
 	errorNotice,
@@ -1097,6 +1097,20 @@ applySettingsToEnv();
 // ============================================
 // Main App
 // ============================================
+
+/** The footer line after Ctrl+U: what was copied, in lines, and plainly when it was not. */
+function copyLastNotice(
+	text: string | null,
+	sent: { osc52: boolean; native: string | null },
+): string {
+	if (!text) return "Nothing to copy yet";
+	const n = text.split("\n").length;
+	const size = `${n} line${n === 1 ? "" : "s"}`;
+	if (sent.native) return `Copied the last message (${size})`;
+	if (sent.osc52)
+		return `Sent ${size} to the terminal clipboard. If nothing pastes, this terminal blocks it`;
+	return `Not copied: ${size} is too long for the terminal clipboard`;
+}
 
 // Splitting this component changes prop surface and file structure; tracked separately from the lint sweep.
 // react-doctor-disable-next-line react-doctor/no-giant-component
@@ -3175,6 +3189,16 @@ export function App({
 		// Ctrl+X: open or close the PLAN column; the chat takes the width back.
 		if (key.ctrl && input === "x") {
 			togglePlanColumn();
+		}
+
+		// Ctrl+U: copy the last message through the terminal's clipboard sequence,
+		// for a terminal where the mouse cannot select it (#181).
+		if (key.ctrl && input === "u") {
+			const text = lastAnswer(messages);
+			const sent = text
+				? copyText(text, { write: (seq) => inkStdout.write(seq) })
+				: { osc52: false, native: null };
+			flashNotice(copyLastNotice(text, sent));
 		}
 
 		if (key.ctrl && input === "y") {

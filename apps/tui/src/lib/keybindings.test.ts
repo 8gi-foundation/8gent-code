@@ -67,6 +67,13 @@ describe("keybindings table (#3918 D8)", () => {
 		}
 	});
 
+	test("/hotkeys names the key that copies the last message (#181)", () => {
+		expect(formatHotkeys()).toContain("Ctrl+U");
+		expect(KEYBINDINGS.find((b) => b.keys === "Ctrl+U")?.action).toBe(
+			"Copy the last message to the clipboard",
+		);
+	});
+
 	test("Ctrl+L is the model picker, once", () => {
 		expect(KEYBINDINGS.find((b) => b.keys === "Ctrl+L")?.action).toBe("Model picker");
 		expect(KEYBINDINGS.filter((b) => b.keys === "Ctrl+L")).toHaveLength(1);
