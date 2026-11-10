@@ -341,7 +341,7 @@ export const TICKET_FILE_NOTE =
  * then said it had typed into the tab. Only these tools reach a tab or a session.
  */
 export const TERMINAL_TAB_NOTE =
-	"**Terminal tabs: only `write_terminal` types into a tab and only `read_terminal` reads one (`term_send` and `term_read` do the same for `term_spawn` sessions). `run_command` runs in a separate shell and never reaches a tab: if you used it, say so, never say you typed into the tab.**";
+	"**Terminal tabs: only `write_terminal` types into one and only `read_terminal` reads one. `run_command` never reaches a tab: never say you typed into one if you used it.**";
 
 /** #4368: an unblock checklist ran 330-429 words and told the person to use options their setup lacks. */
 export const UNBLOCK_NOTE =
