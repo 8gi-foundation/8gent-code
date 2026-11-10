@@ -58,6 +58,7 @@
     "postinstall": "node scripts/postinstall.js",
     "preflight:native": "sh scripts/preflight-native-deps.sh",
     "test": "bun test packages/ apps/ tests/preload-temp-dirs.test.ts",
+    "test:quit-clean": "bun test ./apps/tui/src/__tests__/quit-leaves-nothing.proc.ts",
     "test:benchmarks": "bun test benchmarks/",
     "test:security": "bun test tests/security",
     "test:models": "bun --config=bin/bunfig.empty.toml scripts/test-models.ts",
