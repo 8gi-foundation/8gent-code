@@ -586,9 +586,11 @@ async function grepLiteral(
 				root,
 				pattern: p,
 				ignoreCase: ignoreCase || undefined,
-				maxResults: 5000,
+				maxResults: RG_MAX_LINES,
 				allow: readAllowed(root),
+				deadlineMs: state.timeoutMs ?? RG_TIMEOUT_MS,
 			});
+			if (r.deadline || r.capped) state.rgTimedOut = true;
 			// A failed search must read as "search unavailable", never as "no matches".
 			if (r.error) state.rgMissing = true;
 			hits.push(...r.hits.map((h) => ({ file: h.file, line: h.line, text: h.text })));
@@ -624,9 +626,11 @@ async function listFiles(ctx: RunCtx): Promise<string[]> {
 			root: ctx.root,
 			maxResults: 1_000_000,
 			allow: readAllowed(ctx.root),
+			deadlineMs: ctx.state.timeoutMs ?? RG_TIMEOUT_MS,
 		});
 		if (r.error) ctx.state.rgMissing = true;
-		return r.files;
+		if (r.deadline) ctx.state.rgTimedOut = true;
+		return withIndexed(ctx, r.files, !!r.deadline);
 	}
 	const allowed = readAllowed(ctx.root);
 	const files = out.text
@@ -634,7 +638,13 @@ async function listFiles(ctx: RunCtx): Promise<string[]> {
 		.filter(Boolean)
 		.map(normalizeRelPath)
 		.filter((f) => allowed(path.resolve(ctx.root, f)));
-	if ((out.timedOut || files.length === 0) && ctx.repoId) {
+	return withIndexed(ctx, files, out.timedOut);
+}
+
+/** When a listing timed out (or is empty), add the indexed files so every indexed source file is still ranked. */
+function withIndexed(ctx: RunCtx, files: string[], timedOut: boolean): string[] {
+	if ((timedOut || files.length === 0) && ctx.repoId) {
+		const allowed = readAllowed(ctx.root);
 		const seen = new Set(files);
 		for (const f of getFileTree(ctx.repoId).map(toPosix)) {
 			if (!seen.has(f) && allowed(path.resolve(ctx.root, f))) files.push(f);
