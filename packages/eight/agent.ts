@@ -117,7 +117,7 @@ import {
 } from "../tools/eight-browser";
 import { type Evidence, EvidenceCollector, summarizeEvidence } from "../validation/evidence";
 import { reviewTurn, turnReviewEnabled } from "../verify/turn-review";
-import { isNoToolScope, isVerbatimScope } from "./agent-scopes";
+import { isFlavorExempt, isNoToolScope, isVerbatimScope } from "./agent-scopes";
 import { type Settings, computeAutoTune } from "./auto-tune";
 import { createClient } from "./clients";
 import {
@@ -268,8 +268,8 @@ import {
 	GREETINGS,
 	PERSONALITY,
 	flavorResponse,
-	wantsBareReply,
 	voice as personalityVoice,
+	wantsBareReply,
 } from "../personality/voice.js";
 import {
 	CONTEXT_NOTE_HEADER,
@@ -2566,7 +2566,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			gated.violated ||
 				breakerStop !== null ||
 				agentResult.unverified.length > 0 ||
-				isVerbatimScope(this.config.agentScope) ||
+				isFlavorExempt(this.config) ||
 				wantsBareReply(this.turnTask) ||
 				quickResult !== null
 				? content

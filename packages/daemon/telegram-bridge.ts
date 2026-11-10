@@ -814,7 +814,9 @@ export const VOICE_NEEDS_LOCAL =
  * The one operator whose voice notes are processed in a group, for this rollout (C-G2).
  * On top of TELEGRAM_OPERATOR_USER_IDS, never instead of it.
  */
-export function groupVoiceOperatorId(env: Record<string, string | undefined> = process.env): string {
+export function groupVoiceOperatorId(
+	env: Record<string, string | undefined> = process.env,
+): string {
 	return (env.TELEGRAM_GROUP_VOICE_OPERATOR_ID ?? "").trim();
 }
 export const GROUP_VOICE_MAX_SECONDS = 60;
@@ -1031,6 +1033,51 @@ export function approvalCardText(
 		plain,
 		length: plain.length,
 	};
+}
+
+const FIRST_ATTEMPT_MS = 120_000;
+const RETRY_TIMEOUTS_MS = [FIRST_ATTEMPT_MS, 90_000, 60_000, 30_000];
+
+/**
+ * Words that mean the message needs reading or looking things up, so tools must
+ * stay on and the budget must not shrink. Deliberately broad: a shrunk retry on
+ * a research question is the wrong answer, so when unsure keep tools.
+ */
+const TOOL_WORK_WORDS =
+	/\b(research|review|check|compare|comparison|investigate|look\s?up|find|search|read|analy[sz]e|analysis|audit|summari[sz]e|inspect|verify|explore|study|report|latest|sources?|docs?|repo|files?|code|why)\b/i;
+
+/** True when the original message needs tools. */
+export function needsToolWork(text: string): boolean {
+	return TOOL_WORK_WORDS.test(text);
+}
+
+/** What one attempt does: the prompt, its timeout, an optional one-time notice, or a final fallback line. */
+export function retryPlan(
+	originalText: string,
+	attempt: number,
+): { prompt: string; timeout: number; notice?: string; final?: string } {
+	const toolWork = needsToolWork(originalText);
+	const lastAttempt = toolWork ? 2 : 4;
+	if (attempt > lastAttempt) {
+		return {
+			prompt: originalText,
+			timeout: 0,
+			final:
+				"No answer was produced: the request timed out. Send it again or break it into a smaller task.",
+		};
+	}
+	const notice =
+		attempt === 2
+			? `No answer yet after ${FIRST_ATTEMPT_MS / 1000} seconds. Still working.`
+			: undefined;
+	if (toolWork) return { prompt: originalText, timeout: FIRST_ATTEMPT_MS, notice };
+	let prompt = originalText;
+	if (attempt === 2) {
+		prompt = `Answer briefly and concisely. Limit tool use to 5 calls maximum. Original question: ${originalText}`;
+	} else if (attempt === 3) {
+		prompt = `Respond in one short paragraph. Do NOT use any tools. Just answer from what you know. Question: ${originalText}`;
+	}
+	return { prompt, timeout: RETRY_TIMEOUTS_MS[attempt - 1] ?? 30_000, notice };
 }
 
 class TelegramDaemonBridge {
@@ -2712,49 +2759,35 @@ class TelegramDaemonBridge {
 	}
 
 	/**
-	 * Retry loop: tries the prompt up to 4 times with different strategies.
-	 * The Infinite Gentleman never gives up.
+	 * Retry loop. Attempt 1 sends the prompt as is (2 min). If it times out the
+	 * chat is told once, plainly, that there is no answer yet and work goes on.
 	 *
-	 * Attempt 1: Send as-is (2 min timeout)
-	 * Attempt 2: Simplify - prepend "Answer briefly without using tools: " (90s timeout)
-	 * Attempt 3: Direct - prepend "In one paragraph, no tools: " (60s timeout)
-	 * Attempt 4: Fallback - acknowledge the issue and ask for simpler request
+	 * - Work that needs reading (research, review, check, comparison): one
+	 *   retry of the SAME prompt with the full timeout, then stop. Tools and
+	 *   budget are never cut.
+	 * - Anything else: a brief retry, then a no-tools retry, without further
+	 *   notices.
+	 *
+	 * The last fallback says plainly that no answer was produced and why.
 	 */
 	private retryPrompt(originalText: string, attempt: number): void {
-		const _maxAttempts = 4;
-		const timeouts = [120_000, 90_000, 60_000, 30_000];
-		const timeout = timeouts[attempt - 1] || 30_000;
+		const plan = retryPlan(originalText, attempt);
 
-		let prompt = originalText;
-		if (attempt === 2) {
-			prompt = `Answer briefly and concisely. Limit tool use to 5 calls maximum. Original question: ${originalText}`;
-			tgSend(
-				this.config.telegramToken,
-				this.replyChat(),
-				"Taking a bit longer than expected. Trying a simpler approach...",
-			);
-		} else if (attempt === 3) {
-			prompt = `Respond in one short paragraph. Do NOT use any tools. Just answer from what you know. Question: ${originalText}`;
-			tgSend(
-				this.config.telegramToken,
-				this.replyChat(),
-				"Still working on it. Trying without tools this time...",
-			);
-		} else if (attempt >= 4) {
-			// Final fallback - just acknowledge
+		if (plan.final) {
 			this.agentBusy = false;
-			tgSend(
-				this.config.telegramToken,
-				this.replyChat(),
-				"I tried 3 different approaches but couldn't complete this one. Could you rephrase or break it into a smaller task? I'm ready for the next message.",
-			);
+			tgSend(this.config.telegramToken, this.replyChat(), plan.final);
 			return;
 		}
+		if (plan.notice) tgSend(this.config.telegramToken, this.replyChat(), plan.notice);
 
 		// Send the prompt
 		if (this.ws && this.ws.readyState === WebSocket.OPEN) {
 			this.ws.send(
-				JSON.stringify({ type: "prompt", text: prompt, ...(this.turn ? { turn: this.turn } : {}) }),
+				JSON.stringify({
+					type: "prompt",
+					text: plan.prompt,
+					...(this.turn ? { turn: this.turn } : {}),
+				}),
 			);
 		}
 
@@ -2763,10 +2796,9 @@ class TelegramDaemonBridge {
 			if (this.agentBusy) {
 				// Create a new session to clear any stuck state
 				this.freshSession();
-				// Retry with next strategy
 				this.retryPrompt(originalText, attempt + 1);
 			}
-		}, timeout);
+		}, plan.timeout);
 
 		// Clear the timer if we get a response (handled by agentBusy being set to false)
 		this._retryTimer = timer;

@@ -235,6 +235,8 @@ export interface AgentConfig {
 	 * "__spawned__") apply to every tool call. Defaults to "primary".
 	 */
 	agentScope?: string;
+	/** Shared-chat session (Telegram and similar): replies never get a stock personality line. */
+	plainReplies?: boolean;
 	/**
 	 * TTS voice of the TUI tab this 8gent serves (tabVoices.assign in tools/speak.ts),
 	 * used when the model gives `speak` no voice. Must be a SPEAK_VOICES name;

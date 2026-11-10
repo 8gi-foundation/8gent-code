@@ -243,6 +243,10 @@ export interface FlavoredResponse {
  * Add personality flavor to a response
  */
 export function flavorResponse(content: string, flavor: FlavoredResponse): string {
+	// An empty reply is not an answer. A stock line on it would be the whole
+	// reply: a completion claim with nothing done. Return it untouched so the
+	// caller reports the turn as what it is.
+	if (content.trim() === "") return content;
 	let result = content;
 
 	if (flavor.prefix) {
