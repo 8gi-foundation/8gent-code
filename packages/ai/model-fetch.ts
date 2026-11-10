@@ -28,7 +28,7 @@
  * headers, while it prefills the prompt. With `firstByteMs`, the wait for the
  * FIRST body byte is bounded by that budget instead of `idleMs`; the idle gap
  * takes over once bytes flow. It fires as TurnTimeoutError(firstByteMs,
- * "no first output ...", "idle").
+ * kind "first-output").
  */
 
 import { TurnTimeoutError, resolveTurnTimeoutMs } from "../eight/turn-timeout";
@@ -83,7 +83,10 @@ export async function modelFetch(
 	const armIdle = () => {
 		if (idleMs == null) return;
 		if (idleTimer != null) timers.clearTimeout(idleTimer);
-		idleTimer = timers.setTimeout(() => fire("idle"), gotFirstByte ? idleMs : (firstByteMs ?? idleMs));
+		idleTimer = timers.setTimeout(
+			() => fire("idle"),
+			gotFirstByte ? idleMs : (firstByteMs ?? idleMs),
+		);
 		(idleTimer as { unref?: () => void })?.unref?.();
 	};
 	const stop = () => {
@@ -95,10 +98,8 @@ export async function modelFetch(
 		if (!deadline.signal.aborted || init.signal?.aborted) return err;
 		if (firedBy === "idle" && idleMs != null) {
 			const ms = gotFirstByte ? idleMs : (firstByteMs ?? idleMs);
-			const what =
-				gotFirstByte || ms === idleMs
-					? `no output for ${ms}ms`
-					: `no first output for ${ms}ms (prompt prefill budget)`;
+			if (!gotFirstByte) return new TurnTimeoutError(ms, opts.label, "first-output");
+			const what = `no output for ${ms}ms`;
 			return new TurnTimeoutError(ms, opts.label ? `${opts.label}, ${what}` : what, "idle");
 		}
 		return new TurnTimeoutError(timeoutMs, opts.label, "ceiling");

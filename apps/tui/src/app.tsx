@@ -25,6 +25,7 @@ import { resolveOllamaBaseUrl } from "../../../packages/ai/text-tool-endpoint.js
 import { dropOllamaCloudNames } from "../../../packages/core/ollama-cloud.js";
 import { answerFromLine } from "../../../packages/eight/android-setup.js";
 import { sanitizeForDisplay } from "../../../packages/eight/changelog-view.js";
+import { resolveBaseUrl as ollamaBaseUrl } from "../../../packages/eight/clients/ollama.js";
 import { killLiveShells } from "../../../packages/eight/live-shells.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
 import { chatMessages } from "../../../packages/eight/session-messages.js";
@@ -144,6 +145,11 @@ import {
 	resolvePresetBinary,
 	runExternalAgent,
 } from "./lib/external-agent-runner.js";
+import {
+	type FirstOutputWait,
+	probeModelLoaded,
+	startFirstOutputWait,
+} from "./lib/first-output-wait.js";
 import { GoalClient } from "./lib/goal-client.js";
 import { InProcessGoalTransport } from "./lib/in-process-goal-transport.js";
 import { markIntroSeen, readSeenVersion, shouldShowIntro } from "./lib/intro-gate.js";
@@ -1214,6 +1220,9 @@ export function App({
 	// names removed to make accidental cross-tab leaks compile-fail.
 
 	const [processingStage, setProcessingStage] = useState<ProcessingStage>("planning");
+	// #133: live "waiting for model, N s" / "loading model, N s" while a turn is silent.
+	const [waitLine, setWaitLine] = useState<string | null>(null);
+	const waitRef = useRef<FirstOutputWait | null>(null);
 	const [status, setStatus] = useState<AppStatus>("idle");
 
 	// Real-time agent progress (replaces fake simulateProcessing)
@@ -7828,6 +7837,28 @@ export function App({
 		],
 	);
 
+	// #133: count the silent seconds of a turn; any step or tool restarts the count.
+	useEffect(() => {
+		if (!isProcessing) return;
+		const wait = startFirstOutputWait({
+			model: currentModel,
+			onLine: setWaitLine,
+			probe:
+				currentProvider === "ollama"
+					? () => probeModelLoaded(ollamaBaseUrl(), currentModel)
+					: undefined,
+		});
+		waitRef.current = wait;
+		return () => {
+			wait.stop();
+			waitRef.current = null;
+		};
+	}, [isProcessing, currentModel, currentProvider]);
+	useEffect(() => {
+		// Counters reset to zero at turn start; that is not progress.
+		if (stepCount > 0 || toolCount > 0 || activeTool) waitRef.current?.touch();
+	}, [stepCount, toolCount, activeTool]);
+
 	// Reset agent progress for a new request
 	const resetAgentProgress = useCallback(() => {
 		setActiveTool(null);
@@ -9115,6 +9146,7 @@ export function App({
 							<Box flexShrink={0}>
 								<ActivityMonitor
 									activeTool={activeTool}
+									waitLine={waitLine}
 									stepCount={stepCount}
 									toolCount={toolCount}
 									processingStage={processingStage}

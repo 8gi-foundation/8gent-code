@@ -113,6 +113,13 @@ export function describeLocalTurnFailure(
 		// The no-progress gap fired (#3657): the model stopped sending bytes,
 		// which is a stall or a very long prefill, not a slow answer. Name the
 		// knob that moves THIS limit; raising the wall clock would not help.
+		if (err instanceof TurnTimeoutError && err.kind === "first-output") {
+			return {
+				kind,
+				message: `The local model (${ctx.endpoint}) sent nothing for ${seconds} seconds, so the turn was stopped. Press Esc and send again, or pick a smaller model with /model. To wait longer, set EIGHT_FIRST_TOKEN_MS (milliseconds).`,
+				reason: `timeout: no first output for ${seconds} seconds (${raw})`,
+			};
+		}
 		if (err instanceof TurnTimeoutError && err.kind === "idle") {
 			const hint =
 				"A model that is still thinking keeps sending tokens; silence this long usually means a stalled request or a very long prompt prefill. " +

@@ -142,6 +142,8 @@ interface ActivityMonitorProps {
 	toolCount: number;
 	/** Processing stage */
 	processingStage: "planning" | "toolshed" | "executing" | "complete";
+	/** Live "waiting for model, N s" line while nothing has happened yet (#133) */
+	waitLine?: string | null;
 	/** Max visible entries */
 	maxEntries?: number;
 	/** When false, draw plain markers and no thinking visualiser (matches global ^A anim toggle) */
@@ -268,6 +270,7 @@ export function getAgentTaskOutput(taskId: string): TaskOutput | null {
 
 export function ActivityMonitor({
 	activeTool,
+	waitLine,
 	stepCount,
 	toolCount,
 	processingStage,
@@ -328,7 +331,11 @@ export function ActivityMonitor({
 							<Text color={t.orange} bold>
 								{stageLabel}
 							</Text>
-							{showAnimations && <Text color={t.textDim}>{dots}</Text>}
+							{waitLine ? (
+								<Text color={t.textDim} wrap="truncate-end">{` ${waitLine}`}</Text>
+							) : (
+								showAnimations && <Text color={t.textDim}>{dots}</Text>
+							)}
 						</Box>
 					) : (
 						visibleEntries.slice(-2).map((entry) => (
