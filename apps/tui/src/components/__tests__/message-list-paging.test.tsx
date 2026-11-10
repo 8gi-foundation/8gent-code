@@ -1,8 +1,8 @@
 /**
- * Plain PgUp/PgDn in the chat (#4967 fix round): they scroll the conversation
- * only in keys-up (touchHints), and never while an approval card is pending,
- * because the card pages itself with the same keys. In the roomy layout plain
- * PgUp is not a chat key, exactly as before keys-up.
+ * Plain PgUp/PgDn in the chat: they scroll the conversation in every layout
+ * (pilot break 9: on a laptop PgDn did nothing, since plain paging was
+ * keys-up only), and never while an approval card is pending, because the card
+ * pages itself with the same keys.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
@@ -106,9 +106,10 @@ describe("MessageList plain PgUp", () => {
 		expect(after).toBe(before);
 	});
 
-	test("roomy: plain PgUp does not scroll the chat, as before", async () => {
+	test("roomy: plain PgUp scrolls the chat back too", async () => {
 		const { before, after } = await pageUpOnce({ touchHints: false });
 		expect(before).toContain("line-40");
-		expect(after).toBe(before);
+		expect(after).not.toBe(before);
+		expect(after).not.toContain("line-40");
 	});
 });

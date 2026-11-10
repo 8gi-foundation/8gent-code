@@ -268,6 +268,7 @@ import {
 	GREETINGS,
 	PERSONALITY,
 	flavorResponse,
+	wantsBareReply,
 	voice as personalityVoice,
 } from "../personality/voice.js";
 import {
@@ -2566,6 +2567,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				breakerStop !== null ||
 				agentResult.unverified.length > 0 ||
 				isVerbatimScope(this.config.agentScope) ||
+				wantsBareReply(this.turnTask) ||
 				quickResult !== null
 				? content
 				: flavorResponse(content, flavor),
@@ -4536,7 +4538,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// text-tool path above for why a random COMPLETION_PHRASE in a channel
 			// reads as a fabricated completion claim.
 			const flavoredContent = fixCompletedLine(
-				gatedNative.violated || isVerbatimScope(this.config.agentScope)
+				gatedNative.violated ||
+					isVerbatimScope(this.config.agentScope) ||
+					wantsBareReply(this.turnTask)
 					? content
 					: flavorResponse(content, flavor),
 			).text;

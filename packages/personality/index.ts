@@ -45,6 +45,7 @@ export {
 	getProgressPhrase,
 	getAffirmative,
 	flavorResponse,
+	wantsBareReply,
 	createGreetingResponse,
 	createCompletionResponse,
 	createErrorResponse,
