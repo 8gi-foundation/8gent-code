@@ -548,6 +548,7 @@ import {
 	tabAgentRole,
 } from "./lib/model-selection.js";
 import { routeOnScreen } from "./lib/model-truth.js";
+import { changelogOutput } from "./lib/changelog-reader.js";
 import { PACKAGE_ROOT, packageBinScript } from "./lib/package-scripts.js";
 
 let firstShellTraced = false;
@@ -4643,6 +4644,13 @@ export function App({
 				case "hotkeys":
 					addSystemMessage(formatHotkeys());
 					break;
+
+				case "changelog": {
+					const file = pathMod.join(PACKAGE_ROOT, "CHANGELOG.md");
+					const text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
+					addSystemMessage(changelogOutput(text, args[0], pkgInfo.version));
+					break;
+				}
 
 				case "thinking": {
 					const arg = args[0]?.toLowerCase();
