@@ -536,6 +536,34 @@ export function neverReadClass(
 	return null;
 }
 
+/** Folders under ~/.8gent holding the person's own history; their metadata (not contents) may be listed. */
+const HISTORY_DIRS = ["sessions", "turns"] as const;
+const METADATA_COMMANDS = new Set(["ls", "wc", "stat", "du"]);
+
+/**
+ * True when `command` only lists or counts: ls, wc, stat or du, short flags and paths, joined by
+ * pipes, `&&`, `||` or `;`. No quotes, substitution, redirect, or anything else a shell can use to
+ * read content or write. `wc -l` and `ls -l` say how many sessions there are and when, not what was said.
+ */
+export function isMetadataOnly(command: string): boolean {
+	if (/[`$<>(){}\\"'\n\r?[\]]/.test(command)) return false;
+	// A lone & (background job, or |&) starts a second command the split below would not see.
+	if (/&/.test(command.replace(/&&/g, ""))) return false;
+	const segments = command.trim().split(/\s*(?:\|\||&&|;|\|)\s*/);
+	return segments.every((seg) => {
+		const [cmd, ...args] = seg.split(/\s+/).filter(Boolean);
+		if (!cmd || !METADATA_COMMANDS.has(cmd)) return false;
+		return args.every((a) => (a.startsWith("-") ? /^-[A-Za-z0-9]+$/.test(a) : true));
+	});
+}
+
+/** True when `resolved` is inside 8gent's own sessions or turns folder. */
+function inOwnHistory(resolved: string, env: Record<string, string | undefined>): boolean {
+	return ownDataRoots(env).some((r) =>
+		HISTORY_DIRS.some((d) => isPathWithin(resolved, path.join(r, d), process.platform)),
+	);
+}
+
 export type AskPerson = (request: {
 	action: string;
 	details: string;
@@ -572,6 +600,9 @@ export async function readBoundaryGate(
 	} catch {
 		outside = ["<unparsed>"];
 	}
+	// Listing or counting 8gent's own sessions and turns (ls, wc, stat, du) is allowed: when the
+	// person asks about their history, 8gent can say how many and when. Contents stay refused.
+	if (isMetadataOnly(command)) outside = outside.filter((p) => !inOwnHistory(p, env));
 	// A path never read, whatever the answer: refuse in one plain sentence, show no card (#4897).
 	for (const p of outside) {
 		const cls = neverReadClass(p, env);
