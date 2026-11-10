@@ -57,6 +57,8 @@ export interface SelectInputProps<T = string> {
 	showDescription?: boolean;
 	searchable?: boolean;
 	highlightColor?: string;
+	/** Added to the refusal line: another way to do the same thing. */
+	refuseNote?: string;
 }
 
 /**
@@ -83,24 +85,65 @@ export function pickerHint(columns: number | undefined, searchable: boolean): st
 	return `[↑↓] Navigate [Enter] Select [Esc] Cancel${searchable ? " [type] Filter" : ""}`;
 }
 export const PICKER_MIN_VISIBLE = 3;
-/** Rows the app draws around a picker (the figure the #123 border tests use). */
-export const PICKER_APP_ROWS = 11;
+/**
+ * Rows the app draws around a picker with the full chrome, measured in the real
+ * app at 24 rows: banner 3, tab row 2, NOW strip 3, frame 2, Esc line 1, status
+ * footer 1 = 12, inside a frame one row shorter than the terminal. So the picker
+ * has terminal rows minus 13. (This was 11, which over-counted the room by two.)
+ */
+export const PICKER_APP_ROWS = 13;
+/**
+ * Short windows: while a picker is open the app hides the banner, tab row and NOW
+ * strip. What stays is the frame 2, Esc line 1 and status footer 1, so the picker
+ * has terminal rows minus 5.
+ */
+export const PICKER_SHORT_APP_ROWS = 5;
+/**
+ * Below this many rows the full chrome leaves no room for 3 rows inside a bordered
+ * card (border 2, title 1, scroll line 1, hint 1), so the chrome is hidden instead.
+ */
+export const PICKER_SHORT_BELOW_ROWS = PICKER_APP_ROWS + PICKER_MIN_VISIBLE + 5;
+/**
+ * The least a picker can be used in: 3 rows plus the one hint line (4), plus the
+ * 4 rows of frame, Esc line and footer, inside a frame one row shorter than the
+ * terminal. Under 3 rows there is no row before or after the marked one to see.
+ */
+export const PICKER_MIN_ROWS = PICKER_MIN_VISIBLE + 1 + (PICKER_SHORT_APP_ROWS - 1) + 1;
+
+/** True when the app should hide its banner, tabs and NOW strip for the picker. */
+export function pickerHidesChrome(terminalRows: number | undefined): boolean {
+	return !!terminalRows && terminalRows > 0 && terminalRows < PICKER_SHORT_BELOW_ROWS;
+}
 
 export interface PickerLayout {
-	/** Not even one row plus the hint fits: show one line and let Enter do nothing. */
+	/** Under PICKER_MIN_ROWS: show one line and let Enter do nothing. */
 	refuse: boolean;
 	visible: number;
 	showTitle: boolean;
 	/** Compact: one combined line for the rows above and below. */
 	oneScrollLine: boolean;
+	/** Short window: no card border, no title, one line for the counts and the keys. */
+	bare: boolean;
+}
+
+/** The one line a short picker keeps: what is cut off, then the keys. Counts are the real ones. */
+export function pickerBareHint(above: number, below: number, searchable: boolean): string {
+	const cut = [
+		above > 0 ? `\u25B2 ${above} more above` : "",
+		below > 0 ? `\u25BC ${below} more below` : "",
+	]
+		.filter(Boolean)
+		.join("  ");
+	const keys = searchable ? "\u2191\u2193 Enter Esc  type to filter" : "\u2191\u2193 Enter Esc";
+	return cut ? `${cut}   ${keys}` : keys;
 }
 
 /**
  * How many option rows to draw in the rows the app leaves the picker. From 26
- * terminal rows up this is the old cap. Under that it counts every row the card
- * draws (border 2, hint 1, search line, title, one scroll line) against the real
- * budget, drops the title before it drops a row, and refuses rather than draw
- * a picker whose rows or hint are clipped.
+ * terminal rows up this is the old cap. From 21 to 25 the card keeps its border
+ * and the title, and the scroll lines fold into one. Under 21 the app hides its
+ * own chrome and the picker is bare: rows plus one hint line. Under
+ * PICKER_MIN_ROWS it refuses rather than draw a picker whose rows are clipped.
  */
 export function pickerLayout(
 	terminalRows: number | undefined,
@@ -114,22 +157,34 @@ export function pickerLayout(
 			visible: fitVisible(maxVisible, terminalRows),
 			showTitle: true,
 			oneScrollLine: false,
+			bare: false,
 		};
 	}
-	const budget = (terminalRows as number) - PICKER_APP_ROWS;
-	const avail = budget - 3 - (searching ? 1 : 0);
-	const fit = (room: number): number => {
-		if (room < 1) return 0;
-		if (total <= room) return Math.min(total, maxVisible);
-		return Math.min(room - 1, maxVisible);
-	};
-	const withTitle = fit(avail - 1);
-	if (withTitle >= 1 || (total === 0 && avail >= 1)) {
-		return { refuse: false, visible: Math.max(withTitle, 1), showTitle: true, oneScrollLine: true };
+	const rows = terminalRows as number;
+	const search = searching ? 1 : 0;
+	if (pickerHidesChrome(rows)) {
+		if (rows < PICKER_MIN_ROWS) {
+			return { refuse: true, visible: 0, showTitle: false, oneScrollLine: true, bare: true };
+		}
+		const room = rows - PICKER_SHORT_APP_ROWS - 1 - search;
+		return {
+			refuse: false,
+			visible: Math.max(1, Math.min(total, maxVisible, room)),
+			showTitle: false,
+			oneScrollLine: true,
+			bare: true,
+		};
 	}
-	const bare = fit(avail);
-	if (bare >= 1) return { refuse: false, visible: bare, showTitle: false, oneScrollLine: true };
-	return { refuse: true, visible: 0, showTitle: false, oneScrollLine: true };
+	// Border 2, hint 1, title 1, one scroll line when the list is cut.
+	const avail = rows - PICKER_APP_ROWS - 3 - search - 1;
+	const visible = total <= avail ? Math.min(total, maxVisible) : Math.min(avail - 1, maxVisible);
+	return {
+		refuse: false,
+		visible: Math.max(visible, 1),
+		showTitle: true,
+		oneScrollLine: true,
+		bare: false,
+	};
 }
 
 export function fitVisible(maxVisible: number, terminalRows: number | undefined): number {
@@ -151,6 +206,7 @@ export function SelectInput<T = string>({
 	showDescription = true,
 	searchable = true,
 	highlightColor = "cyan",
+	refuseNote,
 }: SelectInputProps<T>) {
 	const { stdout } = useStdout();
 	const compact = isCompactPicker(stdout?.rows);
@@ -265,7 +321,7 @@ export function SelectInput<T = string>({
 		return (
 			<Box>
 				<MutedText wrap="truncate-end">
-					Window too short for this list. Make it taller. Esc closes.
+					{`Too short: needs ${PICKER_MIN_ROWS} rows, has ${stdout?.rows}. Make it taller.${refuseNote ? ` ${refuseNote}` : ""}`}
 				</MutedText>
 			</Box>
 		);
@@ -278,8 +334,8 @@ export function SelectInput<T = string>({
 	const canScrollDown = scrollOffsetShown + maxVisible < filteredOptions.length;
 	const below = filteredOptions.length - scrollOffsetShown - maxVisible;
 
-	return (
-		<Card borderColor="blue">
+	const body = (
+		<>
 			{/* Title */}
 			{title && layout.showTitle && (
 				<Box marginBottom={compact ? 0 : 1}>
@@ -297,7 +353,7 @@ export function SelectInput<T = string>({
 			)}
 
 			{/* Scroll up indicator */}
-			{hasMore && layout.oneScrollLine && compact && (
+			{hasMore && layout.oneScrollLine && compact && !layout.bare && (
 				<Box>
 					<MutedText wrap="truncate-end">
 						{canScrollUp ? ` ▲ ${scrollOffsetShown} more above` : ""}
@@ -388,9 +444,18 @@ export function SelectInput<T = string>({
 
 			{/* Help text */}
 			<Box marginTop={compact ? 0 : 1}>
-				<MutedText wrap="truncate-end">{pickerHint(stdout?.columns, searchable)}</MutedText>
+				<MutedText wrap="truncate-end">
+					{layout.bare
+						? pickerBareHint(scrollOffsetShown, Math.max(0, below), searchable)
+						: pickerHint(stdout?.columns, searchable)}
+				</MutedText>
 			</Box>
-		</Card>
+		</>
+	);
+	return layout.bare ? (
+		<Box flexDirection="column">{body}</Box>
+	) : (
+		<Card borderColor="blue">{body}</Card>
 	);
 }
 
@@ -576,6 +641,7 @@ export function ModelSelector({
 			onCancel={onCancel}
 			initialIndex={Math.max(0, currentIndex)}
 			highlightColor="green"
+			refuseNote="Or use /model <name>."
 		/>
 	);
 }
