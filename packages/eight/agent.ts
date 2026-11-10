@@ -3571,7 +3571,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				const count = (this.toolCallTracker.get(fingerprint) || 0) + 1;
 				this.toolCallTracker.set(fingerprint, count);
 
-				if (count >= 3 && !event.success && !this.loopWarningInjected) {
+				if (count >= 3 && !nativeOk && !this.loopWarningInjected) {
 					this.loopWarningInjected = true;
 					console.log(
 						`\n⚠️  [LOOP DETECTED] Tool "${event.toolName}" has been called ${count} times with similar args and keeps failing.`,
@@ -3586,14 +3586,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				}
 
 				// Reset loop warning flag on successful calls so it can fire again for new loops
-				if (event.success) {
+				if (nativeOk) {
 					this.loopWarningInjected = false;
 				}
 
 				// Circuit breaker: record call and check for loop patterns
 				this.loopDetector.record(event.toolName, event.args as Record<string, unknown>, {
 					refused: refusedBeforeRun(event.toolName, event.args as Record<string, unknown>),
-					succeeded: event.success && isQuietSuccess(event.toolName, resultStr),
+					succeeded: nativeOk && isQuietSuccess(event.toolName, resultStr),
 				});
 				const loopResult = this.loopDetector.check();
 				if (loopResult?.recoverable) {
@@ -3619,7 +3619,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				const boundaryStop = takeBoundaryStop(this.readScope);
 				if (boundaryStop) this.abort({ kind: "circuit_breaker", reason: boundaryStop });
 
-				if (event.success) {
+				if (nativeOk) {
 					this.sessionWriter.writeToolResult(
 						event.toolCallId,
 						true,
@@ -3630,8 +3630,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					);
 				} else {
 					// v2: emit distinct tool_error entry
-					const errorStr =
-						typeof event.error === "string"
+					// A result the tool itself marked as an error has no thrown error: record its text.
+					const errorStr = event.success
+						? resultStr.slice(0, 2000)
+						: typeof event.error === "string"
 							? event.error
 							: event.error instanceof Error
 								? event.error.message
@@ -3648,7 +3650,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					toolName: event.toolName,
 					toolCallId: event.toolCallId,
 					args: loggedArgs,
-					success: event.success,
+					success: nativeOk,
 					durationMs: event.durationMs,
 					stepNumber: event.stepNumber,
 					resultPreview: resultStr.slice(0, 200),
@@ -3664,12 +3666,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.kernel.recordToolStep({
 					tool: event.toolName,
 					argsSummary: JSON.stringify(loggedArgs ?? {}).slice(0, 300),
-					ok: event.success,
+					ok: nativeOk,
 					durationMs: event.durationMs,
 				});
 
 				// Track file operations
-				if (event.success) {
+				if (nativeOk) {
 					if (event.toolName === "write_file" && event.args.path) {
 						this.sessionWriter.trackFileCreated(event.args.path as string);
 					} else if (event.toolName === "edit_file" && event.args.path) {
@@ -3697,12 +3699,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					...(event.toolName === "write_file" || event.toolName === "edit_file"
 						? { modifiedFiles: [String(event.args.path)] }
 						: {}),
-					...(!event.success && typeof event.error === "string" ? { lastError: event.error } : {}),
+					...(!nativeOk && typeof event.error === "string" ? { lastError: event.error } : {}),
 				});
 
 				// Fire-and-forget evidence collection for significant operations
 				if (
-					event.success &&
+					nativeOk &&
 					["write_file", "edit_file", "run_command", "git_commit"].includes(event.toolName)
 				) {
 					this.collectToolEvidence(event)
@@ -3725,7 +3727,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				}
 
 				// Auto-memory: extract project facts from tool results
-				if (event.success && ["read_file", "run_command"].includes(event.toolName)) {
+				if (nativeOk && ["read_file", "run_command"].includes(event.toolName)) {
 					try {
 						const autoFacts = extractAutoMemories(event.toolName, event.args, resultStr);
 						if (autoFacts.length > 0) {
@@ -3757,7 +3759,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						tool: event.toolName,
 						args: loggedArgs,
 						result: resultStr.slice(0, 2000),
-						success: event.success,
+						success: nativeOk,
 						durationMs: event.durationMs,
 						sessionId: this.sessionId,
 					})
