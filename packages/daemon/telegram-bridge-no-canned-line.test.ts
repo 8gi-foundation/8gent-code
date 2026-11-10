@@ -1,35 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { isFlavorExempt, isPlainReplyChannel } from "../eight/agent-scopes";
-import { COMPLETION_PHRASES, flavorResponse } from "../personality/voice";
+import { createFlowModeController } from "../flow/flow-mode";
+import { COMPLETION_PHRASES, GREETINGS } from "../personality/voice";
 import { TelegramDaemonBridge, needsToolWork, retryPlan } from "./telegram-bridge";
-
-describe("flavorResponse on an empty reply", () => {
-	test("no completion phrase on empty or whitespace content", () => {
-		for (const c of ["", "   ", "\n\t"]) {
-			const out = flavorResponse(c, { style: "completion", suffix: COMPLETION_PHRASES[0] });
-			expect(out).toBe(c);
-			for (const p of COMPLETION_PHRASES) expect(out).not.toContain(p);
-		}
-	});
-	test("a real reply is still flavored", () => {
-		expect(flavorResponse("done", { style: "completion", suffix: "x" })).toBe("done\n\nx");
-	});
-});
-
-describe("isFlavorExempt", () => {
-	test("table, classroom and plainReplies are exempt; the local app is not", () => {
-		expect(isFlavorExempt({ agentScope: "__table__" })).toBe(true);
-		expect(isFlavorExempt({ agentScope: "__classroom__" })).toBe(true);
-		expect(isFlavorExempt({ plainReplies: true })).toBe(true);
-		expect(isFlavorExempt({})).toBe(false);
-		expect(isFlavorExempt({ plainReplies: false })).toBe(false);
-	});
-	test("telegram is a plain-reply channel, the app is not", () => {
-		expect(isPlainReplyChannel("telegram")).toBe(true);
-		expect(isPlainReplyChannel("tui")).toBe(false);
-		expect(isPlainReplyChannel(undefined)).toBe(false);
-	});
-});
 
 describe("retryPlan", () => {
 	test("research keeps the prompt, tools and full timeout, one retry then stop", () => {
@@ -61,42 +33,98 @@ describe("retryPlan", () => {
 	});
 });
 
-describe("bridge turn with an empty model reply", () => {
-	const sent: string[] = [];
-	const realFetch = globalThis.fetch;
-	beforeEach(() => {
-		sent.length = 0;
-		globalThis.fetch = (async (_u: unknown, init?: { body?: string }) => {
-			sent.push(init?.body ?? "");
-			return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }));
-		}) as unknown as typeof fetch;
-	});
-	afterEach(() => {
-		globalThis.fetch = realFetch;
+const JAMES = 100000001;
+const realFetch = globalThis.fetch;
+let sent: string[];
+
+beforeEach(() => {
+	sent = [];
+	globalThis.fetch = (async (_u: unknown, init?: { body?: string }) => {
+		try {
+			const b = init?.body ? JSON.parse(init.body) : {};
+			if (typeof b.text === "string") sent.push(b.text);
+		} catch {}
+		return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }));
+	}) as unknown as typeof fetch;
+});
+afterEach(() => {
+	globalThis.fetch = realFetch;
+});
+
+function make() {
+	const b = new TelegramDaemonBridge({
+		telegramToken: "tok",
+		chatId: String(JAMES),
+		daemonUrl: "ws://127.0.0.1:1",
+		authorizedChatIds: [String(JAMES)],
+		authorizedUserIds: [String(JAMES)],
+		operatorUserIds: [String(JAMES)],
+		env: {},
+		flowController: createFlowModeController(),
+	}) as any;
+	b.voiceEnabled = false;
+	const prompts: string[] = [];
+	b.ws = {
+		readyState: WebSocket.OPEN,
+		send: (s: string) => {
+			const m = JSON.parse(s);
+			if (m.type === "prompt") prompts.push(m.text);
+		},
+	};
+	b.freshSession = () => {};
+	b.agentBusy = true;
+	b.retryPrompt("what is the status", 1);
+	return { b, prompts };
+}
+const final = (b: any, chunk: unknown) =>
+	b.handleDaemonMessage({ type: "event", event: "agent:stream", payload: { final: true, chunk } });
+const settle = () => new Promise((r) => setTimeout(r, 30));
+
+describe("empty final reply goes straight to the retry plan", () => {
+	for (const empty of ["", "   \n\t", "<think>reasoning that never closes", undefined]) {
+		test(`${JSON.stringify(empty)} is not sent and advances to the next attempt`, async () => {
+			const t = make();
+			final(t.b, empty);
+			await settle();
+			expect(sent.some((s) => s.trim() === "")).toBe(false);
+			expect(t.prompts.length).toBe(2);
+			expect(t.prompts[1]).toContain("Original question: what is the status");
+			expect(sent).toEqual(["No answer yet after 120 seconds. Still working."]);
+			expect(t.b.agentBusy).toBe(true);
+			clearTimeout(t.b._retryTimer);
+		});
+	}
+
+	test("empty replies on every attempt end in the plain final message, never a blank or a stock line", async () => {
+		const t = make();
+		for (let i = 0; i < 4; i++) final(t.b, "");
+		await settle();
+		expect(sent.some((s) => s.trim() === "")).toBe(false);
+		expect(sent[sent.length - 1]).toContain("No answer was produced");
+		for (const p of [...COMPLETION_PHRASES, ...GREETINGS]) expect(sent.join("\n")).not.toContain(p);
+		expect(t.b.agentBusy).toBe(false);
 	});
 
-	test("nothing sent claims completion", async () => {
-		const b = new TelegramDaemonBridge({
-			telegramToken: "tok",
-			chatId: "1",
-			daemonUrl: "ws://127.0.0.1:1",
-			env: {},
-		}) as any;
-		b.sessionId = "s1";
-		b.agentBusy = true;
-		b.handleDaemonMessage({
-			type: "event",
-			event: "agent:stream",
-			payload: {
-				sessionId: "s1",
-				final: true,
-				chunk: flavorResponse("", { style: "completion", suffix: COMPLETION_PHRASES[0] }),
-			},
-		});
-		await new Promise((r) => setTimeout(r, 20));
-		const all = sent.join("\n");
-		expect(all).not.toContain("Mission accomplished");
-		for (const p of COMPLETION_PHRASES) expect(all).not.toContain(p);
-		expect(retryPlan("research this", 3).final ?? "").not.toContain("Mission accomplished");
+	test("a whitespace-only chunk with no retry armed posts nothing", async () => {
+		const t = make();
+		clearTimeout(t.b._retryTimer);
+		t.b._retryTimer = null;
+		final(t.b, "  \n ");
+		await settle();
+		expect(sent).toEqual([]);
+	});
+});
+
+describe("bridge delivers the model reply byte-identical", () => {
+	test("50 runs, no phrase from any list added", async () => {
+		const reply = "Build is green.\n\nTwo files changed.";
+		for (let i = 0; i < 50; i++) {
+			sent.length = 0;
+			const t = make();
+			final(t.b, reply);
+			await settle();
+			expect(sent).toEqual([reply]);
+			expect(t.b.agentBusy).toBe(false);
+		}
 	});
 });

@@ -814,9 +814,7 @@ export const VOICE_NEEDS_LOCAL =
  * The one operator whose voice notes are processed in a group, for this rollout (C-G2).
  * On top of TELEGRAM_OPERATOR_USER_IDS, never instead of it.
  */
-export function groupVoiceOperatorId(
-	env: Record<string, string | undefined> = process.env,
-): string {
+export function groupVoiceOperatorId(env: Record<string, string | undefined> = process.env): string {
 	return (env.TELEGRAM_GROUP_VOICE_OPERATOR_ID ?? "").trim();
 }
 export const GROUP_VOICE_MAX_SECONDS = 60;
@@ -1374,6 +1372,18 @@ class TelegramDaemonBridge {
 
 		switch (event) {
 			case "agent:stream":
+				// An empty or whitespace-only final reply is a failed attempt, never an
+				// answer: go straight to the next retry step instead of waiting out the
+				// timer or posting a blank message.
+				if (
+					payload.final &&
+					this.agentBusy &&
+					this._retryTimer &&
+					stripReasoning(String(payload.chunk ?? "")).trim() === ""
+				) {
+					this.failAttempt();
+					break;
+				}
 				if (payload.final && payload.chunk) {
 					this.agentBusy = false;
 					if (this._retryTimer) {
@@ -1381,6 +1391,7 @@ class TelegramDaemonBridge {
 						this._retryTimer = null;
 					}
 					const answer = stripReasoning(payload.chunk);
+					if (answer.trim() === "") break;
 					tgSend(this.config.telegramToken, this.replyChat(), answer);
 					this.maybeSpeak(answer)
 						.catch(() => {})
@@ -2771,6 +2782,7 @@ class TelegramDaemonBridge {
 	 * The last fallback says plainly that no answer was produced and why.
 	 */
 	private retryPrompt(originalText: string, attempt: number): void {
+		this._retryState = { text: originalText, attempt };
 		const plan = retryPlan(originalText, attempt);
 
 		if (plan.final) {
@@ -2805,6 +2817,19 @@ class TelegramDaemonBridge {
 	}
 
 	private _retryTimer: ReturnType<typeof setTimeout> | null = null;
+	private _retryState: { text: string; attempt: number } | null = null;
+
+	/** The current attempt came back empty: drop its timer and move to the next retry step. */
+	private failAttempt(): void {
+		const state = this._retryState;
+		if (this._retryTimer) {
+			clearTimeout(this._retryTimer);
+			this._retryTimer = null;
+		}
+		if (!state) return;
+		this.freshSession();
+		this.retryPrompt(state.text, state.attempt + 1);
+	}
 
 	/** The operator's private chat with the bot (a DM chat id is the user id). */
 	private operatorDm(): string | null {

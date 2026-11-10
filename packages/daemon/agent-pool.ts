@@ -6,7 +6,6 @@
  */
 
 import { Agent } from "../eight/agent";
-import { isPlainReplyChannel } from "../eight/agent-scopes";
 import { sessionApiKey } from "../eight/failover-provider-config";
 import { LOCAL_PROVIDERS } from "../eight/registry";
 import type { AgentConfig, AgentEventCallbacks } from "../eight/types";
@@ -567,7 +566,6 @@ export class AgentPool {
 			// maker-checker gate enforces at the executor: branch pushes auto-approve
 			// (audited), but rm / push-to-main / credentials / deploy hard-block.
 			unattended: channel === "delegation",
-			plainReplies: isPlainReplyChannel(channel),
 		};
 
 		const agent = new Agent(agentConfig);

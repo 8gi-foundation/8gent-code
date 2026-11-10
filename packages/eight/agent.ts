@@ -117,7 +117,7 @@ import {
 } from "../tools/eight-browser";
 import { type Evidence, EvidenceCollector, summarizeEvidence } from "../validation/evidence";
 import { reviewTurn, turnReviewEnabled } from "../verify/turn-review";
-import { isFlavorExempt, isNoToolScope, isVerbatimScope } from "./agent-scopes";
+import { isNoToolScope, isVerbatimScope } from "./agent-scopes";
 import { type Settings, computeAutoTune } from "./auto-tune";
 import { createClient } from "./clients";
 import {
@@ -262,15 +262,7 @@ import {
 import { resolveHome } from "../core/home";
 import { BRAND } from "../personality/brand.js";
 // Personality voice — the infinite gentleman
-import {
-	COMPLETION_PHRASES,
-	ERROR_PHRASES,
-	GREETINGS,
-	PERSONALITY,
-	flavorResponse,
-	voice as personalityVoice,
-	wantsBareReply,
-} from "../personality/voice.js";
+import { COMPLETION_PHRASES, ERROR_PHRASES, GREETINGS, PERSONALITY } from "../personality/voice.js";
 import {
 	CONTEXT_NOTE_HEADER,
 	type SentSections,
@@ -2535,17 +2527,6 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					.filter((p) => p.trim() !== "")
 					.join("\n\n")
 			: gated.content;
-		const flavor = personalityVoice.getFlavor("complete");
-		// Never flavor a Table reply. The officer speaking is Karen or Rishi, not
-		// 8gent, and flavorResponse staples a random COMPLETION_PHRASE ("Consider
-		// it done. Magnificently.", "As expected, excellence prevails.") onto
-		// every third reply. In a channel that reads as a fabricated completion
-		// claim - it appeared verbatim in the live corpus attached to an honest
-		// refusal, directly undercutting the sentence before it. Those taglines
-		// were previously assumed to be an emergent tic of the small local
-		// models; they are packages/personality/voice.ts, appended right here.
-		// Same for a reply carrying "[harness] Not verified" lines: the tool log
-		// contradicts part of it, so no completion tagline goes on the end.
 		// A turn the loop itself says is not done (claims contradicted by the tool
 		// log, or stopped early) is a failed turn for `8gent run`'s exit code
 		// (#3899). Structured: set from the loop's result, never from reply text.
@@ -2562,16 +2543,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				...(agentResult.unverified.length > 0 ? { unverified: agentResult.unverified } : {}),
 			};
 		}
-		const flavoredContent = fixCompletedLine(
-			gated.violated ||
-				breakerStop !== null ||
-				agentResult.unverified.length > 0 ||
-				isFlavorExempt(this.config) ||
-				wantsBareReply(this.turnTask) ||
-				quickResult !== null
-				? content
-				: flavorResponse(content, flavor),
-		).text;
+		// The reply is exactly what the model produced (after the honesty gate): no stock line is added.
+		const flavoredContent = fixCompletedLine(content).text;
 		this.messageHistory.push({ role: "assistant", content: flavoredContent });
 		this.sessionWriter.writeAssistantContent(stepNumber, [{ type: "text", text: flavoredContent }]);
 
@@ -4531,19 +4504,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				? emptyReplyNote(this.turnToolLedger.length, this.turnToolLedger)
 				: gatedNative.content;
 
-			// Apply personality voice flavoring to the response (never on a reply
-			// the honesty gate rewrote - no celebration on a failure).
-			const flavor = personalityVoice.getFlavor("complete");
-			// Table replies are never flavored - see the same guard on the
-			// text-tool path above for why a random COMPLETION_PHRASE in a channel
-			// reads as a fabricated completion claim.
-			const flavoredContent = fixCompletedLine(
-				gatedNative.violated ||
-					isVerbatimScope(this.config.agentScope) ||
-					wantsBareReply(this.turnTask)
-					? content
-					: flavorResponse(content, flavor),
-			).text;
+			// The reply is exactly what the model produced (after the honesty gate): no stock line is added.
+			const flavoredContent = fixCompletedLine(content).text;
 
 			this.messageHistory.push({ role: "assistant", content: flavoredContent });
 
