@@ -291,3 +291,30 @@ describe("notices carried on a chat message", () => {
 		]);
 	});
 });
+
+describe("all providers failed keeps each reason (#179)", () => {
+	const text = [
+		"All providers exhausted (2 attempted):",
+		"  - ollama/qwen3:14b: connection refused",
+		"  - minimax/minimax-m2: timed out after 300 seconds",
+		"next: start ollama, then run /provider to check it",
+	].join("\n");
+
+	test("each provider tried is its own line, in order", () => {
+		const r = classifyError(text);
+		expect(r.cause).toBe("all providers failed (2 tried)");
+		expect(r.detail).toEqual([
+			"ollama/qwen3:14b: connection refused",
+			"minimax/minimax-m2: timed out after 300 seconds",
+		]);
+		const lines = errorLines(r, 80);
+		expect(lines).toContain("  ollama/qwen3:14b: connection refused");
+		expect(lines).toContain("  minimax/minimax-m2: timed out after 300 seconds");
+	});
+
+	test("the next line is the one built from the reasons", () => {
+		const r = classifyError(text);
+		expect(r.next).toBe("start ollama, then run /provider to check it");
+		expect(errorLines(r, 80).join("\n")).not.toContain("send again");
+	});
+});

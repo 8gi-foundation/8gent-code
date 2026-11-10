@@ -12,7 +12,15 @@ import {
 	recordCall,
 	updateCall,
 } from "./locality";
-import { LocalOnlyRefusal, type WireDeps, bodySize, guardFetch, usageFrom } from "./locality-wire";
+import {
+	LocalOnlyRefusal,
+	type WireDeps,
+	bodySize,
+	cloudReasonLine,
+	guardFetch,
+	setCloudReason,
+	usageFrom,
+} from "./locality-wire";
 
 let dir: string;
 let ledger: string;
@@ -430,5 +438,42 @@ describe("ledger read is a tail", () => {
 		expect(got.length).toBeLessThan(n);
 		expect(got.at(-1)?.tokensIn).toBe(n);
 		expect(got.length).toBeGreaterThan(1000);
+	});
+});
+
+describe("the cloud notice states one reason (#179)", () => {
+	const url = "https://api.minimax.io/v1/chat/completions";
+
+	test("a provider the person picked for the tab says so, and nothing else", async () => {
+		setCloudReason("minimax", cloudReasonLine({ picked: true, localFailures: [] }));
+		const { f, notices } = rig("local-first");
+		await post(f, url);
+		setCloudReason("minimax", null);
+		expect(notices[0]).toContain("you picked it for this tab");
+		expect(notices[0]).not.toContain("no local provider");
+		expect(notices[0]).not.toContain(" or ");
+	});
+
+	test("a provider reached after local ones failed says why they could not serve it", async () => {
+		setCloudReason(
+			"minimax",
+			cloudReasonLine({
+				picked: false,
+				localFailures: [{ provider: "ollama", reason: "connection refused" }],
+			}),
+		);
+		const { f, notices } = rig("local-first");
+		await post(f, url);
+		setCloudReason("minimax", null);
+		expect(notices[0]).toContain("no local provider could serve this (ollama: connection refused)");
+		expect(notices[0]).not.toContain("you picked it");
+		expect(notices[0]).not.toContain(" or ");
+	});
+
+	test("a call with no recorded reason never joins two causes", async () => {
+		const { f, notices } = rig("local-first");
+		await post(f, url);
+		expect(notices[0]).not.toContain(" or ");
+		expect(notices[0]).not.toContain("you picked it");
 	});
 });

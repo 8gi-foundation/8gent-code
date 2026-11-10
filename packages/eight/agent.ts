@@ -90,10 +90,13 @@ import {
 	type FailoverChannel,
 	type FailoverEntry,
 	ModelFailover,
+	type ModelFailoverOptions,
 	NoAllowedProviderError,
 	NoCredentialedProviderError,
+	isHostedProvider,
 } from "../providers/failover";
-import { decideRoute, readPolicyState, recordCall } from "../providers/locality";
+import { type RoutingPolicy, decideRoute, readPolicyState, recordCall } from "../providers/locality";
+import { cloudReasonLine, emitNotice, setCloudReason } from "../providers/locality-wire";
 import { callLocalModelWithReroute, resolveToolCapableModel } from "../providers/model-reroute";
 import { extractBranchName, extractCommitHash } from "../reporting";
 import { type RunLogEntry, appendRun } from "../reporting/runlog";
@@ -3980,7 +3983,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			const failover = this.turnFailover();
 			const affinityOn = failover.affinityEnabled;
 			const tried = new Set<string>();
-			const errors: Array<{ provider: string; model: string; error: string }> = [];
+			const errors: ProviderFailure[] = [];
+			const reasonSet = new Set<string>();
+			const failoverOpts: ModelFailoverOptions = {
+				hasCredentials: (p) => getProviderManager().hasCredentials(p),
+			};
 
 			let currentEntry: FailoverEntry = {
 				model: agentConfig.provider.model,
@@ -4033,6 +4040,20 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					provider: providerConfigForStep(providerConfig, currentEntry),
 				};
 				const agent = createEightAgent(stepConfig);
+				// The cloud notice states why this provider is called: the person's pick for
+				// the tab, or the local providers that failed first.
+				if (isHostedProvider(currentEntry.provider)) {
+					setCloudReason(
+						currentEntry.provider,
+						cloudReasonLine({
+							picked: currentEntry.provider === askedEntry.provider,
+							localFailures: errors
+								.filter((e) => !isHostedProvider(e.provider))
+								.map((e) => ({ provider: e.provider, reason: failureReason(e.error) })),
+						}),
+					);
+					reasonSet.add(currentEntry.provider);
+				}
 
 				for (let attempt = 1; attempt <= RATE_LIMIT_ATTEMPTS; attempt++) {
 					// Tracks whether THIS attempt's per-attempt timeout fired. When it
@@ -4176,7 +4197,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 								model: currentEntry.model,
 								attempt,
 								max: RATE_LIMIT_ATTEMPTS - 1,
-								cause: msg.slice(0, 200),
+								cause: scrubSecrets(msg.slice(0, 200)),
 								delayMs: delay,
 							});
 							await new Promise((r) => setTimeout(r, delay));
@@ -4202,7 +4223,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 								model: currentEntry.model,
 								attempt: 1,
 								max: 1,
-								cause: msg.slice(0, 200),
+								cause: scrubSecrets(msg.slice(0, 200)),
 								delayMs: AFFINITY_GRACE_MS,
 							});
 							await new Promise((r) => setTimeout(r, AFFINITY_GRACE_MS));
@@ -4221,7 +4242,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						failover.markDown(currentEntry.model, currentEntry.provider);
 						if (affinityOn) this.affinityDown.push({ ...currentEntry });
 						// No allowed next hop (hosted off, #3710) ends the chain like exhaustion.
-						const next = tryResolve(failover, currentEntry, channel, this.sessionId);
+						const next = fallThroughHop(
+							failover,
+							currentEntry,
+							askedEntry,
+							channel,
+							failoverOpts,
+							errors,
+							this.sessionId,
+						);
 						if (next.model === currentEntry.model && next.provider === currentEntry.provider) {
 							break outer; // chain exhausted
 						}
@@ -4237,7 +4266,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							model: currentEntry.model,
 							attempt: 1,
 							max: 1,
-							cause: msg.slice(0, 200),
+							cause: scrubSecrets(msg.slice(0, 200)),
 							next: `${next.provider}/${next.model}`,
 						});
 						this.announceFailover(askedEntry, next);
@@ -4249,19 +4278,28 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 			this.abortController = null;
 
+			for (const p of reasonSet) setCloudReason(p, null);
 			if (!resolved) {
 				const last = errors[errors.length - 1];
 				if (this.config.providerPinned && last) {
-					throw pinnedProviderError(last.provider, last.model, last.error);
+					throw pinnedProviderError(last.provider, last.model, scrubSecrets(last.error));
 				}
-				const summary = errors.map((e) => `  - ${e.provider}/${e.model}: ${e.error}`).join("\n");
-				// Say why there was no next hop: providers failover skipped for want of a key.
-				const skipped = failover.skippedForCredentials(askedEntry.model, channel);
-				const skippedNote = skipped.length
-					? `\nNext provider not tried, no API key: ${skipped.join(", ")}. Add one with /apikeys so 8gent can fail over.`
-					: "";
 				throw new Error(
-					`All providers exhausted (${errors.length} attempted):\n${summary || "  (no provider errors recorded)"}${skippedNote}`,
+					exhaustedMessage({
+						errors,
+						policy: readPolicyState().policy,
+						// Say why there was no next hop: providers failover skipped for want of a key.
+						skipped: failover.skippedForCredentials(askedEntry.model, channel),
+					}),
+				);
+			}
+			if (errors.length > 0) {
+				emitNotice(
+					answeredLine(
+						askedEntry,
+						{ model: agentConfig.provider.model, provider: agentConfig.provider.name },
+						errors,
+					),
 				);
 			}
 
@@ -5663,6 +5701,116 @@ function tryResolve(
 		}
 		throw err;
 	}
+}
+
+/**
+ * The hop after a failure (#179). The model's own chain first. A model with no chain of its
+ * own (a cloud model, a local model nobody wrote a chain for) used to end the turn here, with
+ * a local provider never asked. Then the legacy text chain anchored on the local default
+ * ("eight:latest", local entries before hosted, in its configured order) is walked, built with
+ * the same options, so the policy, the hosted opt-in and the allowlist apply to it unchanged:
+ * under local-only or without the hosted opt-in it holds no hosted entry. `down` are the
+ * entries that already failed this turn. Returns `current` when nothing is left.
+ */
+export function fallThroughHop(
+	primary: ModelFailover,
+	current: FailoverEntry,
+	asked: FailoverEntry,
+	channel: FailoverChannel,
+	opts: ModelFailoverOptions,
+	down: ReadonlyArray<FailoverEntry>,
+	sessionId?: string,
+): FailoverEntry {
+	const next = tryResolve(primary, current, channel, sessionId);
+	if (next.model !== current.model || next.provider !== current.provider) return next;
+	const chain = ModelFailover.defaultChains().text["eight:latest"];
+	if (!chain) return current;
+	const fallback = new ModelFailover({ text: { [asked.model]: chain }, computer: {} }, opts);
+	for (const d of down) fallback.markDown(d.model, d.provider);
+	try {
+		return fallback.resolve(asked.model, channel);
+	} catch (err) {
+		if (err instanceof NoAllowedProviderError || err instanceof NoCredentialedProviderError) {
+			return current;
+		}
+		throw err;
+	}
+}
+
+export interface ProviderFailure {
+	provider: string;
+	model: string;
+	error: string;
+}
+
+/** Keys and tokens an error text may carry: never printed (#179). */
+function scrubSecrets(text: string): string {
+	return text
+		.replace(/\bBearer\s+\S+/gi, "Bearer [hidden]")
+		.replace(/\b(?:sk|pk|rk|xox[abprs]|ghp|gho|ghs|AIza|eyJ)[-_A-Za-z0-9.]{8,}/g, "[hidden]")
+		.replace(
+			/\b(api[_-]?key|token|secret|password|authorization)(["']?\s*[:=]\s*["']?)[^\s"',;]{6,}/gi,
+			"$1$2[hidden]",
+		);
+}
+
+/** One short reason for a provider error, in plain words. Unknown errors keep their first line, scrubbed. */
+export function failureReason(error: string): string {
+	const wait = /(?:no progress for|no reply for|turn budget of)\s+(\d+)s/i.exec(error);
+	if (wait) return `timed out after ${wait[1]} seconds`;
+	if (/ECONNREFUSED|connection refused/i.test(error)) return "connection refused";
+	if (/\b429\b|rate[ -]?limit|too many requests|Provider returned error/i.test(error)) {
+		return "rate limited";
+	}
+	if (/\b40[13]\b|api key|unauthori[sz]ed|forbidden|not signed in|authentication/i.test(error)) {
+		return "not signed in";
+	}
+	if (/\b404\b|not found|not installed|no such model|unknown model/i.test(error)) {
+		return "model not found";
+	}
+	if (/timed? ?out|timeout|ETIMEDOUT/i.test(error)) return "timed out";
+	if (/ENOTFOUND|EAI_AGAIN|fetch failed|ECONNRESET|socket hang up/i.test(error)) {
+		return "could not connect";
+	}
+	const line = scrubSecrets(error).split("\n")[0].trim();
+	return line.length > 80 ? `${line.slice(0, 79)}…` : line || "failed";
+}
+
+function nextStepFor(f: ProviderFailure | undefined): string {
+	if (!f) return "run /provider to see what is set up";
+	const why = failureReason(f.error);
+	if (why === "connection refused") return `start ${f.provider}, then run /provider to check it`;
+	if (why === "not signed in") return `run /apikeys to sign in to ${f.provider}`;
+	if (why === "model not found") return `run /model to pick one ${f.provider} has`;
+	if (why === "rate limited") return `wait a minute, then send again to ${f.provider}`;
+	return `run /provider to check ${f.provider}`;
+}
+
+/** The turn's error when every provider failed: each one tried, in order, with its reason. */
+export function exhaustedMessage(i: {
+	errors: ReadonlyArray<ProviderFailure>;
+	policy: RoutingPolicy;
+	skipped: ReadonlyArray<string>;
+}): string {
+	const lines = i.errors.map((e) => `  - ${e.provider}/${e.model}: ${failureReason(e.error)}`);
+	const skipped = i.skipped.length
+		? `\nNext provider not tried, no API key: ${i.skipped.join(", ")}. Add one with /apikeys so 8gent can fail over.`
+		: "";
+	const held =
+		i.policy === "local-only"
+			? "\nNothing was sent to a cloud provider: routing policy is local-only."
+			: "";
+	return `All providers exhausted (${i.errors.length} attempted):\n${lines.join("\n") || "  (no provider errors recorded)"}${skipped}${held}\nnext: ${nextStepFor(i.errors[0])}`;
+}
+
+/** One line when a later provider answered: who, and why the first did not. */
+export function answeredLine(
+	asked: FailoverEntry,
+	answered: FailoverEntry,
+	errors: ReadonlyArray<ProviderFailure>,
+): string {
+	const first = errors[0] ?? { ...asked, error: "failed" };
+	return `${answered.provider}/${answered.model} answered. ${first.provider}/${first.model} did not: ${failureReason(first.error)}.`;
 }
 
 /**
