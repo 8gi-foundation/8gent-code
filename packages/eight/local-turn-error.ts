@@ -116,7 +116,7 @@ export function describeLocalTurnFailure(
 		if (err instanceof TurnTimeoutError && err.kind === "first-output") {
 			return {
 				kind,
-				message: `The local model (${ctx.endpoint}) sent nothing for ${seconds} seconds, so the turn was stopped. Press Esc and send again, or pick a smaller model with /model.`,
+				message: `The local model (${ctx.endpoint}) sent nothing for ${seconds} seconds, so the turn was stopped. Press Esc and send again, or pick a smaller model with /model. To wait longer, set EIGHT_FIRST_TOKEN_MS (milliseconds).`,
 				reason: `timeout: no first output for ${seconds} seconds (${raw})`,
 			};
 		}

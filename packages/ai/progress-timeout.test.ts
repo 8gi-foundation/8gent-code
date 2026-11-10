@@ -202,8 +202,8 @@ describe("a provider that goes silent (#3657)", () => {
 		const turn = track(call([{ role: "user", content: "hi" }]));
 		await settle();
 
-		// One reasoning delta inside the first-output grace (#133), then nothing.
-		await clock.advance(60_000);
+		// One reasoning delta after two minutes, then nothing.
+		await clock.advance(120_000);
 		provider.send(sse({ choices: [{ index: 0, delta: { reasoning_content: "hm" } }] }));
 		await settle();
 		expect(turn.settled).toBe(false);
@@ -215,7 +215,7 @@ describe("a provider that goes silent (#3657)", () => {
 		// The gap elapses: stopped, long before the 20 min ceiling.
 		await clock.advance(1);
 		expect(turn.settled).toBe(true);
-		expect(clock.now).toBe(60_000 + idleMs);
+		expect(clock.now).toBe(120_000 + idleMs);
 		expect(clock.now).toBeLessThan(ceilingMs);
 		expect(turn.error).toBeInstanceOf(TurnTimeoutError);
 		const err = turn.error as TurnTimeoutError;

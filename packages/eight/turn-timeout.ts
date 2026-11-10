@@ -62,7 +62,7 @@ export class TurnTimeoutError extends Error {
 		if (kind === "first-output") {
 			// #133: nothing at all came back. Say what to do in one line.
 			super(
-				`Provider attempt timed out after ${timeoutMs}ms${label ? ` (${label})` : ""}: no first output for ${Math.round(timeoutMs / 1000)}s. Press Esc and send again, or pick a smaller model with /model.`,
+				`Provider attempt timed out after ${timeoutMs}ms${label ? ` (${label})` : ""}: no first output for ${Math.round(timeoutMs / 1000)}s. Press Esc and send again, or pick a smaller model with /model. To wait longer, set EIGHT_FIRST_TOKEN_MS (milliseconds).`,
 			);
 			this.name = "TurnTimeoutError";
 			this.timeoutMs = timeoutMs;
@@ -260,7 +260,8 @@ export const PREFILL_FLOOR_TOKENS_PER_S = 50;
  * arrive). So the wait is bounded by this grace plus the prefill estimate
  * instead of the 300 s idle gap plus prefill, which left a silent 411 s for a
  * 14k token prompt. 90 s covers a cold load of a large local model from disk;
- * a longer prompt still earns its prefill time. EIGHT_FIRST_TOKEN_MS overrides.
+ * a longer prompt still earns its prefill time. Never below the idle gap, so a
+ * short prompt waits as long as it did before. EIGHT_FIRST_TOKEN_MS overrides.
  */
 export const FIRST_OUTPUT_GRACE_MS = 90_000;
 
@@ -292,8 +293,14 @@ export function resolveFirstTokenMs(args: {
 	const tokens = Math.max(0, args.promptChars) / CHARS_PER_TOKEN;
 	const prefillMs = Math.ceil((tokens / PREFILL_FLOOR_TOKENS_PER_S) * 1000);
 	const bound = Math.max(args.idleMs, Math.min(args.ceilingMs, args.idleMs + prefillMs));
-	// The old bound stays the upper limit; the grace-based one is the lower, reported as "first-output".
-	return clampTimerMs(Math.min(bound, FIRST_OUTPUT_GRACE_MS + prefillMs));
+	// The old bound stays the upper limit. The grace-based bound never goes below
+	// the idle gap, so a short prompt keeps what main gave it (a cold load of a
+	// large model, or a thinking model, may stay silent past the grace). Only a
+	// prompt whose prefill estimate pushes past the idle gap is cut sooner.
+	// The estimate is chars/4 over string content: code is nearer 3 chars per
+	// token, so a dense prompt is undercounted; EIGHT_FIRST_TOKEN_MS moves it.
+	const graceBound = FIRST_OUTPUT_GRACE_MS + prefillMs;
+	return clampTimerMs(graceBound <= args.idleMs ? bound : Math.min(bound, graceBound));
 }
 
 /**

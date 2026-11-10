@@ -104,14 +104,18 @@ describe("resolveFirstTokenMs", () => {
 	const ceiling = 1_200_000;
 	const prefillOf = (tokens: number) => Math.ceil((tokens / PREFILL_FLOOR_TOKENS_PER_S) * 1000);
 
-	it("an empty prompt gets the grace, not the 300 s idle gap (#133)", () => {
+	it("a short prompt keeps the idle gap main gave it, the grace never lowers it (#133)", () => {
 		expect(resolveFirstTokenMs({ idleMs: idle, promptChars: 0, ceilingMs: ceiling, env: {} })).toBe(
-			FIRST_OUTPUT_GRACE_MS,
+			idle,
 		);
-		// 500 tokens at the floor rate: 10 s more.
+		// 500 tokens at the floor rate: 10 s more, as on main.
 		expect(
 			resolveFirstTokenMs({ idleMs: idle, promptChars: 2_000, ceilingMs: ceiling, env: {} }),
-		).toBe(FIRST_OUTPUT_GRACE_MS + 10_000);
+		).toBe(idle + 10_000);
+		// 10,000 tokens: grace plus prefill is 290 s, still under the idle gap, so no cut.
+		expect(
+			resolveFirstTokenMs({ idleMs: idle, promptChars: 40_000, ceilingMs: ceiling, env: {} }),
+		).toBeGreaterThanOrEqual(idle);
 	});
 
 	it("a 14,020 token prompt is cut well under the old 411 s (#133)", () => {
@@ -167,7 +171,7 @@ describe("resolveFirstTokenMs", () => {
 				ceilingMs: ceiling,
 				env: { EIGHT_FIRST_TOKEN_MS: "soon" },
 			}),
-		).toBe(FIRST_OUTPUT_GRACE_MS);
+		).toBe(idle);
 	});
 });
 
@@ -217,6 +221,7 @@ describe("modelFetch firstByteMs: prefill is not idle time", () => {
 		expect((err as Error).message).toContain(
 			"Press Esc and send again, or pick a smaller model with /model.",
 		);
+		expect((err as Error).message).toContain("EIGHT_FIRST_TOKEN_MS");
 		expect(elapsed).toBeGreaterThanOrEqual(550);
 		expect(elapsed).toBeLessThan(3_000);
 	});

@@ -218,6 +218,6 @@ describe("first-output timeout (#133)", () => {
 		expect(f.kind).toBe("timeout");
 		expect(f.message).toContain("Press Esc and send again, or pick a smaller model with /model.");
 		expect(f.message).toContain("so the turn was stopped.");
-		expect(f.message).not.toContain("EIGHT_");
+		expect(f.message).toContain("EIGHT_FIRST_TOKEN_MS");
 	});
 });
