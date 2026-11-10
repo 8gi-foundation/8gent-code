@@ -36,7 +36,7 @@ import {
 	isThinkingUnsupported,
 	thinkingRequestFields,
 } from "../providers/thinking-request";
-import { noteStreamText } from "../specifications/session/durable-ledger";
+import { discardStreamText, noteStreamText } from "../specifications/session/durable-ledger";
 import { type ModelFetchTimers, modelFetch } from "./model-fetch";
 import { OutputCapError, type TextToolReply } from "./text-tool-client";
 import type { TextTool } from "./text-tool-loop";
@@ -643,6 +643,25 @@ export class StreamedReplyError extends Error {
 	}
 }
 
+/** A stream rule matched mid-stream (#72): the read stopped; `correction` is the note to retry with. */
+export class StreamRuleHit extends Error {
+	constructor(readonly correction: string) {
+		super("stream rule matched");
+		this.name = "StreamRuleHit";
+	}
+}
+
+/**
+ * Stream rules (#72) see a bounded tail, never the whole reply: the new delta
+ * (at most STREAM_GUARD_MAX_DELTA of it) plus STREAM_GUARD_OVERLAP characters
+ * before it, so a phrase split across deltas is still seen. Checking the whole
+ * reply on every delta is quadratic in its length.
+ */
+export const STREAM_GUARD_OVERLAP = 256;
+export const STREAM_GUARD_MAX_DELTA = 2048;
+/** Total time the rules may take on one streamed reply; past it the rest goes unchecked. */
+export const STREAM_GUARD_BUDGET_MS = 100;
+
 /** Streamed tool calls are merged by `index`; anything outside 0..cap-1 is not trusted. */
 const MAX_STREAMED_TOOL_CALLS = 128;
 
@@ -659,13 +678,17 @@ const MAX_STREAMED_TOOL_CALLS = 128;
  * a complete reply. A tool-call `index` that is not a small non-negative
  * integer falls back to the call's position in its delta.
  */
-export async function readStreamedChatCompletion(res: Response): Promise<{
+export async function readStreamedChatCompletion(
+	res: Response,
+	guard?: (textSoFar: string) => string | null,
+): Promise<{
 	choices: Array<{ message: { content: string; tool_calls?: unknown[] }; finish_reason?: unknown }>;
 	usage?: unknown;
 }> {
 	let content = "";
 	let finishReason: unknown;
 	let usage: unknown;
+	let guardMs = 0;
 	type StreamedCall = { id?: string; type: string; function: { name: string; arguments: string } };
 	const calls = new Map<number, StreamedCall>();
 	let done = false;
@@ -694,6 +717,15 @@ export async function readStreamedChatCompletion(res: Response): Promise<{
 		const delta = choice.delta ?? {};
 		if (typeof delta.content === "string") {
 			content += delta.content;
+			// #72: a matching rule stops the read; leaving the loop cancels the body.
+			// Checked before the delta is noted, so the matching text never reaches the durable turn.
+			if (guard && guardMs < STREAM_GUARD_BUDGET_MS) {
+				const take = Math.min(delta.content.length, STREAM_GUARD_MAX_DELTA) + STREAM_GUARD_OVERLAP;
+				const t0 = performance.now();
+				const hit = guard(content.slice(-take));
+				guardMs += performance.now() - t0;
+				if (hit) throw new StreamRuleHit(hit);
+			}
 			noteStreamText(delta.content); // durable turns slice 2: a kill mid-stream keeps this
 		}
 		if (!Array.isArray(delta.tool_calls)) continue;
@@ -878,6 +910,14 @@ export function buildTextToolCall(opts: {
 	idleMs?: number | null;
 	/** Timer source for the step's limits. Default: the global timers. */
 	timers?: ModelFetchTimers;
+	/**
+	 * Stream rules (#72). Called with the tail of the reply text so far while it
+	 * streams (see STREAM_GUARD_OVERLAP / STREAM_GUARD_MAX_DELTA); a
+	 * returned string aborts that generation and the step is retried once, with
+	 * the string appended as a system note. One retry per call function (one
+	 * turn), and the retry is not checked again. Undefined: off.
+	 */
+	streamGuard?: (textSoFar: string) => string | null;
 }): (messages: ChatMessage[]) => Promise<string | TextToolReply> {
 	const endpoint = opts.endpoint || resolveTextToolEndpoint(opts.provider, opts.baseUrl);
 	const temperature = opts.temperature ?? 0.2;
@@ -954,7 +994,10 @@ export function buildTextToolCall(opts: {
 	// One completion: POST, surface a non-2xx as an error, report real usage,
 	// and return the assistant text and structured calls alongside what we need
 	// to judge the reply.
-	const attempt = async (messages: ChatMessage[]): Promise<Attempt> => {
+	const attempt = async (
+		messages: ChatMessage[],
+		guard?: (textSoFar: string) => string | null,
+	): Promise<Attempt> => {
 		const t0 = performance.now();
 		if (!thinkingReported) {
 			thinkingReported = true;
@@ -990,7 +1033,7 @@ export function buildTextToolCall(opts: {
 		const sse = streamed && !isJsonReply(res);
 		if (sse) {
 			try {
-				streamedData = await readStreamedChatCompletion(res);
+				streamedData = await readStreamedChatCompletion(res, guard);
 			} catch (e) {
 				// A failure after the 200 is judged like the HTTP 500 it would have
 				// been non-streamed, so parser-failure recovery still runs.
@@ -1123,8 +1166,24 @@ export function buildTextToolCall(opts: {
 		return { ok: true, content };
 	};
 
+	// #72: the first guarded stream that matches costs this call function (one
+	// turn) its single retry; the retry itself is read unguarded.
+	let ruleRetried = false;
+	const guardedAttempt = async (messages: ChatMessage[]): Promise<Attempt> => {
+		if (!opts.streamGuard || ruleRetried) return attempt(messages);
+		try {
+			return await attempt(messages, opts.streamGuard);
+		} catch (e) {
+			if (!(e instanceof StreamRuleHit)) throw e;
+			ruleRetried = true;
+			// The aborted draft is not the reply: only the corrected one is kept in the durable turn.
+			discardStreamText();
+			return attempt([...messages, { role: "system", content: e.correction }]);
+		}
+	};
+
 	return async (messages: ChatMessage[]): Promise<string | TextToolReply> => {
-		const first = await attempt(messages);
+		const first = await guardedAttempt(messages);
 		let firstFailure: string;
 		if (first.ok) {
 			if (!swallowed(first)) return reply(first);

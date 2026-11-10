@@ -330,6 +330,7 @@ import { cdPrefixShape } from "../permissions/cd-prefix";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { isShellToolName } from "../permissions/shell-tools";
 import { scrub } from "./secret-scanner";
+import { streamGuard } from "./stream-rules";
 
 /** One warning per process for a bad EIGHT_BROWSER_PROFILE (#3622). */
 let browserProfileWarned = false;
@@ -2187,6 +2188,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					? [{ role: "system" as const, content: this.offBoxSystemPrompt() }, ...messages.slice(1)]
 					: messages;
 			const rawCall = buildTextToolCall({
+				// #72: optional ~/.8gent/stream-rules.json; undefined (off) without it.
+				streamGuard: streamGuard(),
 				provider,
 				model,
 				// Honour this session's pinned local endpoint (e.g. a Table officer on
