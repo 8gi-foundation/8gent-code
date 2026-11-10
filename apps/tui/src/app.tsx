@@ -107,6 +107,7 @@ import {
 	ProviderSelector,
 	SelectInput,
 	type SelectOption,
+	pickerHidesChrome,
 } from "./components/select-input.js";
 import { playSound, soundManager } from "./components/sound-effects.js";
 import { AnimatedStatusVerb } from "./components/status-verb.js";
@@ -9266,10 +9267,14 @@ export function App({
 		!nameQuestionOpen &&
 		!isBubbleNavMode &&
 		!bgPanelOpen;
+	const pickerCrowded =
+		PICKER_VIEWS.has(viewMode) && activeTabType === "chat" && pickerHidesChrome(viewport.height);
+	const showNowStrip =
+		!tabBody && !pickerCrowded && !(slashMenuOpen && slashMenuCompact(viewport.height));
 	return (
 		<ADHDModeContext.Provider value={{ enabled: adhdMode, ratio: 0.5 }}>
 			<FixedFrame>
-				{keysUp ? (
+				{pickerCrowded ? null : keysUp ? (
 					<Box flexShrink={0}>
 						<KeysUpTitleRow
 							tabs={workspaceTabs.tabs}
@@ -9339,7 +9344,7 @@ export function App({
 							))}
 
 						<Box flexGrow={1} flexDirection="column" minWidth={0}>
-							{!tabBody && !(slashMenuOpen && slashMenuCompact(viewport.height)) && (
+							{showNowStrip && (
 								<LiveFocalStripWithGoal
 									goalClient={goalClient}
 									adhdMode={adhdMode}
