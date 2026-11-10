@@ -1180,3 +1180,84 @@ describe("claims about files written and tests added", () => {
 		expect(mixed.writtenOnly).toBe(false);
 	});
 });
+
+describe("file and test claims: every writer counts, other languages are read or left alone", () => {
+	const CWD = "/work/repo";
+	const run = (content: string, ledger: ToolLedgerEntry[]) =>
+		unbackedActionClaims(content, ledger, undefined, CWD);
+
+	it("counts the document, media and notebook writers as writes", () => {
+		expect(run("I created report.pdf.", [ok("make_pdf", { markdown: "# x" })])).toEqual([]);
+		expect(run("I created deck.docx.", [ok("make_docx", { spec: {} })])).toEqual([]);
+		expect(
+			run("I created sheet.xlsx.", [ok("make_xlsx", { spec: {}, out: "sheet.xlsx" })]),
+		).toEqual([]);
+		expect(run("I created slides.pptx.", [ok("make_pptx", { spec: {} })])).toEqual([]);
+		expect(run("I created deck.mp4.", [ok("render_video_deck", { out: "deck.mp4" })])).toEqual([]);
+		expect(run("I wrote todo.md.", [ok("write_notes", { title: "t", content: "c" })])).toEqual([]);
+		expect(
+			run("I edited nb.ipynb.", [ok("notebook_edit_cell", { path: "nb.ipynb", cellIndex: 0 })]),
+		).toEqual([]);
+	});
+
+	it("still flags a document claim when no writer ran or it named another file", () => {
+		expect(run("I created report.pdf.", [ok("read_file", { path: "a.ts" })])).toHaveLength(1);
+		expect(run("I created b.xlsx.", [ok("make_xlsx", { spec: {}, out: "a.xlsx" })])).toHaveLength(
+			1,
+		);
+	});
+
+	it("counts Python, Go, Rust and Java test declarations", () => {
+		const py = ok("write_file", {
+			path: "tests/test_x.py",
+			content: "def test_empty():\n    pass\n\ndef test_b():\n    pass\n",
+		});
+		expect(run("I added two tests for empty input.", [py])).toEqual([]);
+		const go = ok("write_file", {
+			path: "x_test.go",
+			content: "func TestEmpty(t *testing.T) {}\n",
+		});
+		expect(run("I added a test for empty input.", [go])).toEqual([]);
+		const rs = ok("write_file", { path: "tests/x.rs", content: "#[test]\nfn empty() {}\n" });
+		expect(run("I added a test for empty input.", [rs])).toEqual([]);
+		expect(run("I added three tests.", [py])).toEqual([
+			"Not done in this turn: 3 tests (2 added).",
+		]);
+	});
+
+	it("stays silent for a test file in a language it cannot read", () => {
+		const lua = ok("write_file", { path: "tests/x_spec.lua", content: "check(1)\n" });
+		expect(run("I added tests for empty input.", [lua])).toEqual([]);
+	});
+
+	it("counts an assertion added inside an existing test", () => {
+		const edit = ok("edit_file", {
+			path: "src/f.test.ts",
+			oldText: "expect(f(1)).toBe(1);",
+			newText: "expect(f(1)).toBe(1);\n    expect(f(null)).toBe(0);",
+		});
+		expect(run("Added tests for null.", [edit])).toEqual([]);
+	});
+
+	it("counts a shell line sent to a terminal tab like a shell command", () => {
+		const tab = ok("write_terminal", { tabId: "default", input: "echo hi > a.txt" });
+		expect(run("I typed `echo hi > a.txt` into the terminal tab and wrote a.txt.", [tab])).toEqual(
+			[],
+		);
+		const send = ok("term_send", { sessionId: "s", text: "echo hi > b.txt" });
+		expect(run("I wrote b.txt.", [send])).toEqual([]);
+		const noWrite = ok("write_terminal", { tabId: "default", input: "ls" });
+		expect(run("I wrote a.txt.", [noWrite])).toHaveLength(1);
+	});
+
+	it("matches a shell write in another directory by its file name", () => {
+		const sh = ok("run_command", { command: "cd src && echo hi > out.txt" });
+		expect(run("I wrote src/out.txt.", [sh])).toEqual([]);
+	});
+
+	it("does not read a library name as a file", () => {
+		const add = ok("run_command", { command: "bun add next@15" });
+		expect(run("I updated to Next.js.", [add])).toEqual([]);
+		expect(run("I updated src/Next.js.", [add])).toHaveLength(1);
+	});
+});
