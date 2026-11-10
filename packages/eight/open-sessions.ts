@@ -1,0 +1,187 @@
+/**
+ * Open-session record (#196): which sessions were open when 8gent Code last
+ * stopped, so the next start can offer to bring them back.
+ *
+ * The conversation itself already survives a restart (session-store.ts, the
+ * /resume picker). What was missing is the one fact "this session was still
+ * open": a clean quit and a Mac restart look the same on disk. So each running
+ * process keeps one small file, <sessions dir>/open/<pid>.json, naming the
+ * session it has open. A deliberate quit removes it. A restart or a kill
+ * leaves it behind, and the next start finds it with no live process behind it.
+ *
+ * Local only, no secret in the file (ids, pid, boot time). Nothing here starts
+ * a session: offerRestore asks, default No, and does nothing without a person.
+ */
+
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { chatMessages } from "./session-messages.js";
+import { SessionStore, defaultSessionsDir, isSessionId, listSessions } from "./session-store.js";
+
+interface OpenRecord {
+	pid: number;
+	sessionId: string;
+	/** Machine boot time in epoch seconds, so a reused pid after a restart is not mistaken for a live process. */
+	bootAt: number;
+}
+
+export interface RestorableSession {
+	id: string;
+	name?: string;
+	cwd: string;
+	lastActiveAt: string;
+	/** The last thing the person typed, one line; empty when the record has none. */
+	lastUserMessage: string;
+}
+
+export interface OpenOpts {
+	dir?: string;
+	pid?: number;
+	bootAt?: number;
+}
+
+const BOOT_TOLERANCE_SECONDS = 120;
+
+export const currentBootAt = (): number => Math.round(Date.now() / 1000 - os.uptime());
+const openDir = (dir: string) => path.join(dir, "open");
+const recordFile = (dir: string, pid: number) => path.join(openDir(dir), `${pid}.json`);
+
+/** Record that this process has `sessionId` open. A later call replaces the earlier one. */
+export function markOpen(sessionId: string, opts: OpenOpts = {}): void {
+	if (!isSessionId(sessionId)) return;
+	const dir = opts.dir ?? defaultSessionsDir();
+	const pid = opts.pid ?? process.pid;
+	const rec: OpenRecord = { pid, sessionId, bootAt: opts.bootAt ?? currentBootAt() };
+	try {
+		fs.mkdirSync(openDir(dir), { recursive: true, mode: 0o700 });
+		fs.writeFileSync(recordFile(dir, pid), JSON.stringify(rec), { mode: 0o600 });
+	} catch {
+		// A read-only home must not stop the app; the session still saves on its own.
+	}
+}
+
+/** A deliberate quit: this process no longer has a session open. */
+export function markClosed(opts: OpenOpts = {}): void {
+	const dir = opts.dir ?? defaultSessionsDir();
+	fs.rmSync(recordFile(dir, opts.pid ?? process.pid), { force: true });
+}
+
+function readRecords(dir: string): Array<{ file: string; rec: OpenRecord }> {
+	let names: string[];
+	try {
+		names = fs.readdirSync(openDir(dir));
+	} catch {
+		return [];
+	}
+	const out: Array<{ file: string; rec: OpenRecord }> = [];
+	for (const n of names) {
+		const file = path.join(openDir(dir), n);
+		try {
+			const r = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<OpenRecord>;
+			if (Number.isInteger(r.pid) && isSessionId(r.sessionId) && typeof r.bootAt === "number") {
+				out.push({ file, rec: r as OpenRecord });
+			} else fs.rmSync(file, { force: true });
+		} catch {
+			fs.rmSync(file, { force: true });
+		}
+	}
+	return out;
+}
+
+function isRunning(rec: OpenRecord, bootAt: number): boolean {
+	if (Math.abs(rec.bootAt - bootAt) > BOOT_TOLERANCE_SECONDS) return false;
+	try {
+		process.kill(rec.pid, 0);
+		return true;
+	} catch (e) {
+		return (e as NodeJS.ErrnoException).code === "EPERM";
+	}
+}
+
+/**
+ * Sessions that were open when 8gent Code last stopped and have a conversation
+ * to come back to, newest first. A session held by a live process is left out,
+ * as is one with no messages. Reading only: nothing is removed here.
+ */
+export function restorableSessions(opts: OpenOpts = {}): RestorableSession[] {
+	const dir = opts.dir ?? defaultSessionsDir();
+	const bootAt = opts.bootAt ?? currentBootAt();
+	const records = readRecords(dir);
+	const live = new Set(records.filter((r) => isRunning(r.rec, bootAt)).map((r) => r.rec.sessionId));
+	const stale = new Set(
+		records.filter((r) => !isRunning(r.rec, bootAt)).map((r) => r.rec.sessionId),
+	);
+	const out: RestorableSession[] = [];
+	for (const s of listSessions({ sessionsDir: dir })) {
+		if (!stale.has(s.id) || live.has(s.id)) continue;
+		out.push({
+			id: s.id,
+			...(s.name !== undefined ? { name: s.name } : {}),
+			cwd: s.cwd,
+			lastActiveAt: s.lastActiveAt,
+			lastUserMessage: lastUserLine(s.id, dir),
+		});
+	}
+	return out;
+}
+
+/** Forget every record with no live process: the person has now been asked once. */
+export function forgetStale(opts: OpenOpts = {}): void {
+	const dir = opts.dir ?? defaultSessionsDir();
+	const bootAt = opts.bootAt ?? currentBootAt();
+	for (const { file, rec } of readRecords(dir)) {
+		if (!isRunning(rec, bootAt)) fs.rmSync(file, { force: true });
+	}
+}
+
+function lastUserLine(id: string, dir: string): string {
+	try {
+		const msgs = chatMessages(SessionStore.open(id, dir)?.messages() ?? []);
+		for (let i = msgs.length - 1; i >= 0; i--) {
+			if (msgs[i].role === "user") {
+				return String(msgs[i].content).replace(/\s+/g, " ").trim().slice(0, 120);
+			}
+		}
+	} catch {
+		// unreadable record: list the session without a last message
+	}
+	return "";
+}
+
+export interface RestoreIo {
+	/** True only with a person at the terminal. */
+	interactive: boolean;
+	write(line: string): void;
+	/** Resolves the person's answer line. */
+	ask(question: string): Promise<string>;
+}
+
+/**
+ * On start: say which sessions were open, ask about each (default No), and
+ * return the sessions the person accepted, newest first. Unattended returns [] and
+ * leaves the record alone, so the next interactive start still offers them.
+ */
+export async function offerRestore(io: RestoreIo, opts: OpenOpts = {}): Promise<RestorableSession[]> {
+	const found = restorableSessions(opts);
+	if (!io.interactive) return [];
+	if (found.length === 0) {
+		forgetStale(opts);
+		return [];
+	}
+	io.write(
+		found.length === 1
+			? "1 session was open when 8gent Code last stopped:"
+			: `${found.length} sessions were open when 8gent Code last stopped:`,
+	);
+	const accepted: RestorableSession[] = [];
+	for (const s of found) {
+		const label = s.name ? `${s.name} (${s.id})` : s.id;
+		const last = s.lastUserMessage ? ` last message: "${s.lastUserMessage}"` : "";
+		io.write(`  ${label}  ${s.cwd}  last active ${s.lastActiveAt}${last}`);
+		const a = (await io.ask("  Resume it? [y/N] ")).trim().toLowerCase();
+		if (a === "y" || a === "yes") accepted.push(s);
+	}
+	forgetStale(opts);
+	return accepted;
+}

@@ -18,6 +18,8 @@ import { markInkMounted } from "./lib/early-input.js";
 // Then the colour policy, so NO_COLOR holds for every byte Ink draws
 // (lib/colour-policy.ts).
 import "./lib/colour-startup.js";
+import { existsSync } from "node:fs";
+import { createInterface } from "node:readline/promises";
 import { render } from "ink";
 import React from "react";
 // Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
@@ -26,6 +28,7 @@ import React from "react";
 // react-doctor-disable-next-line react-doctor/no-barrel-import
 import { enableInfiniteMode } from "../../../packages/permissions/index.js";
 import { setDurableEnabled } from "../../../packages/specifications/session/durable-ledger.js";
+import { markClosed, offerRestore } from "../../../packages/eight/open-sessions.js";
 import { App } from "./app.js";
 import { startMouse } from "./lib/mouse-wiring.js";
 import { tuiRenderOptions } from "./lib/render-options.js";
@@ -79,14 +82,34 @@ if (process.stdout.isTTY) {
 // wheel. Installed before Ink so no mouse byte ever reaches its input parser.
 startMouse();
 
+// Sessions that were open when 8gent Code last stopped (#196): asked once, default No,
+// and never with nobody at the terminal. The first yes resumes here, in its own folder;
+// each further yes is named with the command that reopens it.
+let sessionResume = parsed.sessionResume;
+if (command === "repl" && sessionResume === undefined) {
+	const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+	const rl = interactive ? createInterface({ input: process.stdin, output: process.stdout }) : null;
+	const accepted = await offerRestore({
+		interactive,
+		write: (line) => console.log(line),
+		ask: (q) => (rl ? rl.question(q) : Promise.resolve("")),
+	}).finally(() => rl?.close());
+	for (const [i, s] of accepted.entries()) {
+		if (i === 0) {
+			sessionResume = s.id;
+			if (existsSync(s.cwd)) process.chdir(s.cwd);
+		} else console.log(`To reopen ${s.id}: cd ${s.cwd} && 8gent --resume ${s.id}`);
+	}
+}
+
 // Render the TUI
 bootTrace("ink-render-call");
-render(
+const instance = render(
 	<App
 		initialCommand={command}
 		args={passthroughArgs}
 		sessionName={parsed.sessionName}
-		sessionResume={parsed.sessionResume}
+		sessionResume={sessionResume}
 		cliProvider={parsed.provider}
 		cliModel={parsed.model}
 		cliAutoApprove={parsed.yes}
@@ -96,3 +119,5 @@ render(
 // Runs when render() returns, before Ink's useEffect attaches stdin: a stall
 // inside Ink's own mount is not covered by the watchdog.
 markInkMounted();
+// A deliberate quit closes the open-session record; a restart or a kill leaves it.
+void instance.waitUntilExit().then(() => markClosed());
