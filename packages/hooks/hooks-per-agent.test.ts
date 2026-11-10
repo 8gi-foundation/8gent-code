@@ -17,7 +17,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "hookdirs-")));
-afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
+const savedApprove = process.env.EIGHT_HEADLESS_APPROVE;
+afterAll(() => {
+	if (savedApprove === undefined) delete process.env.EIGHT_HEADLESS_APPROVE;
+	else process.env.EIGHT_HEADLESS_APPROVE = savedApprove;
+	fs.rmSync(root, { recursive: true, force: true });
+});
 
 const shellLog = path.join(root, "shell.log");
 const yamlLog = path.join(root, "yaml.log");
@@ -25,6 +30,8 @@ const dirA = path.join(root, "agent-a");
 const dirB = path.join(root, "agent-b");
 
 beforeAll(() => {
+	// No terminal in a test run: opt in so the scripted commands run.
+	process.env.EIGHT_HEADLESS_APPROVE = "1";
 	const home = path.join(root, "home");
 	for (const d of [home, dirA, dirB]) fs.mkdirSync(d, { recursive: true });
 	const yaml = path.join(root, "hooks.yaml");

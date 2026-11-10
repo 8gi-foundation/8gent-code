@@ -35,6 +35,7 @@ import { agentTools } from "../ai/tools";
 import { createBudgetDrain, resolveTurnBudgetMs } from "../ai/turn-budget";
 import { ensureIndexed as astEnsureIndexed } from "../ast-index";
 import { loggableToolArgs } from "../computer/desktop-approval";
+import { unattended } from "../core/one-yes";
 import {
 	ExtensionHost,
 	type ExtensionLoadResult,
@@ -90,6 +91,7 @@ import {
 	type FailoverEntry,
 	ModelFailover,
 	NoAllowedProviderError,
+	NoCredentialedProviderError,
 } from "../providers/failover";
 import { decideRoute, readPolicyState, recordCall } from "../providers/locality";
 import { callLocalModelWithReroute, resolveToolCapableModel } from "../providers/model-reroute";
@@ -136,10 +138,12 @@ import { continueEmptyTurn } from "./empty-turn-continue";
 import { Friction, withFriction } from "./friction";
 import { readGitBranch } from "./git-branch";
 import {
+	type RepoSnapshot,
 	type ToolLedgerEntry,
 	denialIsCause,
 	enforceAgenticHonesty,
 	isErrorToolResult,
+	readRepoSnapshot,
 } from "./honesty";
 import { projectInstructionsSection } from "./instruction-loader";
 import { getModeManager } from "./modes";
@@ -264,6 +268,7 @@ import {
 	GREETINGS,
 	PERSONALITY,
 	flavorResponse,
+	wantsBareReply,
 	voice as personalityVoice,
 } from "../personality/voice.js";
 import {
@@ -531,7 +536,8 @@ export class Agent {
 			displayLabel: `${provider}/${model}`,
 			requestMs: resolveRequestTimeoutMs(),
 			stallMs: resolveStallMs(),
-			onStall: (silentSeconds: number | null) => this.events.onStall?.({ silentSeconds, provider }),
+			onStall: (silentSeconds: number | null) =>
+				this.events.onStall?.({ silentSeconds, provider, model }),
 		};
 	}
 	private loopDetector: ToolLoopDetector;
@@ -615,6 +621,8 @@ export class Agent {
 	// state. The agentic-honesty gate (issue #2747) checks the final reply
 	// against this so the agent can never claim completion it did not earn.
 	private turnToolLedger: ToolLedgerEntry[] = [];
+	/** HEAD and upstream at the start of the turn: a commit or push claim is judged against the repo, not command text. */
+	private turnRepoStart: RepoSnapshot | null = null;
 	/** A native turn answered with its tool call as text (#4807): this session runs the text protocol from now on. */
 	private nativeWroteTextCall = false;
 	private turnTask = "";
@@ -755,7 +763,7 @@ export class Agent {
 				localRuntime: () => isLocalProvider(this.config.runtime),
 			},
 		);
-		// run_batch items skip the agent loop, so they take the same refusals here (#3502).
+		// batch and run_batch items skip the agent loop, so they take the same refusals here (#3502, #69).
 		this.executor.setItemGate(async (t, a) => {
 			const refusal = await this.refuseToolCall(t, a);
 			if (refusal != null) return { refusal };
@@ -1244,7 +1252,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// ── Extensions: Load from ~/.8gent/extensions/ ──────────────────
 		const extMgr = getExtensionManager();
 		extMgr
-			.loadAll()
+			.loadAll({
+				// Unattended means no: nothing is started unless a person can be asked.
+				attended: config.unattended !== true && (config.attended ?? !unattended()),
+			})
 			.then((exts) => {
 				const loaded = exts.filter((e) => e.status === "loaded");
 				if (loaded.length > 0) {
@@ -1423,7 +1434,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 	private batchSeq = 0;
 
-	/** What an allowed run_batch item starts with: beforeTool hooks, privacy gate, start event, session row (#3502). */
+	/** What an allowed batch or run_batch item starts with: beforeTool hooks, privacy gate, start event, session row (#3502). */
 	private async noteToolStart(
 		toolName: string,
 		args: Record<string, unknown>,
@@ -1456,7 +1467,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		return { id, startedAt };
 	}
 
-	/** What an allowed run_batch item ends with: session row, end event, afterTool hooks (#3502). */
+	/** What an allowed batch or run_batch item ends with: session row, end event, afterTool hooks (#3502). */
 	private async noteToolEnd(
 		id: string,
 		toolName: string,
@@ -1600,6 +1611,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"get_symbol",
 			"search_symbols",
 			"locate",
+			"batch",
 			// Sight (#3641): a model that can see gets the pixels through
 			// read_image; one that cannot gets a description through describe_image.
 			"read_image",
@@ -2493,6 +2505,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			content: agentResult.content,
 			ledger: this.turnToolLedger,
 			workingDirectory: this.config.workingDirectory || process.cwd(),
+			repo: this.turnRepoDelta(),
 		});
 		gated.content = this.settleOutputGate(gated.content);
 		this.settleDoneGate(gated.content);
@@ -2554,6 +2567,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				breakerStop !== null ||
 				agentResult.unverified.length > 0 ||
 				isVerbatimScope(this.config.agentScope) ||
+				wantsBareReply(this.turnTask) ||
 				quickResult !== null
 				? content
 				: flavorResponse(content, flavor),
@@ -3007,6 +3021,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		}
 	}
 
+	private turnRepoDelta() {
+		return {
+			before: this.turnRepoStart,
+			after: readRepoSnapshot(this.config.workingDirectory || process.cwd()),
+		};
+	}
+
 	private async runTurnCore(
 		userMessage: string,
 		imageBase64?: string,
@@ -3022,6 +3043,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		this.stopRequested = false;
 		this.recentFilePaths = [];
 		this.turnToolLedger = [];
+		this.turnRepoStart = readRepoSnapshot(this.config.workingDirectory || process.cwd());
 		this.doneGateNudged = false;
 		this.outputGate = new OutputGate(
 			userMessage,
@@ -4189,7 +4211,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 						// Any other error -> mark provider down, advance chain, restart
 						console.log(
-							`[agent] ${currentEntry.provider}/${currentEntry.model} failed: ${msg.slice(0, 200)} -> failover`,
+							`[agent] ${currentEntry.provider}/${currentEntry.model} failed: ${msg.slice(0, 200)} -> failover (next: ${nextConfiguredLabel(failover, currentEntry, channel)})`,
 						);
 						errors.push({
 							provider: currentEntry.provider,
@@ -4233,8 +4255,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					throw pinnedProviderError(last.provider, last.model, last.error);
 				}
 				const summary = errors.map((e) => `  - ${e.provider}/${e.model}: ${e.error}`).join("\n");
+				// Say why there was no next hop: providers failover skipped for want of a key.
+				const skipped = failover.skippedForCredentials(askedEntry.model, channel);
+				const skippedNote = skipped.length
+					? `\nNext provider not tried, no API key: ${skipped.join(", ")}. Add one with /apikeys so 8gent can fail over.`
+					: "";
 				throw new Error(
-					`All providers exhausted (${errors.length} attempted):\n${summary || "  (no provider errors recorded)"}`,
+					`All providers exhausted (${errors.length} attempted):\n${summary || "  (no provider errors recorded)"}${skippedNote}`,
 				);
 			}
 
@@ -4485,6 +4512,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				content: result.text,
 				ledger: this.turnToolLedger,
 				workingDirectory: this.config.workingDirectory || process.cwd(),
+				repo: this.turnRepoDelta(),
 			});
 			gatedNative.content = this.settleOutputGate(gatedNative.content);
 			this.settleDoneGate(gatedNative.content);
@@ -4510,7 +4538,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// text-tool path above for why a random COMPLETION_PHRASE in a channel
 			// reads as a fabricated completion claim.
 			const flavoredContent = fixCompletedLine(
-				gatedNative.violated || isVerbatimScope(this.config.agentScope)
+				gatedNative.violated ||
+					isVerbatimScope(this.config.agentScope) ||
+					wantsBareReply(this.turnTask)
 					? content
 					: flavorResponse(content, flavor),
 			).text;
@@ -5139,7 +5169,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 */
 	private turnFailover(): ModelFailover {
 		if (!this.affinityFailover) {
-			const fresh = new ModelFailover();
+			const fresh = new ModelFailover(undefined, {
+				hasCredentials: (p) => getProviderManager().hasCredentials(p),
+			});
 			if (!fresh.affinityEnabled) return fresh;
 			this.affinityFailover = fresh;
 		}
@@ -5370,7 +5402,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 */
 	restoreFromCheckpoint(messages: Array<{ role: string; content: string }>): void {
 		// Keep the system prompt, replace conversation history
-		const systemMsg = this.messageHistory[0];
+		// Only a system message is kept: the first entry of a used agent is a user turn.
+		const systemMsg = this.messageHistory.find((m) => m.role === "system");
 		this.messageHistory = systemMsg ? [systemMsg] : [];
 
 		for (const msg of messages) {
@@ -5378,8 +5411,6 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.messageHistory.push(msg);
 			}
 		}
-
-		console.log(`[8gent] Restored ${messages.length} messages from checkpoint`);
 	}
 
 	/**
@@ -5430,6 +5461,18 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		removeSessionScratch(this.sessionScratchDir);
 		// Inspect-only (#4779): nothing was started, so nothing to stop or record.
 		if (this.config.inspectOnly) return;
+		// The record first: the awaits below can be cut short by a hard exit at quit.
+		try {
+			// One friction line, ahead of session_end so session_end stays the last line (#4511).
+			if (!this.frictionWritten) {
+				this.frictionWritten = true;
+				this.sessionWriter.writeFriction(this.friction.record());
+			}
+			this.sessionWriter.writeSessionEnd("user_exit", null, readCardsShown(this.readScope));
+		} catch {
+			// Session writer may already be closed
+		}
+
 		// Flush and end Convex session sync
 		await this.sessionSync.endSession().catch(() => {});
 		// Stop kernel pipeline
@@ -5449,17 +5492,6 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (this.infiniteRunner) {
 			this.infiniteRunner.abort();
 			this.infiniteRunner = null;
-		}
-
-		try {
-			// One friction line, ahead of session_end so session_end stays the last line (#4511).
-			if (!this.frictionWritten) {
-				this.frictionWritten = true;
-				this.sessionWriter.writeFriction(this.friction.record());
-			}
-			this.sessionWriter.writeSessionEnd("user_exit", null, readCardsShown(this.readScope));
-		} catch {
-			// Session writer may already be closed
 		}
 
 		// Write session to Knowledge Graph (fire-and-forget, best-effort)
@@ -5594,6 +5626,16 @@ function readSettingsFileSync(): Settings | null {
 	}
 }
 
+/** "provider/model" of the next usable hop, or "none configured"; read-only, for log lines. */
+function nextConfiguredLabel(
+	failover: ModelFailover,
+	current: FailoverEntry,
+	channel: FailoverChannel,
+): string {
+	const next = failover.nextHop(current.model, current.provider, channel);
+	return next ? `${next.provider}/${next.model}` : "none configured";
+}
+
 /** How long the warm backend gets to recover before the turn leaves it (cache affinity). */
 const AFFINITY_GRACE_MS = 2000;
 
@@ -5616,7 +5658,9 @@ function tryResolve(
 	try {
 		return failover.resolve(current.model, channel, sessionId);
 	} catch (err) {
-		if (err instanceof NoAllowedProviderError) return current;
+		if (err instanceof NoAllowedProviderError || err instanceof NoCredentialedProviderError) {
+			return current;
+		}
 		throw err;
 	}
 }

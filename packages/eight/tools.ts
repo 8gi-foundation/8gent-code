@@ -34,7 +34,6 @@ import {
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
 import { writeScopeLine } from "../ai/write-scope";
 import { writeShapeLine } from "../ai/write-shape";
-import { ToolArgGuard } from "../schema/tool-args";
 import {
 	type FileOutline,
 	type RepoIndex,
@@ -214,6 +213,7 @@ import { systemOneGate, systemOneMode } from "../permissions/system-one-gate";
 import { ToolG8 } from "../permissions/toolg8.js";
 import { hasTuiApprovalHandler, requestTuiApproval } from "../permissions/tui-approval-channel";
 import type { PolicyActionType } from "../permissions/types.js";
+import { webApprovalRefusal } from "../permissions/web-approval";
 import { gateWriteTool } from "../permissions/write-content-gate.js";
 import {
 	WRITE_CONTENT_TOOLS,
@@ -224,6 +224,7 @@ import {
 	resolveEdit,
 	writtenContentFor,
 } from "../permissions/write-content-gate.js";
+import { ToolArgGuard } from "../schema/tool-args";
 import { loadSettings } from "../settings/store";
 import {
 	formatTaskOutput,
@@ -285,6 +286,7 @@ import { isErrorToolResult } from "./honesty";
 import { downscaleNote, imageMaxSide } from "./image-fit";
 import { IssueBlameGate, issueBodyOf } from "./issue-blame";
 import { layoutMeasureLine } from "./layout-measure";
+import { settleShell, trackShell, untrackShell } from "./live-shells";
 import { MESSAGE_BOARDROOM_TOOL_DEF, messageBoardroom } from "./message-boardroom";
 import { moduleHintFor } from "./module-hint";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
@@ -297,6 +299,7 @@ import {
 } from "./placeholder-paths";
 import { readOnlyChain, readPrefixesFor } from "./read-chain";
 import { RetiredFacts } from "./retired-facts";
+import { BATCH_TOOL_DEF, runReadBatch } from "./batch-read";
 import { RUN_BATCH_TOOL_DEF, runBatch, runBatchOn } from "./run-batch";
 import { ensureScratchExcludedIfPresent } from "./scratch-exclude";
 import { scrubKeepingAttachment, scrub as scrubSecrets } from "./secret-scanner";
@@ -2375,6 +2378,8 @@ export class ToolExecutor {
 			...getTermToolDefs(),
 			// Lean MCP access (#3474): advertised only with EIGHT_MCP_LEAN=1 exactly.
 			...(process.env.EIGHT_MCP_LEAN === "1" ? MCP_LEAN_TOOL_DEFS : []),
+			// Read-only batch (#69): always offered, refuses anything that is not a read.
+			BATCH_TOOL_DEF,
 			// Action chunks (#3502): advertised only with EIGHT_RUN_BATCH=1 exactly.
 			...(runBatchOn() ? [RUN_BATCH_TOOL_DEF] : []),
 			// Posting (#3595): advertised only where the tg-group helper is installed.
@@ -2406,14 +2411,14 @@ export class ToolExecutor {
 	 * tools, and their output is scrubbed, filtered and chipped the same way.
 	 */
 	/**
-	 * Per-item gate for run_batch: the owner's refusal checks and start bookkeeping (agent.ts).
+	 * Per-item gate for batch and run_batch: the owner's refusal checks and start bookkeeping (agent.ts).
 	 * refusal is null when the item may run; id and startedAt then name its start event.
 	 */
 	private itemGate?: (
 		tool: string,
 		args: Record<string, unknown>,
 	) => Promise<{ refusal: string | null; id?: string; startedAt?: number }>;
-	/** Per-item end bookkeeping for run_batch: end event, session row, afterTool hooks. */
+	/** Per-item end bookkeeping for batch and run_batch: end event, session row, afterTool hooks. */
 	private itemEnd?: (
 		id: string,
 		tool: string,
@@ -2421,6 +2426,34 @@ export class ToolExecutor {
 		result: string,
 		durationMs: number,
 	) => Promise<void>;
+
+	/**
+	 * One item of batch or run_batch: the owner's refusals and start bookkeeping, then
+	 * execute(), then the end bookkeeping. Fails closed without a gate.
+	 */
+	private async runGatedItem(
+		via: "batch" | "run_batch",
+		tool: string,
+		args: Record<string, unknown>,
+	): Promise<string> {
+		const gate = this.itemGate;
+		if (!gate) return `Error: ${via} has no per-item gate in this session. Nothing was run.`;
+		const s = await gate(tool, args);
+		if (s.refusal != null) return isErrorToolResult(s.refusal) ? s.refusal : `Error: ${s.refusal}`;
+		// Start already fired: the end must fire exactly once, even if execute throws,
+		// and a throwing end hook must not change the item's own status.
+		const t0 = Date.now();
+		let r = "";
+		try {
+			r = await this.execute(tool, args);
+			return r;
+		} catch (e) {
+			r = `Error: ${e instanceof Error ? e.message : String(e)}`;
+			throw e;
+		} finally {
+			if (s.id) await this.itemEnd?.(s.id, tool, args, r, Date.now() - t0)?.catch(() => {});
+		}
+	}
 
 	setItemGate(gate: NonNullable<ToolExecutor["itemGate"]>): void {
 		this.itemGate = gate;
@@ -3155,31 +3188,17 @@ export class ToolExecutor {
 			case "vercel_get_deployment_logs":
 				return vercelGetDeploymentLogs(args.deploymentId as string);
 
+			case "batch":
+				// Each call takes the owner's item gate, then re-enters execute(), as run_batch items do.
+				if (!this.itemGate)
+					return "Error: batch has no per-item gate in this session. Nothing was run.";
+				return runReadBatch(args.calls, (t, a) => this.runGatedItem("batch", t, a));
+
 			case "run_batch":
 				if (!runBatchOn()) return "Error: run_batch is not enabled. Nothing was run.";
 				if (!this.itemGate)
 					return "Error: run_batch has no per-item gate in this session. Nothing was run.";
-				return runBatch(args.items, async (t, a) => {
-					const gate = this.itemGate;
-					if (!gate)
-						return "Error: run_batch has no per-item gate in this session. Nothing was run.";
-					const s = await gate(t, a);
-					if (s.refusal != null)
-						return isErrorToolResult(s.refusal) ? s.refusal : `Error: ${s.refusal}`;
-					// Start already fired: the end must fire exactly once, even if execute throws,
-					// and a throwing end hook must not change the item's own status.
-					const t0 = Date.now();
-					let r = "";
-					try {
-						r = await this.execute(t, a);
-						return r;
-					} catch (e) {
-						r = `Error: ${e instanceof Error ? e.message : String(e)}`;
-						throw e;
-					} finally {
-						if (s.id) await this.itemEnd?.(s.id, t, a, r, Date.now() - t0)?.catch(() => {});
-					}
-				});
+				return runBatch(args.items, (t, a) => this.runGatedItem("run_batch", t, a));
 
 			// MCP tools
 			case "mcp_list_tools":
@@ -4057,6 +4076,11 @@ export class ToolExecutor {
 				}),
 			});
 
+			// Registered so quitting the TUI ends it, whatever its timer does (live-shells.ts).
+			trackShell(proc.pid);
+			proc.once("close", () => settleShell(proc.pid));
+			proc.once("error", () => untrackShell(proc.pid));
+
 			let stdout = "";
 			let stderr = "";
 
@@ -4516,6 +4540,8 @@ export class ToolExecutor {
 	// ============================================
 
 	private async handleWebSearch(query: string, maxResults?: number): Promise<string> {
+		const refused = await webApprovalRefusal(this.permissionManager, "web_search", String(query));
+		if (refused) return refused;
 		try {
 			const results = await webSearch(query, { maxResults: maxResults || 10 });
 			return formatSearchResults(results);
@@ -4525,6 +4551,8 @@ export class ToolExecutor {
 	}
 
 	private async handleWebFetch(url: string): Promise<string> {
+		const refused = await webApprovalRefusal(this.permissionManager, "web_fetch", String(url));
+		if (refused) return refused;
 		try {
 			const result = await webFetch(url);
 			return formatFetchResult(result);

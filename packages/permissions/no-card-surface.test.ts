@@ -30,8 +30,18 @@ const ask = (m: PermissionManager, cmd = CARD_GATED) =>
 	m.requestPermission("run_command", "run a command", cmd);
 
 describe("a daemon turn with no card surface", () => {
-	test("baseline: headless with nothing bound auto-approves the command (the hole)", async () => {
-		expect(await ask(manager())).toBe(true);
+	test("baseline: headless with nothing bound refuses the command (unattended means no)", async () => {
+		delete process.env.EIGHT_HEADLESS_APPROVE;
+		expect(await ask(manager())).toBe(false);
+	});
+
+	test("headless with the explicit opt-in approves a non-dangerous command", async () => {
+		process.env.EIGHT_HEADLESS_APPROVE = "1";
+		try {
+			expect(await ask(manager())).toBe(true);
+		} finally {
+			delete process.env.EIGHT_HEADLESS_APPROVE;
+		}
 	});
 
 	test("inside runWithoutApprovalSurface the same command is refused, not run", async () => {
@@ -69,7 +79,12 @@ describe("a daemon turn with no card surface", () => {
 
 	test("the scope ends with the turn: outside it nothing changes", async () => {
 		const m = manager();
-		await runWithoutApprovalSurface(() => ask(m));
-		expect(await ask(m)).toBe(true);
+		process.env.EIGHT_HEADLESS_APPROVE = "1";
+		try {
+			await runWithoutApprovalSurface(() => ask(m));
+			expect(await ask(m)).toBe(true);
+		} finally {
+			delete process.env.EIGHT_HEADLESS_APPROVE;
+		}
 	});
 });

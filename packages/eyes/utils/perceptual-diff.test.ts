@@ -120,10 +120,15 @@ describe("perceptualDiff", () => {
 
 		expect(r.similarity).toBeLessThan(1);
 		expect(r.regions.length).toBeGreaterThanOrEqual(1);
-		// Shared CI runners jitter well past a 200ms wall-clock cap; keep a
-		// generous budget there that still trips on a gross (multi-x) regression.
-		const budget = process.env.CI ? 1000 : 200;
-		expect(elapsed).toBeLessThan(budget);
+		// A wall clock on a shared machine measures how busy the machine is, not
+		// whether this code is right, so the time budget is opt-in: it must never
+		// decide a merge. Ask for it with EIGHT_PERF_TESTS=1 on a quiet machine.
+		// CI runners jitter well past the 200ms cap, so they get a wider budget
+		// that still trips on a gross (multi-x) regression.
+		if (process.env.EIGHT_PERF_TESTS === "1") {
+			const budget = process.env.CI ? 1000 : 200;
+			expect(elapsed).toBeLessThan(budget);
+		}
 	}, 15_000);
 
 	it("threshold parameter changes sensitivity", async () => {

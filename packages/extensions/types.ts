@@ -33,15 +33,18 @@ export interface LoadedExtension {
 	manifest: ExtensionManifest;
 	dir: string;
 	module: Record<string, Function>;
-	status: "loaded" | "error";
+	status: "loaded" | "error" | "disabled";
 	error?: string;
+	/** Stops the child process of an out-of-process extension. */
+	close?: () => void;
 	/** Present only when EIGHT_EXT_SCOPE=1 and the module exports activate(scope). */
 	scope?: ExtensionScope;
 }
 
 export interface ExtensionManager {
 	extensions: LoadedExtension[];
-	loadAll(): Promise<LoadedExtension[]>;
+	/** `attended: false` starts nothing: unattended means no. */
+	loadAll(opts?: { attended?: boolean }): Promise<LoadedExtension[]>;
 	getTools(): Record<string, Function>;
 	/** Run every undo the extension registered, then drop it. Needs EIGHT_EXT_SCOPE=1. */
 	unload(name: string): Promise<{ errors: string[] }>;

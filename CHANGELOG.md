@@ -9,6 +9,36 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.45] - 2026-11-09
+
+### Added
+- 8llm: read-only planner and device measurer (slice 1) ([#103](https://github.com/8gi-foundation/8gent-code/pull/103))
+- eight: batch tool for read-only calls ([#76](https://github.com/8gi-foundation/8gent-code/pull/76))
+- extensions: out-of-process extensions, off until enabled ([#45](https://github.com/8gi-foundation/8gent-code/pull/45))
+- benchmarks: Harbor adapter for Terminal-Bench 2.1 and the Harness Leaderboard ([#40](https://github.com/8gi-foundation/8gent-code/pull/40))
+
+### Changed
+- tui: provider picker harness waits for the picker to listen before typing the filter (#105) ([#106](https://github.com/8gi-foundation/8gent-code/pull/106))
+- product-focused README ([#37](https://github.com/8gi-foundation/8gent-code/pull/37))
+- user and contributor wiki ([#38](https://github.com/8gi-foundation/8gent-code/pull/38))
+
+### Fixed
+- providers: failover skips hosted providers with no API key ([#64](https://github.com/8gi-foundation/8gent-code/pull/64))
+- privacy: local by default, web tools ask first, headless denies ([#39](https://github.com/8gi-foundation/8gent-code/pull/39))
+
+## [0.20.44] - 2026-11-05
+
+### Added
+- schema: 8gent-schema slice 1, compiled JSON Schema checks, zero deps ([#13](https://github.com/8gi-foundation/8gent-code/pull/13))
+
+### Changed
+- plain copy for the launch notice and the slash menu rows ([#14](https://github.com/8gi-foundation/8gent-code/pull/14))
+- make main green (host and cross-file leaks) ([#35](https://github.com/8gi-foundation/8gent-code/pull/35))
+
+### Fixed
+- daemon: a busy session queues messages by default, dedupes by message id, caps at 20 ([#16](https://github.com/8gi-foundation/8gent-code/pull/16))
+- tui: clicks and drag-to-copy both work by default on macOS (#5317) ([#15](https://github.com/8gi-foundation/8gent-code/pull/15))
+
 ## [0.20.42] - 2026-10-27
 
 ### Changed

@@ -188,6 +188,7 @@ export const PLAN_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
 	"update_plan",
 	"read_file",
 	"list_files",
+	"batch", // read-only calls only; each is gated again on its own (#69)
 	"git_status",
 	"git_diff",
 	"git_log",
@@ -208,8 +209,7 @@ export const PLAN_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
 	"read_pdf_page",
 	"search_pdf",
 	"read_notebook",
-	"web_search",
-	"web_fetch",
+	// web_search and web_fetch send a query or URL off the device: not a read (they ask first).
 	"check_agent",
 	"list_agents",
 	"background_status",

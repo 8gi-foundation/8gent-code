@@ -50,6 +50,7 @@ import {
 import { type MarkStream, holdLivingMark } from "../lib/living-mark.js";
 import { motionEnabled } from "../lib/motion.js";
 import { wrapNotice } from "../lib/notice-wrap.js";
+import { offsetAfterNewMessages, pageMessages, pagingAction } from "../lib/scroll-pin.js";
 import { drawsColour, glyphs } from "../lib/term-caps.js";
 import { useToolOutputVersion } from "../lib/tool-output-state.js";
 import { type ChatItem, type ToolTrailEntry, buildChatItems } from "../lib/tool-trail.js";
@@ -167,6 +168,8 @@ interface MessageListProps {
 	touchHints?: boolean;
 	/** An approval card is up: plain PgUp/PgDn page the card, not the chat. */
 	approvalPending?: boolean;
+	/** Bumped on every submit, slash commands included: the view returns to the live edge. */
+	snapSeq?: number;
 	/**
 	 * Fold the running turn's steps behind one status row (#5170). False (the
 	 * default) draws every step as a row, as before.
@@ -314,6 +317,7 @@ export function MessageList({
 	onToggleCompaction,
 	touchHints = false,
 	approvalPending = false,
+	snapSeq = 0,
 	foldTrace = false,
 	traceOpen = false,
 	onToggleTrace,
@@ -393,6 +397,8 @@ export function MessageList({
 	// scrollOffset = messages held back from the bottom. autoScrollRef tracks
 	// whether the user is pinned to the live edge.
 	const [scrollOffset, setScrollOffset] = useState(0);
+	const scrollOffsetRef = useRef(0);
+	scrollOffsetRef.current = scrollOffset;
 	const autoScrollRef = useRef(true);
 
 	const total = chatMessages.length;
@@ -460,15 +466,18 @@ export function MessageList({
 	// Keyboard: shift+arrows (plain arrows are owned by the input field).
 	useInput(
 		(_input, key) => {
-			// Unshifted PgUp/PgDn scroll the chat only in keys-up (a phone has no
-			// shift) and never while an approval card owns them.
-			const plainPaging = touchHints && !approvalPending;
-			if (key.pageUp && !key.shift && plainPaging) scrollBy(+5);
-			else if (key.pageDown && !key.shift && plainPaging) scrollBy(-5);
-			else if (key.shift && key.upArrow) scrollBy(+1);
-			else if (key.shift && key.downArrow) scrollBy(-1);
-			else if (key.shift && key.pageUp) scrollBy(+5);
-			else if (key.shift && key.pageDown) scrollBy(-5);
+			const action = pagingAction(key, { approvalPending: Boolean(approvalPending) });
+			if (!action) return;
+			if ("step" in action) scrollBy(action.step);
+			else
+				scrollBy(
+					pageMessages({
+						rows: rowEstimates,
+						offset: scrollOffsetRef.current,
+						dir: action.page,
+						pageRows: Math.max(1, resolvedRowBudget - 2),
+					}),
+				);
 		},
 		{ isActive: scrollEnabled },
 	);
@@ -482,6 +491,15 @@ export function MessageList({
 		onWheelDown: () => scrollBy(-1),
 	});
 
+	// A submit of any kind (a slash command adds no user message) returns to the live edge.
+	const lastSnapRef = useRef(snapSeq);
+	useEffect(() => {
+		if (snapSeq === lastSnapRef.current) return;
+		lastSnapRef.current = snapSeq;
+		autoScrollRef.current = true;
+		setScrollOffset(0);
+	}, [snapSeq]);
+
 	// Auto-pin: new messages while pinned snap to bottom. If the user is
 	// scrolled up, we BUMP scrollOffset so their view stays locked on the same
 	// content (web behavior — adding new messages at the bottom must not shift
@@ -490,12 +508,14 @@ export function MessageList({
 		if (total > prevCountRef.current) {
 			const newMessage = chatMessages[chatMessages.length - 1];
 			if (newMessage) setNewMessageId(newMessage.id);
-			if (autoScrollRef.current) {
-				setScrollOffset(0);
-			} else {
-				const delta = total - prevCountRef.current;
-				setScrollOffset((prev) => Math.min(prev + delta, total - 1));
-			}
+			const next = offsetAfterNewMessages({
+				offset: scrollOffsetRef.current,
+				pinned: autoScrollRef.current,
+				added: chatMessages.slice(prevCountRef.current),
+				total,
+			});
+			autoScrollRef.current = next.pinned;
+			setScrollOffset(next.offset);
 		}
 		prevCountRef.current = total;
 	}, [total, chatMessages]);
@@ -532,7 +552,7 @@ export function MessageList({
 					<Text color={t.muted} dimColor>
 						{touchHints
 							? `↑ ${hiddenAbove} earlier${canScrollUp ? "  [PgUp]" : ""}`
-							: `↑ ${hiddenAbove} earlier ${hiddenAbove === 1 ? "line" : "lines"}${canScrollUp ? "  shift+↑" : ""}`}
+							: `↑ ${hiddenAbove} earlier ${hiddenAbove === 1 ? "line" : "lines"}${canScrollUp ? "  PgUp" : ""}`}
 					</Text>
 				</Box>
 			)}
@@ -593,7 +613,7 @@ export function MessageList({
 					<Text color={t.muted} dimColor>
 						{touchHints
 							? `↓ ${clampedOffset} below  [PgDn]`
-							: `↓ ${clampedOffset} below  shift+↓ or scroll down to follow`}
+							: `↓ ${clampedOffset} below  PgDn to follow`}
 					</Text>
 				</Box>
 			)}

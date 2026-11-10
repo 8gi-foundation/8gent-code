@@ -1,242 +1,24 @@
 <p align="center">
-  <img src=".github/assets/readme-header.png" width="100%" alt="8gent Code" />
-</p>
-
-<p align="center">
-  <strong>The kernel of the <a href="https://8gent.world">8gent ecosystem</a>.</strong><br />
-  Open source autonomous coding agent powered by local LLMs or free cloud models, for developers who want an agent that runs on their own machine.<br />
-  No API keys. No cloud dependency.<br />
-  Install: <code>curl -fsSL https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.sh | sh</code> (macOS, Linux), or see <a href="#install">Install</a> for Windows. Then run <code>8gent</code>.
-</p>
-
-<br />
-
-<p align="center">
-  <a href="https://8gentjr.com"><img src="https://img.shields.io/badge/Jr-Live-2D8A56?style=for-the-badge&labelColor=1A1612" alt="Jr Live" /></a>
-  <a href="https://github.com/8gi-foundation/8gent-code"><img src="https://img.shields.io/badge/Code-Open_Source-2D8A56?style=for-the-badge&labelColor=1A1612" alt="Code Open Source" /></a>
-  <a href="https://8gentos.com"><img src="https://img.shields.io/badge/OS-In_Dev-E8610A?style=for-the-badge&labelColor=1A1612" alt="OS In Dev" /></a>
-  <a href="https://8gent.world"><img src="https://img.shields.io/badge/World-In_Dev-E8610A?style=for-the-badge&labelColor=1A1612" alt="World In Dev" /></a>
-  <a href="https://8gent.games"><img src="https://img.shields.io/badge/Games-In_Dev-E8610A?style=for-the-badge&labelColor=1A1612" alt="Games In Dev" /></a>
+  <strong>An open source coding assistant for the terminal that runs local models by default.</strong>
 </p>
 
 <p align="center">
   <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-E8610A?style=for-the-badge&labelColor=1A1612" alt="Apache 2.0 License" /></a>
-  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-0.20.43-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v0.20.43" /></a>
-  <a href="https://daemon.example.com"><img src="https://img.shields.io/badge/daemon-Fly.io_Amsterdam-E8610A?style=for-the-badge&labelColor=1A1612" alt="Daemon" /></a>
+  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-0.20.45-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v0.20.45" /></a>
 </p>
 
-<br />
-
----
-
-<br />
-
-## The Ecosystem
-
-<p align="center"><sub>2 shipped &nbsp;·&nbsp; 5 in development &nbsp;·&nbsp; 1 constitution</sub></p>
-
-<br />
-
-<table>
-<tr>
-<td valign="top" width="33%">
-
-**8gent Code** -[8gent.dev](https://8gent.dev)<br />
-<sub>Open source developer agent. Free on-ramp. Shipped. <em>(this repo)</em></sub>
-
-**8gent Jr** -[8gentjr.com](https://8gentjr.com)<br />
-<sub>AI assistant for kids. Accessibility first. Free forever. Shipped.</sub>
-
-</td>
-<td valign="top" width="33%">
-
-**8gent OS** -[8gentos.com](https://8gentos.com)<br />
-<sub>Paid personal OS. In development.</sub>
-
-**8gent** -[8gent.app](https://8gent.app)<br />
-<sub>Single pane of glass dashboard. In development.</sub>
-
-</td>
-<td valign="top" width="33%">
-
-**8gent World** -[8gent.world](https://8gent.world)<br />
-<sub>Ecosystem story, docs, <a href="https://8gent.world/media/decks">presentation decks</a>. In development.</sub>
-
-**8gent Games** -[8gent.games](https://8gent.games)<br />
-<sub>Agent simulation playground. In development.</sub>
-
-</td>
-</tr>
-</table>
-
-<p align="center">
-  <sub><a href="https://8gent.world/constitution">Constitution</a> &nbsp;·&nbsp; <a href="https://8gent.world/inspirations">Inspirations</a></sub>
-</p>
-
-<br />
-
----
-
-<br />
-
-## 8GI Foundation
-
-8gent Code is the technology layer of the **8GI Foundation** - the autonomous collective intelligence that governs the 8gent ecosystem. 8GI is not a company. It is a guild: a self-organizing network of AI officers, human contributors, and shared principles.
-
-Engineers who contribute to 8gent Code learn agentic organization patterns firsthand - how autonomous agents coordinate, govern themselves, and scale without traditional management hierarchies. See the [Guild Deck](https://8gent.world/media/decks) for the full vision.
-
-All governance docs, decks, and the constitution live at [8gent.world](https://8gent.world). Source-of-truth markdown for governance (including security and onboarding) is in the [`8gi-governance`](https://github.com/8gi-foundation/8gi-governance) repository; static deck assets ship with [`8gent-world`](https://github.com/8gi-foundation/8gent-world) under `public/media/`.
-
-### The Board - 8 Seats of the Inner Circle
-
-The 8GI board consists of AI officers, not humans. 8GI Foundation serves as Founder and Visionary.
-
-| Seat | Officer | Role |
-|:-----|:--------|:-----|
-| **8EO** | AI James | Eight Executive Officer - strategy, coordination, ecosystem oversight |
-| **8TO** | Rishi | Eight Technology Officer - architecture, infrastructure, technical direction |
-| **8PO** | Samantha | Eight Product Officer - product vision, UX, user advocacy |
-| **8DO** | Moira | Eight Design Officer - brand, visual identity, design systems |
-| **8SO** | Karen | Eight Security Officer - policy, compliance, threat modeling |
-| **8CO** | *Unnamed* | Eight Community Officer - seat defined in `packages/board-plane/main.ts` |
-| **8MO** | *Pending* | Eight Marketing Officer |
-| **8GO** | *Pending* | Eight Governance Officer |
-
-### The Lotus Model
-
-8GI scales through the Lotus structure: **1-8-64-512**. One founder. Eight AI officers (the inner circle). 64 working vessels (specialized agents). 512 edge nodes (community contributors and autonomous tasks). Each layer multiplies capacity without multiplying complexity.
-
-### Constitution
-
-The [10 Articles of the 8gent Constitution](https://8gent.world/constitution) govern all decisions across every product and every agent in the ecosystem.
-
-### Control Plane Architecture
-
-The autonomous vessel infrastructure lives in two packages:
-
-- `packages/board-plane/` - the control plane that coordinates board-level decisions and vessel orchestration
-- `packages/board-vessel/` - the blueprint pattern for spawning autonomous AI officer vessels
-
-These implement the board's ability to operate as a persistent, self-governing collective.
-
-### GitHub and Community
-
-All code lives under [github.com/8gi-foundation](https://github.com/8gi-foundation).
-
-| Repo | Role |
-|------|------|
-| **[8gent](https://github.com/8gi-foundation/8gent)** (8gent.app) | The front door. Dashboard. Auth. Billing. User management. |
-| **[8gi-control-plane](https://github.com/8gi-foundation/8gi-control-plane)** | The brain. Model routing. Rate limiting. Token tracking. |
-| **[8gent-vessel](https://github.com/8gi-foundation/8gent-vessel)** | The body. Compute. Sandboxes. Storage. Health. |
-| **[8gent-code](https://github.com/8gi-foundation/8gent-code)** | The kernel. What runs inside every vessel. *(this repo)* |
-| **[8gent-OS](https://github.com/8gi-foundation/8gent-OS)** | The personal layer on top of the kernel. |
-| **[8gi-governance](https://github.com/8gi-foundation/8gi-governance)** | The constitution. Board decisions. Member registry. |
-| **[8gent-world](https://github.com/8gi-foundation/8gent-world)** | Ecosystem story, docs, media. |
-| **[8gent-dev](https://github.com/8gi-foundation/8gent-dev)** | Developer portal. |
-| **[8gent-games](https://github.com/8gi-foundation/8gent-games)** | Agent simulation playground. |
-| **[8gent-telegram-app](https://github.com/8gi-foundation/8gent-telegram-app)** | Jr Telegram interface. |
-
-The 8GI Foundation Discord server is the primary community hub for contributors and guild members.
-
-<br />
-
----
-
-<br />
-
-## Quick Start
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.sh | sh
-8gent
-```
-
-On Windows (PowerShell): `irm https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.ps1 | iex`. Both install the newest GitHub release as a standalone binary, so no Bun or Node is needed.
-
-That's it. 8gent uses an adaptive provider router with 16 model providers (plus two opt-in host-CLI slots). Six run locally: `8gent` (model `eight-1.0-q3:14b`), `ollama` and `lmstudio` are on by default, `llama-server` is selected with `EIGHT_LOCAL_SERVER=llama-server`, and `apple-foundation` and `apfel` turn on when a macOS 26 Apple Silicon host has them. The other ten are hosted providers, each opt-in with your own API key; the full list with every variable is [docs/install/providers.md](docs/install/providers.md). Failover chain: local 8gent, then local Qwen, then OpenRouter free tier.
-
-**Hosted providers are opt-in.** OpenRouter, `auto:free`, the `claude` runtime, and the hosted failover step only run when you set `EIGHT_ALLOW_HOSTED=1`. Without the flag, failover stays local and child agents use the parent's provider and model.
-
-**No model yet?** On a machine with no local model and no key, the chat area shows a short card with both ways to connect one: install Ollama and run `ollama pull qwen3.5`, or run `8gent keys` to add `OPENROUTER_API_KEY` to `~/.8gent/keys.env` and then use `/provider openrouter` with `/model auto:free`. `/provider` lists every option. The card goes away once a model is reachable.
-
-**Pick your platform:** [macOS](docs/install/macos.md), [Windows](docs/install/windows.md), [Linux](docs/install/linux.md), [Android (Termux, kali and arch proots)](docs/install/android-termux.md). Every provider, flag and environment variable is in [docs/install/providers.md](docs/install/providers.md). One-line binary installers (no Bun or Node needed) are in [docs/user/install.md](docs/user/install.md).
-
-**Ollama is optional.** To run on llama.cpp's `llama-server` instead, set `EIGHT_LOCAL_SERVER=llama-server` and start with `8gent --provider=llama-server`. 8gent then never contacts Ollama. See [docs/guides/llama-server.md](docs/guides/llama-server.md).
-
-**First keys to know:**
-
-| Key | What it does |
-|:----|:-------------|
-| `Shift+Tab` | Change how much 8gent may do without asking: Plan (changes nothing), Ask (the default), Guarded (safe steps run, risky ones ask), Infinite (never asks, back to Ask after 30 minutes). Per tab. System One, the local command checker, is on in every mode (`EIGHT_SYSTEM_ONE=0` turns it off). See [docs/guides/permission-modes.md](docs/guides/permission-modes.md). |
-| `Ctrl+1` to `Ctrl+9` | Jump to a tab |
-| `Ctrl+Y` | Cycle the task mode label (Planning, Researching, Implementing, Testing, Debugging). This does not change permissions. |
-
-Prefer no colour? `NO_COLOR=1 8gent`. See [docs/guides/no-color.md](docs/guides/no-color.md).
+8gent Code reads your project, edits files, runs commands and works through multi-step tasks from a chat interface in your terminal. It is built to be free, local first and private: it starts on a model running on your own machine, needs no account or API key, and your prompts and code go only to a model on your machine unless you turn on a hosted provider. Web search and page fetches go to the web.
 
 ## Install
 
-New here, or coming from another terminal coding tool? Start with the [user guide](docs/user/README.md) (Windows first).
-
-One-line installers put the newest GitHub release on your machine as a standalone binary (no Bun, no Node), check it against the release `SHA256SUMS`, and replace nothing if a check fails. They are the path that gets the current version.
-
-Windows (PowerShell, no admin rights):
-
-```powershell
-irm https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.ps1 | iex
-```
-
-macOS and Linux (x64 and arm64):
-
 ```bash
-curl -fsSL https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.sh | sh
-```
-
-More options, including `EIGHT_VERSION` to pin a version, are in [docs/user/install.md](docs/user/install.md). Or take a binary from a [GitHub Release](https://github.com/8gi-foundation/8gent-code/releases) by hand, below.
-
-### Standalone binary (no runtime required)
-
-Self-contained single-file binaries are attached to each [GitHub Release](https://github.com/8gi-foundation/8gent-code/releases). They embed the Bun runtime - no `npm`, no Bun, no Node needed.
-
-**macOS**
-
-```bash
-# Apple Silicon: 8gent-darwin-arm64   Intel: 8gent-darwin-x64
-curl -fsSL -o 8gent https://github.com/8gi-foundation/8gent-code/releases/latest/download/8gent-darwin-arm64
-chmod +x 8gent && sudo mv 8gent /usr/local/bin/8gent
+npm install -g @8gi-foundation/8gent-code
 8gent
 ```
 
-**Linux** - install the `.deb`, `.rpm`, or extract the `.tar.gz` (all land `8gent` on your PATH):
+The package runs on Bun, or on Node 22.5 or newer when Bun is not installed. One-line installers that need neither Bun nor Node, plus per-OS notes, are in [docs/user/install.md](docs/user/install.md). New to the tool? Start with the [user guide](docs/user/README.md).
 
-```bash
-# Debian / Ubuntu
-sudo dpkg -i 8gent_<version>_amd64.deb
-# Fedora / RHEL
-sudo rpm -i 8gent-<version>-1.x86_64.rpm
-# Or portable tarball
-tar xzf 8gent-<version>-linux-amd64.tar.gz && sudo mv 8gent-*/bin/8gent /usr/local/bin/
-8gent
-```
-
-**Windows** - run the installer (`8gent-setup-<version>-x64.exe`). It installs to `%LOCALAPPDATA%\Programs\8gent`, adds itself to your PATH, and registers an uninstaller. A [winget](https://learn.microsoft.com/windows/package-manager/) manifest ships under `packaging/winget/` for `winget install 8GIFoundation.8gentCode` once published.
-
-> Binaries are code-signed only on releases where the maintainer's certificates are configured (see [SIGNING.md](SIGNING.md)). Unsigned downloads run fine but may prompt Gatekeeper (macOS) or SmartScreen (Windows) - allow them through, or build your own with `bun run build:binaries`.
-
-### npm
-
-The npm package tracks the GitHub release: `npm install -g @8gi-foundation/8gent-code` installs the current version. It runs on Bun, or on Node 22.5 or newer when Bun is not installed. On Android (Termux, kali or arch proot) follow [docs/install/android-termux.md](docs/install/android-termux.md).
-
-### Build binaries from source
-
-```bash
-bun install
-bun run build:binaries          # all six targets -> dist/bin/
-bun run build:binaries:host     # just your current OS/arch
-bun run package:linux           # dist/installers: .deb + .rpm + .tar.gz (needs nfpm)
-pwsh scripts/package-windows.ps1 # dist/installers: NSIS installer (needs NSIS, on Windows)
-```
-
-## Quick Start (from source)
+To run from source:
 
 ```bash
 git clone https://github.com/8gi-foundation/8gent-code.git
@@ -245,617 +27,81 @@ bun install
 bun run tui
 ```
 
-If no local model is available, 8gent will guide you through interactive onboarding on first run. The adaptive provider router tries local 8gent, then Ollama, then OpenRouter free tier. Ollama is optional: see [docs/guides/llama-server.md](docs/guides/llama-server.md).
+Check what 8gent found on your machine (models, optional tools) with `8gent doctor`.
 
-<br />
+## Models and providers
 
----
+On first run 8gent picks a model you already have: LM Studio, then Ollama, then Apple's on-device server on Apple Silicon. The built-in `8gent` provider uses `eight-1.0-q3:14b` through Ollama. The `ollama` provider (any model you have pulled) and `lmstudio` (LM Studio's local server at `http://localhost:1234`) are also on by default. `llama-server` is available with `EIGHT_LOCAL_SERVER=llama-server`. If no model is reachable, the chat area shows how to connect one.
 
-<br />
+Hosted providers are opt-in and each needs your own key:
 
-## Why 8gent exists
+`openrouter`, `anthropic`, `openai`, `groq`, `grok`, `mistral`, `together`, `fireworks`, `replicate`, `deepseek`
 
-Token vendors control access to intelligence through pricing tiers, rate limits, and API keys.
-That is a business model, not a law of nature. It is also not the only option.
+To add one, run `8gent keys` (opens `~/.8gent/keys.env`) and add `NAME=value`, for example `OPENROUTER_API_KEY=...`, or use `/apikeys` inside a session. Then pick it with `/provider <name>` or `--provider=<name>` at launch. For OpenRouter's free tier use `/provider openrouter` and `/model auto:free`.
 
-8gent runs locally, privately, and for free. No credit card. No cloud dependency required.
+Hosted fallback is off by default. When a local model is unreachable, failover stays on your machine unless you set `EIGHT_ALLOW_HOSTED=1`. Every provider, key variable and flag is listed in [docs/install/providers.md](docs/install/providers.md).
 
-Every policy that governs what the agent can do is a YAML file you can read, edit, and override.
-Every memory the agent stores is a SQLite database on your own disk. Nothing phones home.
+## Everyday use
 
-Self-improvement: the autoresearch loop runs benchmarks, mutates the system prompt, and promotes what works. This runs locally.
-Your agent runs locally. Your data never leaves your machine. Every policy is readable YAML.
-No central vendor captures that value.
-
-The floor is zero cost. The ceiling is what a self-improving local agent can learn from your codebase.
-
-Try it: `curl -fsSL https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.sh | sh && 8gent` (Windows: see [Install](#install)).
-
-No build tools are needed. On Linux, terminal tabs use node-pty, which compiles at install time: without Python and a C++ compiler npm skips it, 8gent still installs and runs, and a terminal tab says how to enable it (`sudo apt install python3 make g++`, then reinstall).
-
-### From source (contributors)
-
-```bash
-git clone https://github.com/8gi-foundation/8gent-code.git && cd 8gent-code && bun install
-bun run tui
-```
-
-On Linux, some native modules (better-sqlite3, and tree-sitter on arm64) compile at install time. Bun reports itself as Node 24, whose headers need C++20, which those modules do not build with yet. Install the build tools and build against the Node 22 headers:
-
-```bash
-sudo apt install build-essential python3 mpv ffmpeg   # mpv + ffmpeg (and yt-dlp) are for /dj
-export npm_config_target=22.12.0 npm_config_runtime=node npm_config_disturl=https://nodejs.org/dist
-bun install --frozen-lockfile
-bun run tui
-```
-
-<br />
-
----
-
-<br />
-
-## What Makes This Different
-
-<table>
-<tr>
-<td valign="top" width="50%">
-
-**Local-first, free by default**<br />
-<sub>Runs entirely on your machine. Cloud models (OpenRouter free tier) are opt-in. No telemetry, no API keys to start.</sub>
-
-<br />
-
-**Model-agnostic**<br />
-<sub>Adaptive provider router: six local providers and ten hosted providers, each hosted one opt-in with your own API key. Task router classifies prompts (code, reasoning, simple, creative) and picks the best model automatically.</sub>
-
-<br />
-
-**Eight kernel**<br />
-<sub>Persistent daemon deployed on Fly.io Amsterdam (<a href="https://daemon.example.com">daemon.example.com</a>). WebSocket protocol, 4-strategy retry loop, session persistence across reconnections.</sub>
-
-<br />
-
-**NemoClaw policy engine**<br />
-<sub>YAML-based, deny-by-default, rebuilt from scratch. 11 default rules with approval gates for secrets, destructive ops, network, git, and file access. Headless and infinite modes for autonomous operation.</sub>
-
-</td>
-<td valign="top" width="50%">
-
-**8 Powers**<br />
-<sub>Memory, parallel worktrees, NemoClaw policy, self-evolution, self-healing, entrepreneurship, AST blast radius, and browser access. Not plugins. Built-in.</sub>
-
-<br />
-
-**HyperAgent meta-improvement**<br />
-<sub>Metacognitive self-modification. The agent can improve how it improves -meta-config is editable while the evaluation protocol stays human-controlled.</sub>
-
-<br />
-
-**AutoResearch**<br />
-<sub>Overnight improvement loops (Karpathy-style). Runs benchmarks, mutates system prompts, re-tests. Meta-optimizer also tunes few-shots, model routing, and grading weights.</sub>
-
-<br />
-
-**Voice**<br />
-<sub>macOS TTS voices (Moira, Daniel, Samantha, Karen, Rishi) with KittenTTS neural voices as optional upgrade. Full-duplex Moshi backend scaffolded for Apple Silicon. <code>/voice chat</code> to start.</sub>
-
-<br />
-
-**AST-first navigation** &nbsp;·&nbsp; **Multi-agent orchestration** &nbsp;·&nbsp; **Telegram portal**
-
-</td>
-</tr>
-</table>
-
-<br />
-
----
-
-<br />
-
-## The Body Parts
-
-The agent has hands, eyes, and the cortex that coordinates them. Body-part naming is the brand: customer-facing surfaces always say *hands* / *eyes* / *handeyes*. Underlying engines are implementation details.
-
-<table>
-<tr>
-<td valign="top" width="33%">
-
-**Hands** (motor)<br />
-<sub><code>packages/hands/</code></sub><br />
-<sub>macOS desktop driver: click, type, scroll, drag, hover, press, screenshot, windows, clipboard. Backed by `cliclick` + `osascript` fallback. Used by the `desktop_*` agent tools and the `run_computer_task` CUA loop.</sub>
-
-</td>
-<td valign="top" width="33%">
-
-**Eyes** (perception)<br />
-<sub><code>packages/eyes/</code></sub><br />
-<sub>Capture, annotate, locate, describe, wait_for, diff, observe. Bundled native AX bridge at `~/.8gent/bin/8gent-ax-bridge` (Swift, no Homebrew dep). Real perceptual diff (pngjs). Two-phase VisionProvider: resolve provider id, then tier-check, then call. Agent tools `eyes_see` / `eyes_find` / `eyes_describe` / `eyes_wait_for`. Headless `apps/8gent-eyes/` CLI.</sub>
-
-</td>
-<td valign="top" width="33%">
-
-**Handeyes** (sensorimotor coordination)<br />
-<sub><code>packages/handeyes/</code></sub><br />
-<sub>Third body-part. Selectively engaged when the agent is observably stuck on a hands-only or eyes-only flow. 5 compound tools (`handeyes_locate_and_click`, `handeyes_click_and_verify`, `handeyes_type_and_confirm`, `handeyes_engage_struggle_mode`, `handeyes_exit_struggle_mode`). 4 trigger heuristics (3 live in v0.17, trigger 4 from DoomLoopDetector emitter wired pending shared accessor).</sub>
-
-</td>
-</tr>
-</table>
-
-To use end-to-end on macOS:
-
-```bash
-bun install                                           # postinstall builds the AX bridge
-# Grant Screen Recording + Accessibility once in System Settings
-ollama pull qwen2.5-vl                                # local vision (optional; enables eyes_describe)
-```
-
-Conceptual ancestry for the AX bridge: Peekaboo (MIT, Peter Steinberger 2025); see `packages/eyes/native/NOTICE`.
-
-<br />
-
----
-
-<br />
-
-## The 8 Powers
-
-<table>
-<tr>
-<td valign="top" width="25%">
-
-**Memory**<br />
-<sub><code>packages/memory/</code></sub><br />
-<sub>Dual-layer episodic + semantic memory, SQLite + FTS5, Ollama embeddings, procedural memory, health monitoring, contradiction detection, consolidation, lease-based job queue</sub>
-
-</td>
-<td valign="top" width="25%">
-
-**Worktree**<br />
-<sub><code>packages/orchestration/</code></sub><br />
-<sub>Multi-agent parallel execution via git worktrees, max 4 concurrent, filesystem messaging, macro-actions, delegation</sub>
-
-</td>
-<td valign="top" width="25%">
-
-**Policy**<br />
-<sub><code>packages/permissions/</code></sub><br />
-<sub>NemoClaw YAML policy engine, 11 default rules, approval gates, headless mode, infinite mode, dangerous command detection</sub>
-
-</td>
-<td valign="top" width="25%">
-
-**Evolution**<br />
-<sub><code>packages/self-autonomy/</code></sub><br />
-<sub>Post-session reflection, Bayesian skill confidence, HyperAgent meta-mutation, skill compounding (tasks become reusable skills), KittenTTS voice onboarding</sub>
-
-</td>
-</tr>
-<tr>
-<td valign="top" width="25%">
-
-**Healing**<br />
-<sub><code>packages/validation/</code></sub><br />
-<sub>Checkpoint-verify-revert loop, git-stash atomic snapshots, failure log</sub>
-
-</td>
-<td valign="top" width="25%">
-
-**Entrepreneurship**<br />
-<sub><code>packages/proactive/</code></sub><br />
-<sub>GitHub bounty/help-wanted scanner, capability matcher, opportunity pipeline</sub>
-
-</td>
-<td valign="top" width="25%">
-
-**AST**<br />
-<sub><code>packages/ast-index/</code></sub><br />
-<sub>Blast radius engine, import dependency graph, test file mapping, change impact estimation</sub>
-
-</td>
-<td valign="top" width="25%">
-
-**Browser**<br />
-<sub><code>packages/tools/browser/</code></sub><br />
-<sub>Lightweight web access via fetch + DuckDuckGo HTML scraping, disk cache, no headless deps</sub>
-
-</td>
-</tr>
-</table>
-
-<br />
-
----
-
-<br />
-
-## Companion System
-
-Every session spawns a unique companion. Your coding history becomes a collectible deck.
-
-- **40 species** across 5 rarity tiers (Common 60% to Legendary 1%)
-- **10 elements** inspired by MTG color pie (Void, Ember, Aether, Verdant, Radiant, Chrome, Prism, Frost, Thunder, Shadow)
-- **28 accessories** from Pokeball to Triforce to One Ring
-- **6 stats** per companion (DEBUG, CHAOS, WISDOM, PATIENCE, SNARK, ARCANA)
-- **1% shiny** chance
-- **Collection deck** persists at `~/.8gent/companion-deck.json`
-- **macOS dock pet** spawns with companion's name and colors
-
-```bash
-/pet start      # Spawn companion on dock
-/pet deck       # View your collection
-/pet card       # Roll a new card
-```
-
-See [packages/pet/README.md](packages/pet/README.md) for the full bestiary.
-
-<br />
-
----
-
-<br />
-
-## Presentations
-
-| Deck | Link |
-|------|------|
-| **Feature Set Audit** | [8gent.world/media/decks/feature-set](https://8gent.world/media/decks/feature-set) |
-| **npm Launch** | [8gent.world/media/decks/npm-launch](https://8gent.world/media/decks/npm-launch) |
-| **Lil Eight Pets** | [8gent.world/media/decks/lil-eight](https://8gent.world/media/decks/lil-eight) |
-| **Companion System** | [8gent.world/media/decks/companion-system](https://8gent.world/media/decks/companion-system) |
-| **Code Roadmap** | [8gent.world/media/decks/code-roadmap](https://8gent.world/media/decks/code-roadmap) |
-| **All Decks** | [8gent.world/media/decks](https://8gent.world/media/decks) |
-
-<br />
-
----
-
-<br />
-
-## Voice
-
-**Half-duplex** (`/voice chat`) - listen, transcribe, think, speak, repeat. Requires sox and whisper.cpp:
-
-```bash
-brew install sox whisper-cpp
-```
-
-**TTS output** - macOS `say` voices (Moira, Daniel, Samantha, Karen, Rishi) work out of the box. KittenTTS neural voices (8 voices, free, local) are available as an optional upgrade - offered during onboarding.
-
-**Full-duplex** (experimental) - simultaneous listen and speak via Moshi (Kyutai) on Apple Silicon. Backend code exists in `packages/voice/backends/moshi-mlx.ts` but requires manual setup (`pip install moshi`).
-
-<sub>Status bar shows: <strong>VOICE CHAT (listening)</strong> / <strong>SPEAKING</strong> / <strong>THINKING</strong></sub>
-
-<br />
-
----
-
-<br />
-
-## How It Works
-
-```
-User prompt
-  -> BMAD planner (structured task decomposition)
-  -> Multi-agent orchestration (sub-agents in worktrees)
-  -> Toolshed (MCP, LSP, shell, AST, filesystem)
-  -> Execution + validation (self-healing loop)
-  -> Result
-```
-
-<sub>The agent decomposes work, delegates to sub-agents, validates output against test suites, and reports back. It uses the BMAD method for planning and AST-level symbol retrieval to keep token usage minimal.</sub>
-
-<br />
-
----
-
-<br />
-
-## Benchmarks
-
-<p align="center"><sub>Execution-graded tests across professional domains. Local inference via the adaptive router (8gent / Ollama defaults).<br />Code compiles and runs against <code>bun:test</code> suites, or it fails. No string matching, no vibes.</sub></p>
-
-<br />
-
-The battle-test category is 15 tasks. Eight pass, seven do not. Both halves:
-
-| ID | Domain | Task | Score |
-|:---|:-------|:-----|------:|
-| BT003 | Data Engineering | Stream Processing Pipeline | **100** |
-| BT011 | Video Production | Scene Graph, Timeline, FFmpeg CLI | **100** |
-| BT007 | Digital Marketing | SEO Audit Engine: Scoring, Core Web Vitals | **96** |
-| BT014 | AI Consulting | Assessment Report Generator | **95** |
-| BT001 | Software Engineering | SaaS Auth: JWT, Roles, Rate Limiting | **94** |
-| BT002 | Software Engineering | Event-Driven Architecture: Pub/Sub, DLQ, Retry | **92** |
-| BT005 | Software Engineering | Typed State Machine: Guards, Actions | **92** |
-| BT012 | Music Technology | Notes, Chords, Scales, Progressions | **81** |
-| BT006 | Finance | Financial Dashboard | 54 |
-| BT008 | Marketing | Email Campaign | 54 |
-| BT004 | Developer Tooling | CLI Framework | 53 |
-| BT010 | Design | Design Tokens | 39 |
-| BT009 | DevOps | CI/CD Pipeline | 33 |
-| BT013 | Data Visualization | Data Visualization | 30 |
-| BT015 | Security | Security Audit | 30 |
-
-<sub>Scores are from the run recorded in <a href="benchmarks/README.md">benchmarks/README.md</a> (Bun on an Apple M2 Max, all local inference). BT001 moved 85 to 94 after one round of prompt mutations; the rest are single-pass. Additional categories: long-horizon (LH001-LH005), agentic (TC001-MR001), fullstack (FS001-FS003), UI design (UI001-UI008), ability showcase.</sub>
-
-```bash
-bun run benchmark:v2                    # single pass
-CATEGORY=battle-test bun run benchmark:loop  # autoresearch loop
-```
-
-<sub>Full results: <a href="benchmarks/README.md">benchmarks/README.md</a> &nbsp;·&nbsp; Model shootout: <a href="docs/MODEL-SHOOTOUT.md">docs/MODEL-SHOOTOUT.md</a></sub>
-
-<br />
-
----
-
-<br />
-
-## Project Structure
-
-<table>
-<tr>
-<td valign="top" width="50%">
-
-### Apps
-
-```
-apps/
-  tui/           Ink v6 terminal UI (main interface, shipped)
-  clui/          Tauri 2.0 desktop overlay (scaffolded)
-  dashboard/     Next.js admin panel (scaffolded)
-  debugger/      Session debugger (scaffolded)
-  demos/         Remotion video generation
-  installer/     Interactive install wizard (shipped)
-```
-
-</td>
-<td valign="top" width="50%">
-
-### Packages
-
-```
-packages/
-  eight/         Core agent engine (Vercel AI SDK) - shipped
-  providers/     16-provider adaptive router + two host-CLI slots + failover - shipped
-  memory/        SQLite + FTS5 persistent memory - shipped
-  orchestration/ WorktreePool, role registry, macro actions - shipped
-  permissions/   NemoClaw YAML policy engine - shipped
-  self-autonomy/ Evolution, reflection, HyperAgent - shipped
-  validation/    Self-healing executor - shipped
-  proactive/     Business agents, opportunity scanner - shipped
-  ast-index/     Blast radius engine - shipped
-  tools/         filesystem, shell, git, browser, AST tooling - shipped
-  voice/         STT (whisper.cpp) + TTS (macOS/KittenTTS) - partial
-  kernel/        RL fine-tuning pipeline (off by default) - shipped
-  personality/   Brand voice, "Infinite Gentleman" - shipped
-  pet/           Companion system + dock pet - shipped
-  telegram/      Telegram bot portal - shipped
-  daemon/        Persistent vessel daemon (Fly.io) - partial
-  auth/          Clerk auth + GitHub integration - scaffolded
-  db/            Convex reactive database - scaffolded
-  control-plane/ Multi-tenant management - scaffolded
-  board-plane/   Board-level vessel orchestration - scaffolded
-  board-vessel/  Autonomous AI officer blueprint - scaffolded
-```
-
-</td>
-</tr>
-</table>
-
-<sub>Additional directories: <code>benchmarks/</code> execution-graded benchmarks + autoresearch &nbsp;·&nbsp; <code>bin/</code> CLI entry points &nbsp;·&nbsp; <code>docs/</code> architecture docs</sub>
-
-<br />
-
----
-
-<br />
-
-## Roadmap
-
-See [ROADMAP.md](ROADMAP.md) for the full ledger. Snapshot:
-
-<table>
-<tr>
-<td valign="top" width="33%">
-
-### Just shipped (v0.20.0)
-
-Released 13 October 2026. Full notes on the [release page](https://github.com/8gi-foundation/8gent-code/releases/tag/v0.20.0).
-
-- Local screen grounding: `screen_locate`, `desktop_act` and `chooseElement` find and act on a target through a local grounder, with approval in every mode
-- `8gent deck render spec.json` and `render_video_deck` render a JSON spec into slides or video deterministically
-- Daemon: shared sessions across the TUI and the browser panel, a live anatomy page at `/live` (Ctrl+F), crash resume that never repeats a side effect
-- Local models get 8gent Browser tools through an on-demand isolated profile
-- Onboarding finds llama-server and LM Studio on every OS and saves your choice
-- `8gent update` pulls and rebuilds source checkouts, including 8gent Browser
-
-Earlier: v0.18.0 made installs work on a bare Linux machine and kept `web_fetch` to the public internet.
-
-</td>
-<td valign="top" width="33%">
-
-### Next
-
-- **Trigger 4 wire** (#2537) - one line in agent.ts when shared DoomLoopDetector accessor lands
-- **`apps/8gent-handeyes` CLI** (#2538) - headless parity per dispatch-everywhere rule
-- **Mid-click re-locate** (#2539) - auto-invoke the wired hook in hands-queue
-- **BashParser runtime wiring** (#2484) - wire `gateBashCommand` into the spawn site
-- **TUI bug fixes** - slash registry race (#2473), frame buffer corruption (#2474)
-- **Per-tab model routing** - each agent tab gets its own provider/model
-- **Voice hardening** - KittenTTS integration, full-duplex Moshi backend stabilization
-- **Keychain test fix** (#2510) - clear the perpetual Validate-red blocker
-
-</td>
-<td valign="top" width="33%">
-
-### Later / under evaluation
-
-- **Virtuoso + OPAL eval** (#2486) - federated knowledge-graph substrate for Lotus / 8gentOS data spaces. 1-week scoped spike, decision criteria filed.
-- **MCP server support** - expose 8gent tools as MCP servers for external agent consumption
-- **Extension system** - ExtensionCrafter for autonomous source-to-extension generation
-- [HyperAgent meta-improvement loop](docs/HYPERAGENT-SPEC.md)
-- [Kernel fine-tuning pipeline](docs/KERNEL-FINETUNING.md) activation
-- Desktop client (Swift AppKit, `apps/lil-eight/`)
-- Multi-tenant control plane via 8GI gateway
-- Personal LoRA from session training pairs
-
-</td>
-</tr>
-</table>
-
-### Process amendments
-- **#2475** Constitutional amendment (2026-05-09): any extraction / refactor / feature touching MORE THAN 3 GitHub issues requires boardroom alignment + signed PRD + minutes filed BEFORE Wave 1 dispatch.
-- **CleanRoomPort skill** in the maintainer's local skill library, for AGPL-safe pattern porting.
-- **Strategic note** #2469 - owning the renderer (vs Ink) is filed as NOT-TO-BUILD, multi-month deferred.
-
-<br />
-
----
-
-<br />
-
-## Slash Commands
-
-<table>
-<tr>
-<td valign="top" width="50%">
+From the shell:
 
 | Command | What it does |
 |:--------|:-------------|
-| `/voice chat` | Start voice conversation mode |
-| `/model <name>` | Switch LLM model |
-| `/provider <name>` | Switch LLM provider |
-| `/kanban` | Kanban task board |
-| `/predict` | Confidence-scored step predictions |
-| `/evidence` | Session evidence summary |
-| `/router` | Task router + model selection |
+| `8gent` | Open the chat interface |
+| `8gent --resume` | Resume the last session |
+| `8gent run <prompt>` | One-shot run without the interface, see [headless use](docs/user/headless.md) |
+| `8gent review` | Review the current git diff |
+| `8gent keys` | Open your provider keys file |
+| `8gent doctor` | Check models and tools |
 
-</td>
-<td valign="top" width="50%">
+Inside the interface:
 
 | Command | What it does |
 |:--------|:-------------|
-| `/history` | Browse past sessions |
-| `/resume` | Resume a previous session |
-| `/compact` | Compact current session |
-| `/github` | GitHub integration |
-| `/auth status` | Check auth state |
-| `/debug` | Session inspector |
-| `/deploy <target>` | Deploy to Vercel/Railway/Fly |
-| `/music` | Toggle lofi music (ADHD mode) |
-| `/pet` | Companion dock pet |
-| `/rename` | Rename the current session |
+| `/help` | List the core commands (`/help all` lists every command) |
+| `/model`, `/provider` | Choose the model or the provider |
+| `/plan`, `/status` | Show the current plan, or the session status |
+| `/goal <goal>` | Run a goal to completion |
+| `/compact` | Summarize older messages to free context |
+| `/resume`, `/history` | Pick up an earlier session, or browse all of them |
+| `/fork`, `/rewind` | Branch the conversation, or go back to a checkpoint |
+| `/export` | Save the session as HTML |
+| `/skills` | List and manage skills |
+| `/boardroom` | Get a structured review of a proposed change from a set of role-based viewpoints before you build it. It returns a decision and, on go, a requirements doc, and writes no code |
+| `/privacy` | Show how much stayed on this machine and each cloud call |
+| `/hotkeys` | List every keyboard shortcut |
+| `/quit` | Exit |
 
-</td>
-</tr>
-</table>
+Type `/` to see the core commands, or start typing a name to find any other. In a message, `@` picks a project file, `!cmd` runs a shell command and sends its output with your next message, and `!!cmd` runs it without sending the output.
 
-<br />
+`Shift+Tab` changes how much 8gent may do without asking: Plan (changes nothing), Ask (the default), Guarded (safe steps run, risky ones ask) or Infinite (runs without asking, except pushes to the default branch and commands that send data; returns to Ask after 30 minutes). See [docs/guides/permission-modes.md](docs/guides/permission-modes.md). All keys are in [docs/user/keys.md](docs/user/keys.md).
 
----
+## Configuration and files
 
-<br />
+Settings, keys and data live in `~/.8gent/`. Set `EIGHT_DATA_DIR` to move the folder.
 
-## Documentation
+| Path | What it holds |
+|:-----|:--------------|
+| `~/.8gent/keys.env` | Provider API keys |
+| `~/.8gent/providers.json` | Your own endpoints (any server that speaks the OpenAI, Ollama or Anthropic format) |
+| `~/.8gent/settings.json` | Preferences, such as `thinking.level` |
+| `~/.8gent/failover.json` | Your own failover chains |
+| `~/.8gent/skills/` | Skills, one markdown file each, each becomes a `/<name>` command |
+| `~/.8gent/extensions/` | Extensions |
+| `~/.8gent/mcp.json`, `~/.8gent/hooks.json` | MCP servers and hooks |
 
-<details>
-<summary><strong>Architecture &amp; Specs</strong></summary>
+Set `NO_COLOR=1` to turn colour off.
 
-<br />
+## Privacy
 
-| Doc | What it covers |
-|:----|:---------------|
-| [SOUL.md](SOUL.md) | Agent persona and principles |
-| [AGENTS.md](AGENTS.md) | Dev conventions, design system, repo rules (also served as `8GENT.md`) |
-| [docs/HYPERAGENT-SPEC.md](docs/HYPERAGENT-SPEC.md) | HyperAgent metacognitive self-modification spec |
-| [docs/MODEL-SHOOTOUT.md](docs/MODEL-SHOOTOUT.md) | Local vs cloud model comparison results |
-| [docs/specs/MEMORY-SPEC.md](docs/specs/MEMORY-SPEC.md) | Memory layer architecture and API reference |
-| [docs/specs/KERNEL-FINETUNING.md](docs/specs/KERNEL-FINETUNING.md) | RL fine-tuning pipeline |
-| [docs/PERSONALIZATION.md](docs/PERSONALIZATION.md) | 5-layer personalization system |
-| [docs/guides/TOOLSHED.md](docs/guides/TOOLSHED.md) | Capability discovery and skill registry |
-| [docs/guides/permissions.md](docs/guides/permissions.md) | Policy engine and approval gates |
-| [docs/guides/permission-modes.md](docs/guides/permission-modes.md) | Plan, Ask, Guarded and Infinite on Shift+Tab |
-| [docs/guides/llama-server.md](docs/guides/llama-server.md) | Running on llama-server with no Ollama |
-| [docs/install/macos.md](docs/install/macos.md), [windows.md](docs/install/windows.md), [linux.md](docs/install/linux.md) | Install and run on each OS, every model option |
-| [docs/install/providers.md](docs/install/providers.md) | Every provider, flag and environment variable |
-| [docs/guides/system-one-shared-judge.md](docs/guides/system-one-shared-judge.md) | One shared System One judge per machine |
-| [docs/guides/no-color.md](docs/guides/no-color.md) | Turning colour off with NO_COLOR |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
+With the defaults, prompts and code go only to a model on your own machine. Nothing is sent to a hosted provider until you add a key for it. If no local model is running and exactly one hosted provider has a key, 8gent uses it. Keys stay on your machine, in ~/.8gent/keys.env or the OS keychain. Web search and fetch ask first (the prompt defaults to No), and those requests leave the machine. /privacy shows how much stayed local and lists each hosted model call, not web requests. Security reports: see [SECURITY.md](SECURITY.md).
 
-</details>
+## Help and contributing
 
-<details>
-<summary><strong>External Resources</strong></summary>
+- Questions and bugs: [open an issue](https://github.com/8gi-foundation/8gent-code/issues). Inside a session, `/bug <description>` saves a secret-free bug report folder on your machine to share.
+- Contributing: read [CONTRIBUTING.md](CONTRIBUTING.md). Run `bun run test` and `bun run typecheck` before you open a pull request.
+- Project site: [8gent.dev](https://8gent.dev)
 
-<br />
+## License
 
-| Resource | Link |
-|:---------|:-----|
-| 8gent Constitution | [8gent.world/constitution](https://8gent.world/constitution) |
-| Presentation Decks | [8gent.world/media/decks](https://8gent.world/media/decks) |
-| Architecture Inspirations | [8gent.world/inspirations](https://8gent.world/inspirations) |
-
-</details>
-
-<br />
-
----
-
-<br />
-
-## Inspirations
-
-Architecture credits. These projects informed specific parts of 8gent's design.
-
-<table>
-<tr>
-<td valign="top" width="50%">
-
-- [Hermes by ArcadeAI](https://github.com/ArcadeAI/hermes) -persistent memory and self-evolution patterns
-- [CashClaw](https://github.com/nicepkg/CashClaw) -autonomous work discovery and value generation
-- NemoClaw -policy-driven governance and approval gate architecture
-- HyperAgents (Meta FAIR, March 2026) -metacognitive self-modification
-- Hypothesis Loop -atomic commit-verify-revert development cycle
-
-</td>
-<td valign="top" width="50%">
-
-- Blast Radius Engine -AST-based change impact estimation
-- Coding-agent worktree isolation -the pattern for parallel agent execution
-- Karpathy's autoresearch methodology -iterative prompt mutation and meta-optimization
-- [SoulSpec](https://github.com/OpenSoul-org/SoulSpec) -agent persona standard
-- [usecomputer](https://github.com/remorses/usecomputer) -cross-platform desktop automation via native Zig N-API
-- [Quitty](https://github.com/iad1tya/Quitty) -process management and resource conservation UX
-
-</td>
-</tr>
-</table>
-
-<sub>Full list at <a href="https://8gent.world/inspirations">8gent.world/inspirations</a></sub>
-
-<br />
-
----
-
-<br />
-
-<p align="center">
-  <strong>Apache 2.0</strong> - 8GI Foundation, Founder and Visionary
-</p>
-
-<p align="center">
-  <a href="https://x.com/8gentapp">X / Twitter</a> &nbsp;·&nbsp;
-  <a href="https://github.com/8gi-foundation/8gent-code">GitHub</a> &nbsp;·&nbsp;
-  <a href="https://8gent.dev">8gent.dev</a> &nbsp;·&nbsp;
-  <a href="https://8gent.world">8gent.world</a>
-</p>
-
-<br />
-
-<p align="center">
-  <sub>Your OS. Your rules. Your AI.</sub>
-</p>
+Apache 2.0. See [LICENSE](LICENSE).

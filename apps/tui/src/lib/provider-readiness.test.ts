@@ -302,3 +302,47 @@ describe("hosted providers never refuse a typed line on a slow probe", () => {
 		expect(Date.now() - t0).toBeLessThan(1000);
 	});
 });
+
+describe("fresh install, no local model, no key", () => {
+	test("first-run notice tells the person to start a local model or add a key, and no hosted endpoint is probed", async () => {
+		const probed: string[] = [];
+		const realFetch = globalThis.fetch;
+		globalThis.fetch = ((input: any, init?: any) => {
+			probed.push(String(input));
+			return realFetch(input, init);
+		}) as typeof fetch;
+		try {
+			const d = await resolveReadyProvider(
+				{ provider: "ollama", model: "" },
+				{
+					timeoutMs: 500,
+					endpoints: [
+						{
+							provider: "ollama",
+							label: "Ollama",
+							modelsUrl: "http://127.0.0.1:1/api/tags",
+							extract: () => [],
+						},
+					],
+				},
+			);
+			expect(d.kind).toBe("none");
+			if (d.kind === "none") {
+				expect(d.notice).toContain("Start a local model");
+				expect(d.notice).toContain("add a key");
+			}
+		} finally {
+			globalThis.fetch = realFetch;
+		}
+		expect(probed.every((u) => /127\.0\.0\.1|localhost/.test(u))).toBe(true);
+	});
+
+	test("startup no longer falls back to openrouter or fetches its list without a key", async () => {
+		const src = await Bun.file(new URL("../app.tsx", import.meta.url)).text();
+		expect(src).not.toContain('return { provider: "openrouter", model: "auto:free" }');
+		expect(src).toContain('currentProvider === "openrouter" && !process.env.OPENROUTER_API_KEY');
+		expect(src).toContain(
+			'currentProvider === "openrouter-free" && !process.env.OPENROUTER_API_KEY',
+		);
+	});
+});

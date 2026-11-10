@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { deriveProviders } from "./activity-rail-derivation.js";
+import { deriveProviders, routeSnapshot } from "./activity-rail-derivation.js";
 import { askedNote, modelOnScreen, providerOnScreen, routeOnScreen } from "./model-truth.js";
 
 const ASKED = "eight-1.0-q3:14b";
@@ -113,5 +113,26 @@ describe("routeOnScreen (what app.tsx renders into PROVIDERS)", () => {
 				routed: { model: RAN, provider: "lmstudio" },
 			}),
 		).toEqual({ ran: "llama3.2:3b", provider: "ollama" });
+	});
+});
+
+/**
+ * Pilot: with Ollama down the NOW strip said NO MODEL while the PROVIDERS rail
+ * still drew a filled "primary" dot beside the same model. A route that cannot
+ * answer is an offline row.
+ */
+describe("routeSnapshot: the rail agrees with the NOW strip", () => {
+	const route = { name: "ollama:qwen3.6:27b" };
+	const fallback = null;
+
+	test("a route that can answer is the primary", () => {
+		const rows = deriveProviders(routeSnapshot({ canAnswer: true, route, fallback }));
+		expect(rows).toEqual([{ name: route.name, state: "primary", latency: undefined }]);
+	});
+
+	test("a route that cannot answer is offline, never primary", () => {
+		const rows = deriveProviders(routeSnapshot({ canAnswer: false, route, fallback }));
+		expect(rows.map((r) => r.state)).toEqual(["offline"]);
+		expect(rows[0]?.name).toBe(route.name);
 	});
 });

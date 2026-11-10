@@ -224,7 +224,7 @@ describe("a named provider never falls back to another provider (#3746)", () => 
 		try {
 			const { reqs, error } = await turn("pin-a");
 			expect(reqs.filter((r) => r.server === "openrouter")).toEqual([]);
-			expect(error).toContain("No API key for openrouter");
+			expect(error).toMatch(/Next provider not tried, no API key: [^.]*openrouter/);
 		} finally {
 			process.env.OPENROUTER_API_KEY = prev;
 		}

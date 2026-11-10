@@ -25,7 +25,9 @@ import { resolveOllamaBaseUrl } from "../../../packages/ai/text-tool-endpoint.js
 import { dropOllamaCloudNames } from "../../../packages/core/ollama-cloud.js";
 import { answerFromLine } from "../../../packages/eight/android-setup.js";
 import { changelogOutput, readBundledChangelog, sanitizeForDisplay } from "../../../packages/eight/changelog-view.js";
+import { killLiveShells } from "../../../packages/eight/live-shells.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
+import { chatMessages } from "../../../packages/eight/session-messages.js";
 import {
 	type SessionListItem,
 	SessionStore,
@@ -169,6 +171,7 @@ import { startProviderHealthPolling } from "./lib/provider-health-schedule.js";
 import { probeProviders } from "./lib/provider-health.js";
 import { TelegramTab, type TelegramTabHost } from "./lib/telegram-tab.js";
 import { isUserThemeId } from "./lib/user-themes.js";
+import { createWaitNoticeGate } from "./lib/wait-notice.js";
 import {
 	type ThemeChoice,
 	applyDesignSystem,
@@ -250,6 +253,7 @@ import {
 	deriveTools,
 	fallbackFromChain,
 	planStepsFromText,
+	routeSnapshot,
 } from "./lib/activity-rail-derivation.js";
 import * as bgPool from "./lib/background-pool.js";
 import {
@@ -346,6 +350,7 @@ import {
 	modelListFailureNotice,
 	registryKeyNotice,
 } from "./lib/provider-truth.js";
+import { quitNow } from "./lib/quit.js";
 import {
 	type TurnError,
 	buildResultFor,
@@ -543,6 +548,7 @@ import {
 	pickBestChatModel,
 	planAgentBuild,
 	providerToRuntime,
+	savedChoiceIsPinned,
 	specForActivatedTab,
 	startupModelSeed,
 	tabAgentRole,
@@ -701,14 +707,20 @@ async function detectBestLocalProviderUntraced(): Promise<{ provider: string; mo
 	const _onlyKeyed = hostedKeyedProviders();
 	if (_onlyKeyed.length === 1) return { provider: _onlyKeyed[0], model: "" };
 
-	// No local provider answered. Default to OpenRouter free tier so a fresh
-	// Windows / Linux install boots into a working state instead of pointing
-	// at an ollama that isn't there.
-	return { provider: "openrouter", model: "auto:free" };
+	// Nothing local answered and no hosted key exists. Stay on the local provider with
+	// no model: no request goes to any hosted service until the person adds a key or
+	// picks one. The readiness gate then shows the first-run message.
+	return { provider: "ollama", model: "" };
 }
 
 loadEnvFile();
 const _savedProviderSettings = loadProviderSettings();
+// What was on disk at launch, before auto-detection below fills gaps. Only this is the
+// person's choice; a detected default is not (break 10).
+const _launchSavedChoice = {
+	provider: _savedProviderSettings.provider,
+	model: _savedProviderSettings.model,
+};
 // If no saved provider/model, auto-detect the best available local provider. Awaited
 // here, once, so the first frame still knows it; computeCliOverrides reuses the answer.
 // A saved HOSTED provider whose key is present wins over the local default, even
@@ -914,6 +926,26 @@ interface AppProps {
 	cliModel?: string;
 	/** Non-interactive: skip onboarding when --yes / -y */
 	cliAutoApprove?: boolean;
+}
+
+/**
+ * A stored session as chat bubbles. Each bubble keeps the time its message was
+ * written; the resume time is only a fallback for a file that has none.
+ */
+export function storedToBubbles(
+	stored: ReadonlyArray<{ role: string; content: unknown }>,
+	times?: ReadonlyArray<string>,
+): Message[] {
+	const stamp = Date.now();
+	return stored.map((m, i) => {
+		const written = times?.[i] ? new Date(times[i]) : null;
+		return {
+			id: `restored-${stamp}-${i}`,
+			role: (m.role === "user" || m.role === "assistant" ? m.role : "system") as Message["role"],
+			content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+			timestamp: written && !Number.isNaN(written.getTime()) ? written : new Date(),
+		};
+	});
 }
 
 export interface Message {
@@ -1555,13 +1587,8 @@ export function App({
 			if (resumed) {
 				setActiveSessionId(resumed.id);
 				if (resumed.messages.length > 0) {
-					const restored = resumed.messages.map((m, i) => ({
-						id: `restored-${i}`,
-						role: m.role as "user" | "assistant" | "system",
-						content: m.content,
-						timestamp: new Date(),
-					}));
-					setMessages(restored as Message[]);
+					setMessages(storedToBubbles(resumed.messages, resumed.times));
+					seedAgentHistory(activeTabIdRef.current, resumed.messages);
 				}
 				addSystemMessage(
 					`Resumed session: "${resumed.name || resumed.id}" (${resumed.messageCount} messages)`,
@@ -1698,6 +1725,26 @@ export function App({
 	// the foreground UI; other tabs' work continues in the background and
 	// shows up in tabMessagesRef when their chat() resolves.
 	const perTabAgents = usePerTabAgents();
+	// A resumed chat is painted AND handed to the model. The agent may not exist yet
+	// (launch with --resume builds it after this runs, or a model switch rebuilds it),
+	// so the history waits here for the tab's agent and is applied the moment it exists.
+	const restoredHistoryRef = useRef<{
+		tabId: string;
+		messages: Array<{ role: string; content: string }>;
+	} | null>(null);
+	const seedAgentHistory = (
+		tabId: string,
+		stored: ReadonlyArray<{ role: string; content: unknown }>,
+	) => {
+		restoredHistoryRef.current = { tabId, messages: chatMessages([...stored]) };
+		applyRestoredHistory(tabId, perTabAgents.getAgent(tabId));
+	};
+	const applyRestoredHistory = (tabId: string, target: Agent | null | undefined) => {
+		const pending = restoredHistoryRef.current;
+		if (!pending || pending.tabId !== tabId || !target) return;
+		restoredHistoryRef.current = null;
+		target.restoreFromCheckpoint(pending.messages);
+	};
 	const isProcessing = perTabAgents.isTabProcessing(activeTabId);
 	// Folded trace (#5170): while a turn runs, its steps sit behind one status row.
 	// The setting is read when a turn starts or a view changes, not on every render.
@@ -1806,7 +1853,12 @@ export function App({
 		if (
 			(cliProviderRequestedRef.current ||
 				cliModelRequestedRef.current ||
-				(_savedHostedWithKey && currentProvider === _savedProviderSettings.provider)) &&
+				savedChoiceIsPinned({
+					savedProvider: _launchSavedChoice.provider,
+					savedModel: _launchSavedChoice.model,
+					savedHostedWithKey: _savedHostedWithKey,
+					currentProvider,
+				})) &&
 			cliPinRef.current === null
 		) {
 			cliPinRef.current = {
@@ -2178,6 +2230,8 @@ export function App({
 						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
 						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
 					}
+				} else if (currentProvider === "openrouter-free" && !process.env.OPENROUTER_API_KEY) {
+					if (!cancelled) setAvailableModels([]);
 				} else if (currentProvider === "openrouter-free") {
 					// Fetch free models from OpenRouter API
 					const apiKey = process.env.OPENROUTER_API_KEY || "";
@@ -2194,6 +2248,9 @@ export function App({
 								freeModels.length > 0 ? freeModels : ["google/gemini-2.5-flash:free"],
 							);
 					}
+				} else if (currentProvider === "openrouter" && !process.env.OPENROUTER_API_KEY) {
+					// No key: nothing is sent to openrouter.ai. Add a key to list its models.
+					if (!cancelled) setAvailableModels([]);
 				} else if (currentProvider === "openrouter") {
 					// Fetch all OpenRouter models (top 20 by context length)
 					const apiKey = process.env.OPENROUTER_API_KEY || "";
@@ -2258,6 +2315,8 @@ export function App({
 
 	// Each fallback line is said once per session, not once per turn (#4754).
 	const fallbackNoticeGateRef = useRef(createFallbackNoticeGate());
+	// One "model has gone quiet" line per quiet spell per tab (break 12).
+	const waitNoticeGateRef = useRef(createWaitNoticeGate());
 	// After model list loads: ensure currentModel is valid for the active provider.
 	// If the model isn't in the fetched list (e.g. Ollama model on OpenRouter), auto-select.
 	// react-doctor-disable-next-line react-doctor/no-effect-chain
@@ -2590,7 +2649,11 @@ export function App({
 	}, []);
 	// Never leave a shell command behind: unmount, exit, SIGTERM and SIGHUP kill them.
 	useEffect(() => {
-		const uninstall = killBangsOnExit(() => stopBangRuns());
+		const uninstall = killBangsOnExit(() => {
+			stopBangRuns();
+			// A signal death never fires "exit", so the SIGKILL sweep there is not enough.
+			killLiveShells("SIGKILL");
+		});
 		return () => {
 			uninstall();
 			stopBangRuns();
@@ -2953,8 +3016,18 @@ export function App({
 			}
 			flushSession();
 			stopBangRuns();
-			if (agent) agent.cleanup().catch(() => {});
-			exit();
+			// Stop the turn first, then unmount, then a hard exit backstop: a turn
+			// waiting on a slow model must not hold the process open (break 13).
+			quitNow({
+				abortAll: () => {
+					agent?.abort();
+					perTabAgents.abortAll();
+					// A command the model started outlives the TUI otherwise (live-shells.ts).
+					killLiveShells("SIGTERM");
+					agent?.cleanup().catch(() => {});
+				},
+				unmount: exit,
+			});
 		}
 
 		// Toggle animations with Ctrl+A
@@ -3855,7 +3928,16 @@ export function App({
 					toolTrail: toTrailEntry(event),
 				});
 			},
-			onStall: ({ silentSeconds }) => {
+			onStall: ({ silentSeconds, model }) => {
+				// Say which model is quiet, once per quiet spell (break 12).
+				const waitLine = waitNoticeGateRef.current(tabId, { silentSeconds, model });
+				if (waitLine)
+					appendToTabLatest.current(tabId, {
+						id: messageId("wait"),
+						role: "system",
+						content: waitLine,
+						timestamp: new Date(),
+					});
 				if (tabId !== activeTabId) return;
 				setNarratorText(
 					silentSeconds === null
@@ -4319,6 +4401,7 @@ export function App({
 				// own error. Local providers still gate.
 				if (_check.ok || !shouldGateOnReadiness(currentProvider)) {
 					perTabAgents.setAgent(_initTabId, newAgent);
+					applyRestoredHistory(_initTabId, newAgent);
 					setAgent(newAgent);
 					setAgentReady(true);
 					built();
@@ -4571,19 +4654,9 @@ export function App({
 		return sessionMgr.store(activeSessionId);
 	}, [activeSessionId, messages, sessionMgr, currentModel, currentProvider]);
 
-	/** Stored messages as chat bubbles. */
-	const restoredBubbles = (stored: ReadonlyArray<{ role: string; content: unknown }>): Message[] =>
-		stored.map((m, i) => ({
-			id: `restored-${Date.now()}-${i}`,
-			role: (m.role === "user" || m.role === "assistant" ? m.role : "system") as Message["role"],
-			content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
-			timestamp: new Date(),
-		}));
-
 	/**
-	 * Make a stored session the active one and show its transcript (E3). The
-	 * 8gent's own context is not reloaded: the Agent has no history setter
-	 * yet, so the line says what was restored and nothing more.
+	 * Make a stored session the active one: show its transcript and hand the
+	 * same turns to the model, so the next request carries them.
 	 */
 	const openStoredSession = useCallback(
 		(id: string): boolean => {
@@ -4593,7 +4666,8 @@ export function App({
 				return false;
 			}
 			setActiveSessionId(found.id);
-			setMessages(restoredBubbles(found.messages));
+			setMessages(storedToBubbles(found.messages, found.times));
+			seedAgentHistory(activeTabIdRef.current, found.messages);
 			lastSaveCount.current = found.messages.length;
 			addSystemMessage(
 				`Resumed "${found.name || found.id}": ${found.messageCount} messages, ${found.model}, ${found.cwd}. Transcript restored.`,
@@ -5073,8 +5147,10 @@ export function App({
 					} else if (sub === "switch" && args[1]) {
 						try {
 							store.branch(args[1]);
-							setMessages(restoredBubbles(store.messages(args[1])));
-							lastSaveCount.current = store.messages(args[1]).length;
+							const onBranch = store.messages(args[1]);
+							setMessages(storedToBubbles(onBranch, store.messageTimes()));
+							seedAgentHistory(activeTabIdRef.current, onBranch);
+							lastSaveCount.current = onBranch.length;
 							addSystemMessage(`Continuing from entry ${args[1]}.`);
 						} catch (e) {
 							addSystemMessage(`Branch error: ${e instanceof Error ? e.message : String(e)}`);
@@ -5319,7 +5395,7 @@ export function App({
 							addSystemMessage("No saved sessions.");
 						} else {
 							const lines = sessions.map((s) => {
-								const label = s.name || `Session ${s.createdAt.slice(0, 10)}`;
+								const label = s.name || s.title || `Session ${s.createdAt.slice(0, 10)}`;
 								const ago = Math.floor((Date.now() - new Date(s.lastActiveAt).getTime()) / 60000);
 								const timeStr = ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`;
 								return `  ${s.id}  ${label.slice(0, 30).padEnd(30)}  ${s.messageCount} msgs  ${timeStr}`;
@@ -5332,13 +5408,8 @@ export function App({
 						if (resumed) {
 							setActiveSessionId(resumed.id);
 							if (resumed.messages.length > 0) {
-								const restored = resumed.messages.map((m, i) => ({
-									id: `restored-${i}`,
-									role: m.role as "user" | "assistant" | "system",
-									content: m.content,
-									timestamp: new Date(),
-								}));
-								setMessages(restored as Message[]);
+								setMessages(storedToBubbles(resumed.messages, resumed.times));
+								seedAgentHistory(activeTabIdRef.current, resumed.messages);
 							}
 							addSystemMessage(
 								`Resumed: "${resumed.name || resumed.id}" (${resumed.messageCount} messages)`,
@@ -5522,13 +5593,8 @@ export function App({
 						break;
 					}
 					setActiveSessionId(resumedLast.id);
-					const restoredMsgs = resumedLast.messages.map((m, i) => ({
-						id: `restored-${i}`,
-						role: m.role as "user" | "assistant" | "system",
-						content: m.content,
-						timestamp: new Date(),
-					}));
-					setMessages(restoredMsgs as Message[]);
+					setMessages(storedToBubbles(resumedLast.messages, resumedLast.times));
+					seedAgentHistory(activeTabIdRef.current, resumedLast.messages);
 					addSystemMessage(
 						`Restored: "${resumedLast.name || resumedLast.id}"\n  ${resumedLast.messageCount} messages - ${resumedLast.model}\n  Last active: ${new Date(resumedLast.lastActiveAt).toLocaleString()}\n\nContext restored. Continue where you left off.`,
 					);
@@ -7784,6 +7850,7 @@ export function App({
 	// tab. With per-tab agents, each tab id has its own queue + Agent + ESC
 	// scope so concurrent submissions across Orchestrator / Engineer / QA do
 	// not block one another.
+	const [snapSeq, setSnapSeq] = useState(0);
 	const handleSubmit = async (
 		rawInput: string,
 		submitTabId?: string,
@@ -7808,6 +7875,10 @@ export function App({
 
 		// During setup an empty Enter is an answer: it takes the default.
 		if (!input && !attached && !showOnboarding) return;
+
+		// Any submit, slash commands included, returns the chat to the live edge.
+		// A slash command adds no user message, so the list cannot infer it.
+		setSnapSeq((n) => n + 1);
 
 		// (gh auth LLM intercept removed — now handled as a deterministic gate in the UI)
 
@@ -8756,7 +8827,8 @@ export function App({
 							try {
 								store.branch(entryId);
 								const onPath = store.messages(entryId);
-								setMessages(restoredBubbles(onPath));
+								setMessages(storedToBubbles(onPath, store.messageTimes()));
+								seedAgentHistory(activeTabIdRef.current, onPath);
 								lastSaveCount.current = onPath.length;
 								addSystemMessage(
 									`Continuing from entry ${entryId} (${onPath.length} messages on this path).`,
@@ -9162,13 +9234,19 @@ export function App({
 		turnError,
 	});
 	readinessRef.current = readiness;
-	const providerRows = deriveProviders({
-		primary: currentModel
-			? { name: `${shownProvider}:${shownModel.ran}`, asked: shownModel.asked }
-			: { name: currentProvider },
-		fallback: railFallback(shownProvider, shownModel.ran),
-		offline: null,
-	});
+	const providerRows = deriveProviders(
+		currentModel
+			? routeSnapshot({
+					canAnswer: readiness.state !== "none",
+					route: { name: `${shownProvider}:${shownModel.ran}`, asked: shownModel.asked },
+					fallback: railFallback(shownProvider, shownModel.ran),
+				})
+			: {
+					primary: { name: currentProvider },
+					fallback: railFallback(shownProvider, shownModel.ran),
+					offline: null,
+				},
+	);
 	const orchestrationAgents: OrchestrationAgentSnapshot[] = orchestration.agents.map((a) => ({
 		id: a.id,
 		name: a.name,
@@ -9319,6 +9397,7 @@ export function App({
 										onToggleCompaction={toggleCompaction}
 										touchHints={keysUp}
 										approvalPending={isApprovalPending}
+										snapSeq={snapSeq}
 									/>
 								)}
 							</Box>

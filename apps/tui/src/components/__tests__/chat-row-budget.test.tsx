@@ -236,7 +236,8 @@ describe("chat box at 80x45 with 13 chat rows (#3019)", () => {
 		const chat = (await lastFrame(true, msgs)).slice(CHROME_TOP, CHROME_TOP + CHAT_ROWS).join("\n");
 		expect(chat).toContain("All requested steps are complete.");
 		expect(chat).toContain("step 30 done");
-		// The user turn above is a whole message, so shift+↑ is offered.
-		expect(chat.split("\n")[0]).toMatch(/^↑ \d+ earlier lines {2}shift\+↑\s*$/);
+		// The user turn above is a whole message, so paging up is offered. The
+		// hint names PgUp, the key that pages the chat on every keyboard.
+		expect(chat.split("\n")[0]).toMatch(/^↑ \d+ earlier lines {2}PgUp\s*$/);
 	});
 });

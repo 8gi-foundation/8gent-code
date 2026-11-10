@@ -146,6 +146,8 @@ export interface SessionListItem {
 	provider?: string;
 	createdAt: string;
 	lastActiveAt: string;
+	/** The first thing the person typed, one line: what the picker shows when the session has no name. */
+	title?: string;
 	/** Messages on the current path: equals SessionStore.messages().length. */
 	messageCount: number;
 	branch?: string;
@@ -187,6 +189,19 @@ const CONTROL_TEXT = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g;
 /** A name is one line of plain text: every C0/C1 control character goes. */
 export function cleanName(s: string): string {
 	return s.replace(CONTROL_ALL, "");
+}
+
+const TITLE_MAX = 60;
+
+/**
+ * A session's fallback title: its first user prompt as one plain line, cut to
+ * TITLE_MAX. Empty when the content is not text or has no words.
+ */
+export function promptTitle(content: unknown): string | undefined {
+	if (typeof content !== "string") return undefined;
+	const line = cleanText(content).replace(/\s+/g, " ").trim();
+	if (!line) return undefined;
+	return line.length > TITLE_MAX ? `${line.slice(0, TITLE_MAX - 1)}…` : line;
 }
 
 /** Body text keeps tabs and newlines; terminal escapes and other controls go. */
@@ -475,6 +490,11 @@ export class SessionStore {
 	 */
 	messages(entryId: string | null = this._leafId): StoredMessage[] {
 		return this.transcriptEntries(entryId).map(toMessage);
+	}
+
+	/** When each message in messages() was written (ISO), same order. */
+	messageTimes(): string[] {
+		return this.transcriptEntries().map((e) => e.ts);
 	}
 
 	/** The path entries messages() renders, in the same order. */
@@ -888,6 +908,7 @@ function listTree(sessionsDir: string): SessionListItem[] {
 			let provider = header.provider;
 			let branch = header.branch;
 			let channel = header.channel;
+			let title: string | undefined;
 			// One pass. Tree entries are read by their fixed key prefix (the writer
 			// always emits type, id, parentId first) so message bodies are never
 			// parsed; the count walks the current path, the same number
@@ -898,6 +919,16 @@ function listTree(sessionsDir: string): SessionListItem[] {
 				if (!line) continue;
 				const m = ENTRY_PREFIX.exec(line);
 				if (m) {
+					if (title === undefined && line.includes('"role":"user"')) {
+						try {
+							const e = JSON.parse(line) as MessageEntry;
+							if (e.type === "message" && e.message?.role === "user") {
+								title = promptTitle(e.message.content);
+							}
+						} catch {
+							// torn line
+						}
+					}
 					const parentId = m[3] === "null" ? null : m[3].slice(1, -1);
 					parent.set(m[2], { parentId, transcript: m[1] !== "compaction" });
 					leaf = m[2];
@@ -936,6 +967,7 @@ function listTree(sessionsDir: string): SessionListItem[] {
 				provider,
 				createdAt: header.createdAt,
 				lastActiveAt: fs.statSync(file).mtime.toISOString(),
+				...(title ? { title } : {}),
 				messageCount,
 				format: "tree",
 				file,
@@ -948,6 +980,16 @@ function listTree(sessionsDir: string): SessionListItem[] {
 		}
 	}
 	return out;
+}
+
+function legacyTitle(messages: unknown): { title: string } | Record<string, never> {
+	if (!Array.isArray(messages)) return {};
+	for (const m of messages as Array<{ role?: unknown; content?: unknown }>) {
+		if (m?.role !== "user") continue;
+		const title = promptTitle(m.content);
+		if (title) return { title };
+	}
+	return {};
 }
 
 function listLegacy(sessionsDir: string): SessionListItem[] {
@@ -972,6 +1014,7 @@ function listLegacy(sessionsDir: string): SessionListItem[] {
 				provider: typeof raw.provider === "string" ? raw.provider : undefined,
 				createdAt: String(raw.createdAt ?? ""),
 				lastActiveAt: String(raw.lastActiveAt ?? raw.createdAt ?? ""),
+				...legacyTitle(raw.messages),
 				messageCount: typeof raw.messageCount === "number" ? raw.messageCount : 0,
 				format: "legacy",
 				file,

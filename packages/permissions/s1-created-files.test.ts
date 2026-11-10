@@ -66,13 +66,20 @@ let ws: string;
 let outside: string;
 let judge: RmIsDangerous;
 const saved: Record<string, string | undefined> = {};
-const KEYS = [SYSTEM_ONE_FLAG, SYSTEM_ONE_ALLOWLIST_FLAG, "EIGHT_HEADLESS", "EIGHT_WORKSPACE_ROOT"];
+const KEYS = [
+	"EIGHT_HEADLESS_APPROVE",
+	SYSTEM_ONE_FLAG,
+	SYSTEM_ONE_ALLOWLIST_FLAG,
+	"EIGHT_HEADLESS",
+	"EIGHT_WORKSPACE_ROOT",
+];
 
 beforeAll(() => {
 	for (const k of KEYS) saved[k] = process.env[k];
 	Reflect.deleteProperty(process.env, "EIGHT_WORKSPACE_ROOT");
 	Reflect.deleteProperty(process.env, SYSTEM_ONE_ALLOWLIST_FLAG);
 	process.env.EIGHT_HEADLESS = "1";
+	process.env.EIGHT_HEADLESS_APPROVE = "1";
 });
 
 afterAll(() => {

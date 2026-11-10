@@ -163,6 +163,8 @@ function startDaemon(n: number): ChildProcess {
 			EIGHT_DAEMON_PORT: String(DAEMON_PORT),
 			EIGHT_RESUME_ON_BOOT: "1",
 			EIGHT_AUTO_CONTINUE: "1",
+			// A fixture with no terminal: opt in so the scripted command runs (unattended defaults to no).
+			EIGHT_HEADLESS_APPROVE: "1",
 			EIGHT_CHECKPOINT_EVERY: "1",
 			DEFAULT_RUNTIME: "ollama",
 			DEFAULT_MODEL: "stub",

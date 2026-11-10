@@ -152,6 +152,12 @@ describe("the ladder", () => {
 		expect(claudeRuntimeRefusal(undefined)).toBeNull();
 	});
 
+	test("web_search and web_fetch are not read-only: Plan refuses them (they leave the device)", async () => {
+		for (const t of ["web_search", "web_fetch"]) {
+			expect(await planModeRefusal(t, {})).toContain("[PLAN MODE]");
+		}
+	});
+
 	test("Plan lets reads and provably read-only shell commands through, refuses everything else", async () => {
 		for (const t of [
 			"read_file",
@@ -160,7 +166,6 @@ describe("the ladder", () => {
 			"git_status",
 			"git_diff",
 			"git_log",
-			"web_search",
 		]) {
 			expect(await planModeRefusal(t, {})).toBeNull();
 		}
@@ -409,19 +414,27 @@ describe("Guarded puts System One in front of Ask, with EIGHT_SYSTEM_ONE=0", () 
 	});
 
 	// run_command goes through cmd.exe on Windows, where printf does not exist.
-	test.skipIf(process.platform === "win32")("an allowed command that is not dangerous runs without a card (Ask would have asked)", async () => {
-		const out = await executorIn(w.dir, "guarded").execute("run_command", {
-			command: "printf ok > made.txt",
-		});
-		expect(out).not.toContain("DENIED");
-		expect(w.asked).toEqual([]);
-		expect(readFileSync(join(w.dir, "made.txt"), "utf-8")).toBe("ok");
-		// Native path, same rule.
-		const nat = await native("run_command", { command: "printf ok > made2.txt" }, w.dir, "guarded");
-		expect(nat).not.toContain("DENIED");
-		expect(existsSync(join(w.dir, "made2.txt"))).toBe(true);
-		expect(w.asked).toEqual([]);
-	});
+	test.skipIf(process.platform === "win32")(
+		"an allowed command that is not dangerous runs without a card (Ask would have asked)",
+		async () => {
+			const out = await executorIn(w.dir, "guarded").execute("run_command", {
+				command: "printf ok > made.txt",
+			});
+			expect(out).not.toContain("DENIED");
+			expect(w.asked).toEqual([]);
+			expect(readFileSync(join(w.dir, "made.txt"), "utf-8")).toBe("ok");
+			// Native path, same rule.
+			const nat = await native(
+				"run_command",
+				{ command: "printf ok > made2.txt" },
+				w.dir,
+				"guarded",
+			);
+			expect(nat).not.toContain("DENIED");
+			expect(existsSync(join(w.dir, "made2.txt"))).toBe(true);
+			expect(w.asked).toEqual([]);
+		},
+	);
 
 	test("a dangerous command System One allows still gets the card", async () => {
 		const before = statSync(join(w.dir, "build")).mode & 0o777;
@@ -517,9 +530,11 @@ describe("headless (the pilot): Guarded behaves exactly like today's EIGHT_SYSTE
 	beforeEach(() => {
 		w = freshWorld();
 		process.env.EIGHT_HEADLESS = "1";
+		process.env.EIGHT_HEADLESS_APPROVE = "1";
 	});
 	afterEach(() => {
 		Reflect.deleteProperty(process.env, "EIGHT_HEADLESS");
+		Reflect.deleteProperty(process.env, "EIGHT_HEADLESS_APPROVE");
 		Reflect.deleteProperty(process.env, SYSTEM_ONE_FLAG);
 		rmSync(w.dir, { recursive: true, force: true });
 	});
