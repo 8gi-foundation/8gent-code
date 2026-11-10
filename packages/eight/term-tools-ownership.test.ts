@@ -10,10 +10,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "b
 import {
 	chmodSync,
 	existsSync,
+	lstatSync,
+	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
 	statSync,
+	symlinkSync,
 	utimesSync,
 	writeFileSync,
 } from "node:fs";
@@ -76,7 +79,9 @@ mock.module("../terminal-tab/index.js", () => ({
 	},
 	realTmuxSync: () => "",
 	releaseRun: realTerminalTab.releaseRun,
-	removeSessionLog: realTerminalTab.removeSessionLog,
+	// The real guard, pointed at the scratch log directory.
+	removeSessionLog: (p: string) => realTerminalTab.removeSessionLog(p, LOG_DIR),
+	stopServer: realTerminalTab.stopServer,
 	sweepDeadRuns: () => [],
 	sweepSessionLogs: () => ({ deleted: [], tightened: [] }),
 	thisTmuxRun: () => runB,
@@ -116,8 +121,22 @@ async function spawn(extra: Record<string, unknown> = {}): Promise<string> {
 	return out.sessionId;
 }
 
+/** What execFileSync throws when tmux runs and exits 1 ("no server running on ..."). */
+function tmuxSaysNo(): Error {
+	return Object.assign(new Error("no server running"), { status: 1, signal: null });
+}
+
+/** What execFileSync throws when tmux is killed at the timeout: proves nothing. */
+function tmuxTimedOut(): Error {
+	return Object.assign(new Error("spawnSync tmux ETIMEDOUT"), {
+		code: "ETIMEDOUT",
+		status: null,
+		signal: "SIGTERM",
+	});
+}
+
 /**
- * A fake synchronous tmux. After kill-server, list-sessions throws (no server)
+ * A fake synchronous tmux. After kill-server, list-sessions says no server
  * unless `serverSurvives`, which models a stop that did not take.
  */
 function fakeRunner(serverSurvives = false) {
@@ -126,7 +145,7 @@ function fakeRunner(serverSurvives = false) {
 	const run = (argv: string[]) => {
 		argvs.push(argv);
 		if (argv.includes("kill-server")) stopped = !serverSurvives;
-		if (argv.includes("list-sessions") && stopped) throw new Error("no server running");
+		if (argv.includes("list-sessions") && stopped) throw tmuxSaysNo();
 		return "";
 	};
 	return { argvs, run };
@@ -248,7 +267,7 @@ describe("quitting ends the sessions this run started", () => {
 		const argvs: string[][] = [];
 		endOwnedSessions((argv) => {
 			argvs.push(argv);
-			throw new Error("no server");
+			throw tmuxSaysNo();
 		});
 		expect(argvs.map((x) => x.slice(2, 5))).toEqual([
 			["kill-session", "-t", `=${a}`],
@@ -257,6 +276,21 @@ describe("quitting ends the sessions this run started", () => {
 			["list-sessions"],
 		]);
 		expect(ownedSessions()).toEqual([]);
+		// tmux itself said no server is running there: the record is released.
+		expect(existsSync(runB.ownerPath)).toBe(false);
+	});
+
+	test("a stop that times out or fails to run keeps the socket and owner record for the sweep", async () => {
+		for (const failure of [tmuxTimedOut, () => new Error("tmux could not start")]) {
+			await spawn();
+			endOwnedSessions(() => {
+				throw failure();
+			});
+			expect(ownedSessions()).toEqual([]);
+			expect(existsSync(runB.ownerPath)).toBe(true);
+		}
+		endOwnedSessions(fakeRunner().run);
+		expect(existsSync(runB.ownerPath)).toBe(false);
 	});
 
 	test("the socket and owner record are kept while the server still answers after kill-server", async () => {
@@ -379,18 +413,13 @@ describe("one tmux socket per run", () => {
 		const dead = realTerminalTab.newTmuxRun(SOCK_DIR, deadPid);
 		layDown(dead, `${deadPid}\n`);
 		expect(realTerminalTab.isPidAlive(deadPid)).toBe(false);
-		const calls: string[][] = [];
-		const swept = realTerminalTab.sweepDeadRuns(
-			SOCK_DIR,
-			(argv) => {
-				calls.push(argv);
-				return "";
-			},
-			realTerminalTab.isPidAlive,
-			runB,
-		);
+		const { argvs: calls, run } = fakeRunner();
+		const swept = realTerminalTab.sweepDeadRuns(SOCK_DIR, run, realTerminalTab.isPidAlive, runB);
 		expect(swept).toEqual([dead.id]);
-		expect(calls).toEqual([["-S", dead.socketPath, "kill-server"]]);
+		expect(calls).toEqual([
+			["-S", dead.socketPath, "kill-server"],
+			["-S", dead.socketPath, "list-sessions"],
+		]);
 		expect(existsSync(dead.socketPath)).toBe(false);
 		expect(existsSync(dead.ownerPath)).toBe(false);
 	});
@@ -439,6 +468,34 @@ describe("one tmux socket per run", () => {
 		).toEqual([]);
 		expect(existsSync(runB.socketPath)).toBe(true);
 		realTerminalTab.releaseRun(runB);
+	});
+
+	test("a dead run whose server will not stop keeps its socket and record for a later sweep", () => {
+		const dead = realTerminalTab.newTmuxRun(SOCK_DIR, deadPid);
+		layDown(dead, `${deadPid}\n`);
+		const swept = realTerminalTab.sweepDeadRuns(
+			SOCK_DIR,
+			() => {
+				throw tmuxTimedOut();
+			},
+			realTerminalTab.isPidAlive,
+			runB,
+		);
+		expect(swept).toEqual([]);
+		expect(existsSync(dead.socketPath)).toBe(true);
+		expect(existsSync(dead.ownerPath)).toBe(true);
+		// tmux answers that nothing runs there: now it is removed.
+		const later = realTerminalTab.sweepDeadRuns(
+			SOCK_DIR,
+			() => {
+				throw tmuxSaysNo();
+			},
+			realTerminalTab.isPidAlive,
+			runB,
+		);
+		expect(later).toEqual([dead.id]);
+		expect(existsSync(dead.socketPath)).toBe(false);
+		expect(existsSync(dead.ownerPath)).toBe(false);
 	});
 });
 
@@ -558,5 +615,64 @@ describe("session logs", () => {
 		expect(mode(youngTight)).toBe(0o600);
 		expect(existsSync(notLog)).toBe(true);
 		expect(mode(notLog)).toBe(0o644);
+	});
+
+	// Deletion guard: regular files directly inside the app's own log directory only.
+	test("a planted symlink at a log name is never followed: link and target both stay", () => {
+		const dir = join(TMP, "planted");
+		realTerminalTab.ensurePrivateDir(dir);
+		const outside = join(TMP, "outside-target.txt");
+		writeFileSync(outside, "keep me");
+		const legacyLink = join(dir, "term-1-2.log");
+		const appLink = join(dir, "8gent-term-0123456789ab.log");
+		symlinkSync(outside, legacyLink);
+		symlinkSync(outside, appLink);
+		const out = realTerminalTab.sweepSessionLogs(dir, Date.now() + 365 * 24 * 60 * 60 * 1000);
+		expect(out.deleted).toEqual([]);
+		realTerminalTab.removeSessionLog(appLink, dir);
+		expect(lstatSync(legacyLink).isSymbolicLink()).toBe(true);
+		expect(lstatSync(appLink).isSymbolicLink()).toBe(true);
+		expect(readFileSync(outside, "utf-8")).toBe("keep me");
+	});
+
+	test("a log directory that is a symlink is never swept or deleted from", () => {
+		const real = join(TMP, "real-elsewhere");
+		realTerminalTab.ensurePrivateDir(real);
+		const victim = join(real, "term-1-2.log");
+		const appLog = join(real, "8gent-term-0123456789ab.log");
+		writeFileSync(victim, "not ours");
+		writeFileSync(appLog, "not ours");
+		const linked = join(TMP, "linked-sessions");
+		symlinkSync(real, linked);
+		expect(realTerminalTab.sweepSessionLogs(linked, Date.now()).deleted).toEqual([]);
+		realTerminalTab.removeSessionLog(join(linked, "8gent-term-0123456789ab.log"), linked);
+		expect(existsSync(victim)).toBe(true);
+		expect(existsSync(appLog)).toBe(true);
+	});
+
+	test("nothing outside the log directory, and no directory inside it, is ever deleted", () => {
+		const dir = join(TMP, "own-logs");
+		realTerminalTab.ensurePrivateDir(dir);
+		const sibling = join(TMP, "sibling.log");
+		writeFileSync(sibling, "not ours");
+		const nested = join(dir, "sub");
+		mkdirSync(nested);
+		const deeper = join(nested, "8gent-term-0123456789ab.log");
+		writeFileSync(deeper, "not directly inside");
+		const dirNamedLikeLog = join(dir, "term-9-9.log");
+		mkdirSync(dirNamedLikeLog);
+		realTerminalTab.removeSessionLog(sibling, dir);
+		realTerminalTab.removeSessionLog(join(dir, "..", "sibling.log"), dir);
+		realTerminalTab.removeSessionLog(deeper, dir);
+		realTerminalTab.removeSessionLog(dirNamedLikeLog, dir);
+		expect(realTerminalTab.sweepSessionLogs(dir, Date.now()).deleted).toEqual([]);
+		expect(existsSync(sibling)).toBe(true);
+		expect(existsSync(deeper)).toBe(true);
+		expect(existsSync(dirNamedLikeLog)).toBe(true);
+		// A regular file directly inside is removed.
+		const own = join(dir, "8gent-term-00000000000f.log");
+		writeFileSync(own, "echoed");
+		realTerminalTab.removeSessionLog(own, dir);
+		expect(existsSync(own)).toBe(false);
 	});
 });

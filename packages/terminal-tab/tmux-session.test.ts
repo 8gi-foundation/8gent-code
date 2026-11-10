@@ -13,7 +13,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-	NO_TMUX_ENV,
+	SESSION_ENV_ALLOW,
 	buildEnterKeyArgs,
 	buildPipePaneArgs,
 	buildSendKeysArgs,
@@ -27,6 +27,8 @@ import {
 	readSessionLog,
 	releaseRun,
 	sendKeys,
+	sessionEnv,
+	sessionShellCommand,
 	setTmuxRunForTest,
 	spawnTmuxSession,
 	thisTmuxRun,
@@ -93,7 +95,8 @@ describe("buildTmuxNewSessionArgs", () => {
 		expect(args).toContain("50");
 		expect(args).toContain("-c");
 		expect(args).toContain("/Users/me");
-		expect(args[args.length - 1]).toBe("unset TMUX TMUX_PANE; claude");
+		expect(args[args.length - 1]).toBe(sessionShellCommand("claude"));
+		expect(args[args.length - 1]).toStartWith("exec /usr/bin/env -i ");
 	});
 
 	it("appends shell-quoted args when cmdArgs is non-empty", () => {
@@ -314,28 +317,39 @@ describe("private tmux socket", () => {
 	}
 
 	it.if(tmuxServes)(
-		"the program in a session does not see TMUX or TMUX_PANE",
+		"the program in a session sees only the allowlist: no TMUX, TMUX_PANE or socket path",
 		async () => {
 			const out = tmpLog("env");
-			const handle = await spawnTmuxSession({
-				command: "sh",
-				args: [
-					"-c",
-					`printenv TMUX TMUX_PANE > '${out}.env'; echo "rc=$?" >> '${out}.env'; sleep 30`,
-				],
-				cwd: process.cwd(),
-				logPath: out,
-			});
+			// tmux copies SSH_AUTH_SOCK from the client into a new session by default.
+			const saved = process.env.SSH_AUTH_SOCK;
+			process.env.SSH_AUTH_SOCK = "/tmp/canary-ssh.sock";
+			let id = "";
 			try {
+				const handle = await spawnTmuxSession({
+					command: "sh",
+					args: ["-c", `env > '${out}.env'; echo "done=1" >> '${out}.env'; sleep 30`],
+					cwd: process.cwd(),
+					logPath: out,
+				});
+				id = handle.sessionId;
 				let text = "";
-				for (let i = 0; i < 30 && !text.includes("rc="); i++) {
+				for (let i = 0; i < 30 && !text.includes("done=1"); i++) {
 					await new Promise((r) => setTimeout(r, 100));
 					text = existsSync(`${out}.env`) ? readFileSync(`${out}.env`, "utf-8") : "";
 				}
-				// printenv prints nothing and exits 1 when neither variable is set.
-				expect(text).toBe("rc=1\n");
+				const keys = text
+					.split("\n")
+					.filter((l) => l.includes("=") && l !== "done=1")
+					.map((l) => l.slice(0, l.indexOf("=")));
+				expect(keys).toContain("PATH");
+				for (const k of keys) expect(ALLOWED.has(k)).toBe(true);
+				expect(text).not.toContain("TMUX");
+				expect(text).not.toContain(thisTmuxRun().socketPath);
+				expect(text).not.toContain("canary");
 			} finally {
-				await killTmuxSession(handle.sessionId);
+				if (saved === undefined) Reflect.deleteProperty(process.env, "SSH_AUTH_SOCK");
+				else process.env.SSH_AUTH_SOCK = saved;
+				if (id) await killTmuxSession(id);
 			}
 		},
 		10000,
@@ -409,8 +423,78 @@ describe("composeShellCommand", () => {
 			["sh", ["-c", "echo $HOME"]],
 		] as [string, string[]][]) {
 			const argv = buildTmuxNewSessionArgs({ sessionId: "x", command, cmdArgs, cwd: "/" });
-			// The judged string, behind a fixed prefix that only drops TMUX and TMUX_PANE.
-			expect(argv[argv.length - 1]).toBe(`${NO_TMUX_ENV}${composeShellCommand(command, cmdArgs)}`);
+			// The judged string, run under an app-made environment wrapper.
+			expect(argv[argv.length - 1]).toBe(
+				sessionShellCommand(composeShellCommand(command, cmdArgs)),
+			);
 		}
+	});
+});
+
+// -------------------------------------------------------
+// #146 item 4: a session's program gets an explicit, minimal environment
+// -------------------------------------------------------
+
+/** Variables /bin/sh itself may set, besides the ones the wrapper passes. */
+const SHELL_OWN = new Set(["PWD", "OLDPWD", "SHLVL", "_"]);
+const ALLOWED = new Set<string>([...SESSION_ENV_ALLOW, "TERM", ...SHELL_OWN]);
+
+describe("session environment", () => {
+	const run = thisTmuxRun();
+	/** The app's own environment as it might be inside the person's tmux, with secrets. */
+	const appEnv = {
+		...process.env,
+		TMUX: `${run.socketPath},4242,0`,
+		TMUX_PANE: "%7",
+		TMUX_TMPDIR: run.dir,
+		EIGHT_CANARY_SECRET: "canary-secret-value",
+		SSH_AUTH_SOCK: "/tmp/canary-ssh.sock",
+		TMPDIR: join(run.dir, "tmp"),
+	};
+
+	it("keeps only the allowlist, and drops any value that names the socket directory", () => {
+		const env = sessionEnv(appEnv, run);
+		for (const k of Object.keys(env)) expect(SESSION_ENV_ALLOW as readonly string[]).toContain(k);
+		expect(env.TMUX).toBeUndefined();
+		expect(env.TMUX_PANE).toBeUndefined();
+		expect(env.TMPDIR).toBeUndefined();
+		expect(env.PATH).toBe(process.env.PATH as string);
+		for (const v of Object.values(env)) expect(v).not.toContain(run.dir);
+	});
+
+	it("the spawn argv names neither TMUX, TMUX_PANE nor the socket path", () => {
+		const argv = buildTmuxNewSessionArgs(
+			{ sessionId: "8gent-term-0123456789ab", command: "claude", cwd: "/" },
+			sessionEnv(appEnv, run),
+		);
+		const all = argv.join("\n");
+		expect(all).not.toContain("TMUX");
+		expect(all).not.toContain(run.socketPath);
+		expect(all).not.toContain(run.dir);
+		expect(all).not.toContain("canary");
+	});
+
+	// Regression for the 8SO read of 3be83b9 and e4afed9: there, the program got
+	// the app's whole environment with only TMUX and TMUX_PANE unset. Runs the
+	// exact string tmux is given through /bin/sh, the way tmux does, no tmux needed.
+	it("the program sees only the allowlist and TERM, never TMUX, TMUX_PANE or a secret", () => {
+		const argv = buildTmuxNewSessionArgs(
+			{ sessionId: "x", command: "env", cwd: "/" },
+			sessionEnv(appEnv, run),
+		);
+		const out = execFileSync("/bin/sh", ["-c", argv[argv.length - 1]], {
+			env: { ...appEnv, TERM: "screen" },
+			encoding: "utf-8",
+		});
+		const keys = out
+			.split("\n")
+			.filter((l) => l.includes("="))
+			.map((l) => l.slice(0, l.indexOf("=")));
+		for (const k of keys) expect(ALLOWED.has(k)).toBe(true);
+		expect(keys).toContain("TERM");
+		expect(keys).toContain("PATH");
+		expect(out).not.toContain("TMUX");
+		expect(out).not.toContain(run.socketPath);
+		expect(out).not.toContain("canary");
 	});
 });

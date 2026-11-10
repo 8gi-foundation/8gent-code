@@ -39,6 +39,7 @@ import {
 	saveSession,
 	sendTmuxKeys,
 	spawnTmuxSession,
+	stopServer,
 	sweepDeadRuns,
 	sweepSessionLogs,
 	thisTmuxRun,
@@ -148,21 +149,11 @@ export function endOwnedSessions(
 		}
 		forgetSession(s);
 	}
-	if (hadSessions || existsSync(termRun.socketPath)) {
-		try {
-			run(tmuxArgv(["kill-server"], termRun));
-		} catch {
-			/* already stopped, or the stop failed: the probe below decides */
-		}
-		// Release the socket and owner record only once the server is gone. A
-		// server that outlived its socket file could never be found again; kept,
-		// the next start's sweep stops it once this process is dead.
-		try {
-			run(tmuxArgv(["list-sessions"], termRun));
-			return; // still answering: keep the socket and record
-		} catch {
-			/* no server on this socket */
-		}
+	// Release the socket and owner record only once the server is confirmed
+	// gone. A server that outlived its socket file could never be found again;
+	// kept, the next start's sweep stops it once this process is dead.
+	if ((hadSessions || existsSync(termRun.socketPath)) && !stopServer(termRun.socketPath, run)) {
+		return;
 	}
 	try {
 		releaseRun(termRun);

@@ -37,7 +37,7 @@ import {
 	writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { stripControl } from "./ansi-strip.js";
 import { isPidAlive } from "./session-store.js";
@@ -155,6 +155,36 @@ export const realTmuxSync: TmuxSyncRunner = (argv) =>
 	});
 
 /**
+ * True when tmux ran to the end and said no (an exit status, no signal), as
+ * opposed to a timeout, a kill or tmux not starting at all, which prove nothing.
+ */
+function tmuxSaidNo(err: unknown): boolean {
+	const e = err as { status?: unknown; signal?: unknown } | null;
+	return typeof e?.status === "number" && e.status !== 0 && !e.signal;
+}
+
+/**
+ * Stop the tmux server on `socketPath` and report whether it is gone (#146
+ * review, item 4). Gone means that after kill-server, tmux itself answers
+ * that no server is running there (a socket file outlives its server). A
+ * timeout, a server still answering, or any other failure is not proof, so
+ * the caller keeps the socket and owner record for the next start's sweep.
+ */
+export function stopServer(socketPath: string, run: TmuxSyncRunner = realTmuxSync): boolean {
+	try {
+		run(["-S", socketPath, "kill-server"]);
+	} catch (err) {
+		if (!tmuxSaidNo(err)) return false;
+	}
+	try {
+		run(["-S", socketPath, "list-sessions"]);
+		return false; // still answering
+	} catch (err) {
+		return tmuxSaidNo(err);
+	}
+}
+
+/**
  * The process id a run's owner record names, or null when that cannot be
  * read for sure: missing, unreadable, not a plain positive integer, or not
  * the process id the run id was made from.
@@ -204,13 +234,8 @@ export function sweepDeadRuns(
 		const pid = recordedOwner(dir, id);
 		if (pid === null || alive(pid)) continue;
 		const socketPath = join(dir, `${id}.sock`);
-		if (existsSync(socketPath)) {
-			try {
-				run(["-S", socketPath, "kill-server"]);
-			} catch {
-				/* no server left on it */
-			}
-		}
+		// A server whose stop did not take keeps its socket: removed, it could never be found again.
+		if (existsSync(socketPath) && !stopServer(socketPath, run)) continue;
 		rmSync(socketPath, { force: true });
 		rmSync(join(dir, `${id}.pid`), { force: true });
 		swept.push(id);
@@ -225,8 +250,28 @@ export function createSessionLog(logPath: string): void {
 	chmodSync(logPath, 0o600);
 }
 
-/** Delete a session log. Only a regular file is ever removed. */
-export function removeSessionLog(logPath: string): void {
+/**
+ * `dir` is a real directory (never a symbolic link) owned by this user, so
+ * deleting inside it cannot reach anywhere else.
+ */
+function isOwnLogDir(dir: string): boolean {
+	try {
+		const st = lstatSync(dir);
+		if (!st.isDirectory()) return false;
+		const uid = process.getuid?.();
+		return uid === undefined || st.uid === uid;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Delete a session log. Only a regular file (never a symbolic link) directly
+ * inside `dir`, which must itself be a real directory and not a link, is ever
+ * removed; anything else is left alone.
+ */
+export function removeSessionLog(logPath: string, dir: string = SESSIONS_LOG_DIR): void {
+	if (resolve(dirname(logPath)) !== resolve(dir) || !isOwnLogDir(dir)) return;
 	try {
 		if (lstatSync(logPath).isFile()) rmSync(logPath, { force: true });
 	} catch {
@@ -250,6 +295,8 @@ export function sweepSessionLogs(
 	now: number = Date.now(),
 ): { deleted: string[]; tightened: string[] } {
 	const out = { deleted: [] as string[], tightened: [] as string[] };
+	// A linked or foreign directory is never swept: nothing outside the app's own is deleted.
+	if (!isOwnLogDir(dir)) return out;
 	let names: string[];
 	try {
 		names = readdirSync(dir);
@@ -325,16 +372,71 @@ export interface BuildNewSessionArgs {
 	rows?: number;
 }
 
+/**
+ * The only variables a session's program gets (#146 item 4), the same list
+ * packages/eight/local-runtime.ts gives a started server. tmux puts TMUX and
+ * TMUX_PANE (this run's socket path and the pane) into every pane, after any
+ * -e flag, and the server passes on the whole environment it started with.
+ * So the program runs under `env -i` with only these, plus the pane's TERM.
+ */
+export const SESSION_ENV_ALLOW = [
+	"PATH",
+	"HOME",
+	"USER",
+	"LOGNAME",
+	"LANG",
+	"LC_ALL",
+	"TMPDIR",
+	"TZ",
+] as const;
+
+/** The allowlisted variables from `env`, minus any value that names the socket directory. */
+export function sessionEnv(
+	env: NodeJS.ProcessEnv = process.env,
+	run: TmuxRun = currentRun,
+): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const k of SESSION_ENV_ALLOW) {
+		const v = env[k];
+		if (v !== undefined && !v.includes(run.dir)) out[k] = v;
+	}
+	return out;
+}
+
+/**
+ * The string tmux runs for a session: `composed` (the string the gate judged)
+ * under `/usr/bin/env -i` with only `env` and the pane's TERM, through /bin/sh.
+ * Neither TMUX, TMUX_PANE nor the socket path reaches the program.
+ *
+ * What remains (said plainly): this binds what the program is handed, not
+ * what it can find. A program running as the same user can still locate the
+ * socket, for example by listing ~/.8gent/term or reading the tmux server's
+ * command line (`ps`), and then drive every session on it. The 0700 directory
+ * stops other users only. Making the socket unusable to a same-user process
+ * is not possible without also locking out this app, which is the same user.
+ */
+export function sessionShellCommand(
+	composed: string,
+	env: Record<string, string> = sessionEnv(),
+): string {
+	const vars = Object.entries(env)
+		.map(([k, v]) => `${k}=${shellSingleQuote(v)}`)
+		.join(" ");
+	return `exec /usr/bin/env -i TERM="$TERM" ${vars ? `${vars} ` : ""}/bin/sh -c ${shellSingleQuote(composed)}`;
+}
+
 /** Build the argv for `tmux new-session -d -s <id> -x C -y R -c CWD CMD...`. */
-export function buildTmuxNewSessionArgs(args: BuildNewSessionArgs): string[] {
+export function buildTmuxNewSessionArgs(
+	args: BuildNewSessionArgs,
+	env: Record<string, string> = sessionEnv(),
+): string[] {
 	const cmdArgs = args.cmdArgs ?? [];
 	const cols = args.cols ?? 200;
 	const rows = args.rows ?? 50;
-	// tmux's last positional is "shell-command": a single string it runs through sh.
-	// The gate judges `composed`; the fixed prefix only drops TMUX and TMUX_PANE,
-	// which tmux sets in the pane (after any -e), so the program cannot drive
-	// sibling sessions on this run's server by reading them (#146 item 4).
-	const composed = `${NO_TMUX_ENV}${composeShellCommand(args.command, cmdArgs)}`;
+	// tmux's last positional is "shell-command": a single string it runs through
+	// its default shell. The gate judges composeShellCommand(...); the wrapper
+	// around it is app made and only sets the environment (#146 item 4).
+	const shellCommand = sessionShellCommand(composeShellCommand(args.command, cmdArgs), env);
 	return [
 		"new-session",
 		"-d",
@@ -346,12 +448,9 @@ export function buildTmuxNewSessionArgs(args: BuildNewSessionArgs): string[] {
 		String(rows),
 		"-c",
 		args.cwd,
-		composed,
+		shellCommand,
 	];
 }
-
-/** Prefix of every session's shell command: the program never sees this run's server. */
-export const NO_TMUX_ENV = "unset TMUX TMUX_PANE; ";
 
 export interface BuildSendKeysOpts {
 	appendEnter?: boolean;
@@ -429,7 +528,8 @@ export async function spawnTmuxSession(opts: TmuxSpawnOpts): Promise<TmuxSession
 	try {
 		return await startSession(sessionId, cwd, logPath, opts);
 	} catch (err) {
-		removeSessionLog(logPath);
+		// The file made a moment ago at the path this spawn was given.
+		removeSessionLog(logPath, dirname(logPath));
 		throw err;
 	}
 }
