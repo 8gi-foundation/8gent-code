@@ -12,6 +12,7 @@
  * It does NOT cover run_command tools such as curl, clients that do not use
  * fetch, or child processes that do not load it (see LOCAL_ONLY_GAPS).
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
 	type CallInfo,
 	type LedgerEntry,
@@ -152,13 +153,35 @@ const MAX_HOPS = 5;
 const CREDENTIAL_HEADERS = ["authorization", "cookie", "proxy-authorization"];
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 
-/** Why each cloud provider is being called, set by the code that chose it (the turn's chain walk). */
-const cloudReasons = new Map<string, string>();
+/**
+ * Why each cloud provider is being called, held on the turn that chose it (#179). A turn
+ * runs its chain walk inside withCloudReasons, so a reason is only ever read by a request
+ * made from that same turn: never by another session in this process, never by a later turn.
+ */
+const cloudReasonScope = new AsyncLocalStorage<Map<string, string>>();
 
-/** Record the one reason `provider` is called; null clears it. Read by the notice below. */
+/**
+ * Run one turn's chain walk with its own reasons. They are cleared when it ends, by
+ * return, throw or abort, so a request still in flight after that reads no reason.
+ */
+export async function withCloudReasons<T>(fn: () => Promise<T>): Promise<T> {
+	const reasons = new Map<string, string>();
+	try {
+		return await cloudReasonScope.run(reasons, fn);
+	} finally {
+		reasons.clear();
+	}
+}
+
+/**
+ * Record the one reason `provider` is called in this turn; null clears it. Outside a
+ * turn (no withCloudReasons) it records nothing. Read by the notice below.
+ */
 export function setCloudReason(provider: string, reason: string | null): void {
-	if (reason === null) cloudReasons.delete(provider);
-	else cloudReasons.set(provider, reason);
+	const reasons = cloudReasonScope.getStore();
+	if (!reasons) return;
+	if (reason === null) reasons.delete(provider);
+	else reasons.set(provider, reason);
 }
 
 /**
@@ -181,7 +204,7 @@ function notice(policy: string, provider: string): string {
 	const why =
 		policy === "cloud-first"
 			? "policy is cloud-first"
-			: (cloudReasons.get(provider) ?? "no reason was recorded for this call");
+			: (cloudReasonScope.getStore()?.get(provider) ?? "no reason was recorded for this call");
 	return `Cloud call: ${provider}. Policy ${policy}: ${why}. See /privacy.`;
 }
 
