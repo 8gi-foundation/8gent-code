@@ -1643,3 +1643,42 @@ describe("/dev/ names the shell builds (#3763 round 2)", () => {
 		}
 	});
 });
+
+describe("commands that print the environment ask a person (#95)", () => {
+	const PRINTERS = ["env", "printenv", "printenv TELEGRAM_BOT_TOKEN", "set", "export -p", "export", "env -0"];
+	const NOT_PRINTERS = ["env FOO=1 ls", "env -i PATH=/bin ls", "set -e", "export FOO=1", "echo hi"];
+
+	test("mustAskReason names each of them", () => {
+		for (const c of PRINTERS) expect(mustAskReason(c, ctx())).toContain("environment");
+		for (const c of NOT_PRINTERS) expect(mustAskReason(c, ctx())).toBeNull();
+	});
+
+	test("a pipe or a chain does not hide one", () => {
+		expect(mustAskReason("ls && env", ctx())).toContain("environment");
+		expect(mustAskReason("env | grep TOKEN", ctx())).toContain("environment");
+	});
+
+	test("headless with EIGHT_HEADLESS_APPROVE=1 and --yes still refuses them", async () => {
+		process.env.EIGHT_HEADLESS = "1";
+		const prior = process.env.EIGHT_HEADLESS_APPROVE;
+		process.env.EIGHT_HEADLESS_APPROVE = "1";
+		try {
+			const pm = manager();
+			pm.setAutoApprove(true);
+			for (const c of PRINTERS) {
+				expect(await pm.requestPermission("Execute Shell Command", "d", c)).toBe(false);
+			}
+			expect(await pm.requestPermission("Execute Shell Command", "d", "ls")).toBe(true);
+		} finally {
+			if (prior === undefined) delete process.env.EIGHT_HEADLESS_APPROVE;
+			else process.env.EIGHT_HEADLESS_APPROVE = prior;
+		}
+	});
+
+	test("the headless safe list no longer names env or printenv", async () => {
+		const { HEADLESS_SAFE_COMMANDS } = await import("./index");
+		for (const c of ["env", "printenv", "set", "export"]) {
+			expect(HEADLESS_SAFE_COMMANDS).not.toContain(c);
+		}
+	});
+});

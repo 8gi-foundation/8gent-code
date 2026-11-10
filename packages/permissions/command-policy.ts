@@ -1447,6 +1447,23 @@ function writesGitConfig(argv: string[]): boolean {
 /** The refusal text for a cloud metadata address; leads with the named reason. */
 export const CLOUD_METADATA_REFUSAL = `${CLOUD_METADATA_REASON}: it reaches a cloud metadata address, which hands out instance credentials`;
 
+/**
+ * A command that prints the environment: bare `env`, `printenv`, bare `set`, `export`
+ * or `export -p` (#95). They ask a person every time, so headless never runs them
+ * unasked. `env FOO=1 cmd` runs cmd and is judged as cmd; `set -e` and `export A=1` print nothing.
+ */
+function printsEnvironment(raw: string[]): boolean {
+	let i = 0;
+	while (i < raw.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(raw[i])) i++;
+	const word = path.basename(raw[i] ?? "");
+	const rest = raw.slice(i + 1);
+	if (word === "printenv") return true;
+	if (word === "env") return stripPrefix(raw.slice(i))?.argv.length === 0;
+	if (word === "set") return rest.length === 0;
+	if (word === "export") return rest.length === 0 || rest.every((t) => t === "-p");
+	return false;
+}
+
 /** Why one command (a single segment's words) must be approved, or null. */
 function argvReason(
 	raw: string[],
@@ -1455,6 +1472,7 @@ function argvReason(
 	line: LineState,
 	appendsArgs = false,
 ): string | null {
+	if (printsEnvironment(raw)) return "it prints the environment, which can hold secrets";
 	const unwrapped = stripPrefix(raw);
 	if (!unwrapped) return "it runs a command through a wrapper whose options this check cannot read";
 	const argv = unwrapped.argv;
