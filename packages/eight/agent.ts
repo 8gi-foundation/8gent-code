@@ -535,7 +535,8 @@ export class Agent {
 			displayLabel: `${provider}/${model}`,
 			requestMs: resolveRequestTimeoutMs(),
 			stallMs: resolveStallMs(),
-			onStall: (silentSeconds: number | null) => this.events.onStall?.({ silentSeconds, provider }),
+			onStall: (silentSeconds: number | null) =>
+				this.events.onStall?.({ silentSeconds, provider, model }),
 		};
 	}
 	private loopDetector: ToolLoopDetector;
@@ -5397,7 +5398,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 */
 	restoreFromCheckpoint(messages: Array<{ role: string; content: string }>): void {
 		// Keep the system prompt, replace conversation history
-		const systemMsg = this.messageHistory[0];
+		// Only a system message is kept: the first entry of a used agent is a user turn.
+		const systemMsg = this.messageHistory.find((m) => m.role === "system");
 		this.messageHistory = systemMsg ? [systemMsg] : [];
 
 		for (const msg of messages) {
@@ -5405,8 +5407,6 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.messageHistory.push(msg);
 			}
 		}
-
-		console.log(`[8gent] Restored ${messages.length} messages from checkpoint`);
 	}
 
 	/**

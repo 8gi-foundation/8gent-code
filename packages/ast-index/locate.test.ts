@@ -514,6 +514,91 @@ describe("a repo larger than one rg output chunk", () => {
 		},
 		SLOW,
 	);
+
+	// Same checks with ripgrep deliberately missing, so the in-process fallback is
+	// exercised on every machine, including ones that have rg installed.
+	describe("with no ripgrep", () => {
+		const noRg = () => path.join(big, "no-such-dir", "rg");
+
+		test(
+			"path: a late-sorting file is found",
+			async () => {
+				const r = await locate("needle-target.ts", {
+					root: big,
+					repoId: null,
+					rg: noRg(),
+					rgTimeoutMs: SLOW,
+				});
+				expect(r.rows[0]).toMatchObject({ file: "zz/needle-target.ts", kind: "file" });
+				expect(r.incomplete).toBeFalsy();
+			},
+			SLOW,
+		);
+
+		test(
+			"grep: the definition of a common name is found",
+			async () => {
+				const r = await locate("commonThing", {
+					root: big,
+					repoId: null,
+					rg: noRg(),
+					rgTimeoutMs: SLOW,
+				});
+				expect(r.route.mode).toBe("grep");
+				expect(r.rows[0]).toMatchObject({ file: "zz/def.ts", line: 1 });
+				expect(r.incomplete).toBeFalsy();
+			},
+			SLOW,
+		);
+
+		test(
+			"a fallback search cut by a tiny limit is marked incomplete",
+			async () => {
+				const grep = await locate("commonThing", {
+					root: big,
+					repoId: null,
+					rg: noRg(),
+					rgTimeoutMs: 1,
+				});
+				expect(grep.incomplete).toBe(true);
+				const list = await locate("needle-target.ts", {
+					root: big,
+					repoId: null,
+					rg: noRg(),
+					rgTimeoutMs: 1,
+				});
+				expect(list.incomplete).toBe(true);
+			},
+			SLOW,
+		);
+
+		test(
+			"a fallback search that ran out of ignore rules is marked incomplete",
+			async () => {
+				// More .gitignore rules than one search will read: the walk cannot know
+				// what it was told to skip, so its answer is partial, not complete.
+				const dir = fs.mkdtempSync(path.join(os.tmpdir(), "locate-rules-"));
+				try {
+					const rules = Array.from({ length: 10_050 }, (_, i) => `ignored-${i}.tmp`).join("\n");
+					fs.writeFileSync(path.join(dir, ".gitignore"), `${rules}\n`);
+					fs.writeFileSync(path.join(dir, "kept.ts"), "export const keptThing = 1;\n");
+					const rg = path.join(dir, "no-such-dir", "rg");
+					const grep = await locate("keptThing", {
+						root: dir,
+						repoId: null,
+						rg,
+						rgTimeoutMs: SLOW,
+					});
+					expect(grep.incomplete).toBe(true);
+					const list = await locate("kept.ts", { root: dir, repoId: null, rg, rgTimeoutMs: SLOW });
+					expect(list.incomplete).toBe(true);
+				} finally {
+					removeDir(dir);
+				}
+			},
+			SLOW,
+		);
+	});
 });
 
 describe("path-guard on locate (#4634)", () => {
