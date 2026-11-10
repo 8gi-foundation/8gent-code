@@ -5461,6 +5461,18 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		removeSessionScratch(this.sessionScratchDir);
 		// Inspect-only (#4779): nothing was started, so nothing to stop or record.
 		if (this.config.inspectOnly) return;
+		// The record first: the awaits below can be cut short by a hard exit at quit.
+		try {
+			// One friction line, ahead of session_end so session_end stays the last line (#4511).
+			if (!this.frictionWritten) {
+				this.frictionWritten = true;
+				this.sessionWriter.writeFriction(this.friction.record());
+			}
+			this.sessionWriter.writeSessionEnd("user_exit", null, readCardsShown(this.readScope));
+		} catch {
+			// Session writer may already be closed
+		}
+
 		// Flush and end Convex session sync
 		await this.sessionSync.endSession().catch(() => {});
 		// Stop kernel pipeline
@@ -5480,17 +5492,6 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (this.infiniteRunner) {
 			this.infiniteRunner.abort();
 			this.infiniteRunner = null;
-		}
-
-		try {
-			// One friction line, ahead of session_end so session_end stays the last line (#4511).
-			if (!this.frictionWritten) {
-				this.frictionWritten = true;
-				this.sessionWriter.writeFriction(this.friction.record());
-			}
-			this.sessionWriter.writeSessionEnd("user_exit", null, readCardsShown(this.readScope));
-		} catch {
-			// Session writer may already be closed
 		}
 
 		// Write session to Knowledge Graph (fire-and-forget, best-effort)

@@ -25,6 +25,7 @@ import { resolveOllamaBaseUrl } from "../../../packages/ai/text-tool-endpoint.js
 import { dropOllamaCloudNames } from "../../../packages/core/ollama-cloud.js";
 import { answerFromLine } from "../../../packages/eight/android-setup.js";
 import { sanitizeForDisplay } from "../../../packages/eight/changelog-view.js";
+import { killLiveShells } from "../../../packages/eight/live-shells.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
 import { chatMessages } from "../../../packages/eight/session-messages.js";
 import {
@@ -349,6 +350,7 @@ import {
 	modelListFailureNotice,
 	registryKeyNotice,
 } from "./lib/provider-truth.js";
+import { quitNow } from "./lib/quit.js";
 import {
 	type TurnError,
 	buildResultFor,
@@ -2647,7 +2649,11 @@ export function App({
 	}, []);
 	// Never leave a shell command behind: unmount, exit, SIGTERM and SIGHUP kill them.
 	useEffect(() => {
-		const uninstall = killBangsOnExit(() => stopBangRuns());
+		const uninstall = killBangsOnExit(() => {
+			stopBangRuns();
+			// A signal death never fires "exit", so the SIGKILL sweep there is not enough.
+			killLiveShells("SIGKILL");
+		});
 		return () => {
 			uninstall();
 			stopBangRuns();
@@ -3010,8 +3016,18 @@ export function App({
 			}
 			flushSession();
 			stopBangRuns();
-			if (agent) agent.cleanup().catch(() => {});
-			exit();
+			// Stop the turn first, then unmount, then a hard exit backstop: a turn
+			// waiting on a slow model must not hold the process open (break 13).
+			quitNow({
+				abortAll: () => {
+					agent?.abort();
+					perTabAgents.abortAll();
+					// A command the model started outlives the TUI otherwise (live-shells.ts).
+					killLiveShells("SIGTERM");
+					agent?.cleanup().catch(() => {});
+				},
+				unmount: exit,
+			});
 		}
 
 		// Toggle animations with Ctrl+A
