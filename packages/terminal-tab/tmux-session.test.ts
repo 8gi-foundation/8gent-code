@@ -13,6 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	TMUX_SOCKET_NAME,
 	buildEnterKeyArgs,
 	buildPipePaneArgs,
 	buildSendKeysArgs,
@@ -20,10 +21,12 @@ import {
 	composeShellCommand,
 	hasSession,
 	killTmuxSession,
+	listTmuxSessions,
 	parseLogTail,
 	readSessionLog,
 	sendKeys,
 	spawnTmuxSession,
+	tmuxArgv,
 } from "./tmux-session.js";
 
 const tmuxAvailable = (() => {
@@ -173,7 +176,7 @@ const liveSessions: string[] = [];
 afterAll(() => {
 	for (const s of liveSessions) {
 		try {
-			execFileSync("tmux", ["kill-session", "-t", s], { stdio: "ignore" });
+			execFileSync("tmux", tmuxArgv(["kill-session", "-t", s]), { stdio: "ignore" });
 		} catch {
 			/* already gone */
 		}
@@ -233,6 +236,80 @@ describe("spawnTmuxSession — live", () => {
 			expect(await hasSession(handle.sessionId)).toBe(false);
 		},
 		8000,
+	);
+});
+
+// -------------------------------------------------------
+// #146: every call goes to the app's own tmux server
+// -------------------------------------------------------
+
+describe("private tmux socket", () => {
+	it("every tmux argv carries -L and the app's socket name first", () => {
+		expect(TMUX_SOCKET_NAME).toBe("8gent-term");
+		expect(tmuxArgv(["kill-session", "-t", "x"])).toEqual([
+			"-L",
+			"8gent-term",
+			"kill-session",
+			"-t",
+			"x",
+		]);
+	});
+
+	if (!tmuxAvailable) {
+		console.log(
+			"[tmux-session.test] SKIP real-tmux socket test: tmux was not found on this machine. The fake-runner tests in packages/eight/term-tools-ownership.test.ts still run.",
+		);
+	}
+
+	it.if(tmuxAvailable)(
+		"a session on the default tmux server is not listed and cannot be sent to or killed",
+		async () => {
+			const name = `user-own-${process.pid}-${Date.now().toString(36)}`;
+			const onDefault = () => {
+				try {
+					execFileSync("tmux", ["has-session", "-t", name], { stdio: "ignore" });
+					return true;
+				} catch {
+					return false;
+				}
+			};
+			execFileSync("tmux", ["new-session", "-d", "-s", name, "sleep 60"], { stdio: "ignore" });
+			let ours = "";
+			try {
+				expect(onDefault()).toBe(true);
+				expect(await listTmuxSessions()).not.toContain(name);
+				expect(await hasSession(name)).toBe(false);
+				await expect(sendKeys(name, "echo reached")).rejects.toThrow();
+				await killTmuxSession(name);
+				expect(onDefault()).toBe(true);
+
+				// And a spawned session lives on the private server, not the default one.
+				const handle = await spawnTmuxSession({
+					command: "sleep",
+					args: ["60"],
+					cwd: process.cwd(),
+					logPath: join(tmpdir(), `${name}-spawn.log`),
+				});
+				ours = handle.sessionId;
+				expect(await hasSession(ours)).toBe(true);
+				expect(await listTmuxSessions()).toContain(ours);
+				let onDefaultToo = true;
+				try {
+					execFileSync("tmux", ["has-session", "-t", ours], { stdio: "ignore" });
+				} catch {
+					onDefaultToo = false;
+				}
+				expect(onDefaultToo).toBe(false);
+			} finally {
+				if (ours) await killTmuxSession(ours);
+				try {
+					execFileSync("tmux", ["kill-session", "-t", name], { stdio: "ignore" });
+				} catch {
+					/* already gone */
+				}
+			}
+		},
+		10000,
 	);
 });
 

@@ -50,6 +50,8 @@ export {
 	sendKeys as sendTmuxKeys,
 	spawnTmuxSession,
 	SESSIONS_LOG_DIR,
+	TMUX_SOCKET_NAME,
+	tmuxArgv,
 } from "./tmux-session.js";
 export type {
 	ParsedLogTail,

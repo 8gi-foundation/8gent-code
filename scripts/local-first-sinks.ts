@@ -661,12 +661,6 @@ export const INSTALL_SITES: InstallSite[] = [
 		why: "the deck command needs ffmpeg",
 	},
 	{
-		file: "packages/eight/term-tools.ts",
-		max: 1,
-		mode: "fallback",
-		why: "a tmux tool was called and tmux is missing",
-	},
-	{
 		file: "packages/eight/tools.ts",
 		max: 1,
 		mode: "fallback",

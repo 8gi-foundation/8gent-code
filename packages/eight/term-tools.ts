@@ -16,6 +16,8 @@
  * window IDs. It just calls term_spawn / term_send / term_read.
  */
 
+import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { commandSegments } from "../permissions/command-policy.js";
 import { getPermissionManager } from "../permissions/index.js";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
@@ -24,17 +26,166 @@ import {
 	attachInTerminal,
 	composeShellCommand,
 	deleteSession,
-	getSession,
 	hasTmuxSession,
 	isTmuxAvailable,
 	killTmuxSession,
 	listTmuxSessions,
-	loadSessions,
 	readSessionLog,
 	saveSession,
 	sendTmuxKeys,
 	spawnTmuxSession,
+	tmuxArgv,
 } from "../terminal-tab/index.js";
+
+// ---------------- Sessions this run started (#146) ----------------
+//
+// term_send, term_read and term_kill reach only a session that term_spawn
+// started in this app run, matched exactly on the tmux target it created.
+// The target is app made (fixed prefix plus a random id); a model-supplied
+// label never becomes one. Everything here ends when the app quits.
+
+export interface OwnedSession {
+	/** The exact tmux session name term_spawn created; also the sessionId the model uses. */
+	target: string;
+	label: string;
+	command: string;
+	args: string[];
+	pid: number;
+	logPath: string;
+	createdAt: string;
+}
+
+const owned = new Map<string, OwnedSession>();
+
+/** Fixed prefix of every session name term_spawn makes. */
+export const OWNED_PREFIX = "8gent-term-";
+
+/** A fresh, app-made tmux session name: the prefix plus 12 random hex digits. */
+export function newOwnedTarget(): string {
+	return `${OWNED_PREFIX}${randomBytes(6).toString("hex")}`;
+}
+
+/** Sessions this run started, oldest first. */
+export function ownedSessions(): OwnedSession[] {
+	return [...owned.values()];
+}
+
+/**
+ * The session for `raw`, or the refusal to hand back. A name tmux would read
+ * as target syntax (`:` `.` `=` `*`, whitespace, anything outside letters,
+ * digits, `-` and `_`) is refused before any tmux call; anything else must be
+ * exactly a registered target. No prefix match, no pattern.
+ */
+function resolveOwned(
+	tool: string,
+	raw: unknown,
+	nothing: string,
+): { session: OwnedSession } | { refusal: string } {
+	const id = typeof raw === "string" ? raw : "";
+	if (!id) return { refusal: `ERR: ${tool} needs sessionId.` };
+	const shown = JSON.stringify(id.slice(0, 80));
+	if (!/^[A-Za-z0-9_-]+$/.test(id)) {
+		return {
+			refusal: `[BLOCKED] ${tool}: ${shown} is not a valid session id. ${nothing}`,
+		};
+	}
+	const session = owned.get(id);
+	if (!session) {
+		return {
+			refusal: `[BLOCKED] ${tool}: ${shown} is not a session started by term_spawn in this run. ${nothing}`,
+		};
+	}
+	return { session };
+}
+
+/** Runs tmux synchronously with an argv (never a shell string); throws on failure. */
+export type TmuxSyncRunner = (argv: string[]) => string;
+
+const realTmuxSync: TmuxSyncRunner = (argv) =>
+	execFileSync("tmux", argv, {
+		encoding: "utf-8",
+		stdio: ["ignore", "pipe", "ignore"],
+		timeout: 3000,
+	});
+
+/**
+ * End every session this run started, then stop the app's tmux server if it
+ * has no sessions left. Synchronous so it can run from an exit handler.
+ * Safe to call more than once.
+ */
+export function endOwnedSessions(run: TmuxSyncRunner = realTmuxSync): void {
+	if (owned.size === 0) return;
+	for (const s of owned.values()) {
+		try {
+			run(tmuxArgv(["kill-session", "-t", s.target]));
+		} catch {
+			/* already gone */
+		}
+		try {
+			deleteSession(s.target);
+		} catch {
+			/* best effort */
+		}
+		readOffsets.delete(s.target);
+		pendingInput.delete(s.target);
+	}
+	owned.clear();
+	let left: string;
+	try {
+		left = run(tmuxArgv(["list-sessions", "-F", "#{session_name}"]));
+	} catch {
+		return; // no server running: nothing to stop
+	}
+	if (left.trim() === "") {
+		try {
+			run(tmuxArgv(["kill-server"]));
+		} catch {
+			/* already stopped */
+		}
+	}
+}
+
+export interface ExitHost {
+	on(event: string, fn: () => void): unknown;
+	removeListener(event: string, fn: () => void): unknown;
+	listenerCount(event: string): number;
+	kill(pid: number, signal: string): unknown;
+	pid: number;
+}
+
+/**
+ * Run `cleanup` on exit and on SIGINT, SIGTERM and SIGHUP. On a signal the
+ * handler steps aside and, if nobody else listens, raises it again so the
+ * process still ends (the pattern apps/tui/src/lib/bang-command.ts and
+ * lib/mouse-input.ts use). Returns the uninstaller.
+ */
+export function endSessionsOnExit(
+	cleanup: () => void = () => endOwnedSessions(),
+	host: ExitHost = process as unknown as ExitHost,
+): () => void {
+	const onExit = () => cleanup();
+	const handlers = (["SIGINT", "SIGTERM", "SIGHUP"] as const).map((sig) => {
+		const fn = (): void => {
+			cleanup();
+			host.removeListener(sig, fn);
+			if (host.listenerCount(sig) === 0) host.kill(host.pid, sig);
+		};
+		host.on(sig, fn);
+		return [sig, fn] as const;
+	});
+	host.on("exit", onExit);
+	return () => {
+		host.removeListener("exit", onExit);
+		for (const [sig, fn] of handlers) host.removeListener(sig, fn);
+	};
+}
+
+let exitHooked = false;
+function hookExitOnce(): void {
+	if (exitHooked) return;
+	exitHooked = true;
+	endSessionsOnExit();
+}
 
 // ---------------- Per-session read offsets ----------------
 //
@@ -236,7 +387,7 @@ export function getTermToolDefs(): object[] {
 			function: {
 				name: "term_spawn",
 				description:
-					"[ORCHESTRATION] Spawns command (a CLI binary on $PATH) in a real Terminal.app window via tmux. Returns a sessionId you can use with term_send / term_read. Examples of valid commands: 'claude', 'openclaw', 'pi', '/bin/sh'. Use this when delegating a task to a different agent CLI is cheaper than answering yourself, or when you want to parallelise work across multiple sub-agents.",
+					"[ORCHESTRATION] Spawns command (a CLI binary on $PATH) in a real Terminal.app window via tmux. Returns a sessionId you can use with term_send / term_read. The sessionId is generated; label is display text only. Sessions end when 8gent closes. Examples of valid commands: 'claude', 'openclaw', 'pi', '/bin/sh'. Use this when delegating a task to a different agent CLI is cheaper than answering yourself, or when you want to parallelise work across multiple sub-agents.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -302,7 +453,7 @@ export function getTermToolDefs(): object[] {
 			function: {
 				name: "term_list",
 				description:
-					"[ORCHESTRATION] List all active windowed sessions 8gent is currently orchestrating, with their command, label, and uptime.",
+					"[ORCHESTRATION] List the sessions term_spawn started in this run that are still running, with their command, label, and uptime. Sessions started any other way are never listed.",
 				parameters: { type: "object", properties: {}, required: [] },
 			},
 		},
@@ -335,7 +486,7 @@ export async function executeTermTool(
 	args: Record<string, unknown>,
 ): Promise<string> {
 	if (!isTmuxAvailable()) {
-		return "ERR: tmux is not installed. Run `brew install tmux` (macOS) or `apt install tmux` (Linux) so 8gent can orchestrate windowed sessions.";
+		return "ERR: terminal sessions are unavailable on this machine (tmux was not found). Nothing was started.";
 	}
 
 	switch (name) {
@@ -366,24 +517,44 @@ async function termSpawn(args: Record<string, unknown>): Promise<string> {
 	const denied = await gateInput("term_spawn", composeShellCommand(command, cmdArgs));
 	if (denied) return denied;
 
-	const handle = await spawnTmuxSession({
-		command,
-		args: cmdArgs,
-		cwd: process.cwd(),
-		cols: 200,
-		rows: 50,
+	// The tmux target is app made; the label is shown, never used as a target.
+	const target = newOwnedTarget();
+	hookExitOnce();
+	let handle: Awaited<ReturnType<typeof spawnTmuxSession>>;
+	try {
+		handle = await spawnTmuxSession({
+			command,
+			args: cmdArgs,
+			cwd: process.cwd(),
+			cols: 200,
+			rows: 50,
+			sessionId: target,
+		});
+	} catch (err) {
+		// new-session may have run before a later step failed: end it.
+		await killTmuxSession(target);
+		return `ERR: term_spawn could not start the session: ${err instanceof Error ? err.message : String(err)}`;
+	}
+	owned.set(target, {
+		target,
+		label,
+		command: handle.command,
+		args: handle.args,
+		pid: handle.pid,
+		logPath: handle.logPath,
+		createdAt: handle.startedAt,
 	});
 
 	// Open a Terminal.app window so the human can watch / take over.
 	try {
-		await attachInTerminal(handle.sessionId);
+		await attachInTerminal(target);
 	} catch {
 		/* attaching is best-effort; tmux session is still running detached */
 	}
 
 	// Persist for cross-restart reconnection.
 	const session: WindowSession = {
-		sessionId: handle.sessionId,
+		sessionId: target,
 		command: handle.command,
 		args: handle.args,
 		label,
@@ -396,7 +567,7 @@ async function termSpawn(args: Record<string, unknown>): Promise<string> {
 
 	return JSON.stringify({
 		ok: true,
-		sessionId: handle.sessionId,
+		sessionId: target,
 		pid: handle.pid,
 		logPath: handle.logPath,
 		label,
@@ -405,9 +576,10 @@ async function termSpawn(args: Record<string, unknown>): Promise<string> {
 }
 
 async function termSend(args: Record<string, unknown>): Promise<string> {
-	const sessionId = String(args.sessionId ?? "").trim();
+	const found = resolveOwned("term_send", args.sessionId, "Nothing was sent.");
+	if ("refusal" in found) return found.refusal;
+	const sessionId = found.session.target;
 	const text = String(args.text ?? "");
-	if (!sessionId) return "ERR: term_send needs sessionId.";
 	if (!(await hasTmuxSession(sessionId))) {
 		return `ERR: session "${sessionId}" is not running.`;
 	}
@@ -430,14 +602,10 @@ async function termSend(args: Record<string, unknown>): Promise<string> {
 }
 
 async function termRead(args: Record<string, unknown>): Promise<string> {
-	const sessionId = String(args.sessionId ?? "").trim();
-	if (!sessionId) return "ERR: term_read needs sessionId.";
-
-	const session = getSession(sessionId);
-	if (!session) return `ERR: no persisted session for "${sessionId}".`;
-
-	// Resolve log path from the tmux session's expected location.
-	const logPath = `${process.env.HOME}/.8gent/sessions/${sessionId}.log`;
+	const found = resolveOwned("term_read", args.sessionId, "Nothing was read.");
+	if ("refusal" in found) return found.refusal;
+	const sessionId = found.session.target;
+	const logPath = found.session.logPath;
 
 	const cursor = args.resetCursor === true ? 0 : (readOffsets.get(sessionId) ?? 0);
 	const tail = readSessionLog(logPath, cursor);
@@ -453,14 +621,14 @@ async function termRead(args: Record<string, unknown>): Promise<string> {
 }
 
 async function termList(): Promise<string> {
+	// Only sessions this run started, and only while tmux still has them.
 	const tmuxNames = await listTmuxSessions();
-	const persisted = loadSessions();
-	const live = persisted.filter((s) => tmuxNames.includes(s.sessionId));
+	const live = ownedSessions().filter((s) => tmuxNames.includes(s.target));
 
 	const rows = live.map((s) => {
-		const elapsedMs = Date.now() - new Date(s.startedAt).getTime();
+		const elapsedMs = Date.now() - new Date(s.createdAt).getTime();
 		return {
-			sessionId: s.sessionId,
+			sessionId: s.target,
 			label: s.label,
 			command: s.command,
 			args: s.args,
@@ -473,9 +641,11 @@ async function termList(): Promise<string> {
 }
 
 async function termKill(args: Record<string, unknown>): Promise<string> {
-	const sessionId = String(args.sessionId ?? "").trim();
-	if (!sessionId) return "ERR: term_kill needs sessionId.";
+	const found = resolveOwned("term_kill", args.sessionId, "Nothing was killed.");
+	if ("refusal" in found) return found.refusal;
+	const sessionId = found.session.target;
 	await killTmuxSession(sessionId);
+	owned.delete(sessionId);
 	deleteSession(sessionId);
 	readOffsets.delete(sessionId);
 	pendingInput.delete(sessionId);

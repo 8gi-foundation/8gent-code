@@ -40,10 +40,11 @@ mock.module("../terminal-tab/index.js", () => ({
 	sendTmuxKeys: async (_id: string, text: string) => {
 		sent.push(text);
 	},
-	spawnTmuxSession: async (o: { command: string; args: string[] }) => {
+	tmuxArgv: realTerminalTab.tmuxArgv,
+	spawnTmuxSession: async (o: { command: string; args: string[]; sessionId: string }) => {
 		spawned.push([o.command, ...o.args].join(" "));
 		return {
-			sessionId: "s1",
+			sessionId: o.sessionId,
 			command: o.command,
 			args: o.args,
 			pid: 1,
@@ -76,7 +77,18 @@ const WIPE_HOME = WIPE_ROOT;
 
 const savedTTY = process.stdin.isTTY;
 const savedHeadless = process.env.EIGHT_HEADLESS;
-const send = (text: string) => executeTermTool("term_send", { sessionId: "s1", text });
+// The session these tests type into: one term_spawn started (#146), fresh per test.
+let s1 = "";
+/** term_kill ends the session; its id is then refused, and a new term_spawn starts clean. */
+async function killAndRespawn(): Promise<void> {
+	const old = s1;
+	await executeTermTool("term_kill", { sessionId: old });
+	expect(await executeTermTool("term_send", { sessionId: old, text: "echo hi" })).toContain(
+		"[BLOCKED]",
+	);
+	s1 = JSON.parse(await executeTermTool("term_spawn", { command: "cat" })).sessionId;
+}
+const send = (text: string) => executeTermTool("term_send", { sessionId: s1, text });
 
 function attachTerminal(answer: () => "approve" | "deny", asked: string[]) {
 	(process.stdin as { isTTY?: boolean }).isTTY = true;
@@ -88,7 +100,8 @@ function attachTerminal(answer: () => "approve" | "deny", asked: string[]) {
 }
 
 beforeEach(async () => {
-	await executeTermTool("term_kill", { sessionId: "s1" });
+	if (s1) await executeTermTool("term_kill", { sessionId: s1 });
+	s1 = JSON.parse(await executeTermTool("term_spawn", { command: "cat" })).sessionId;
 	sent.length = 0;
 	spawned.length = 0;
 	getPermissionManager().setGitState(git);
@@ -144,7 +157,7 @@ describe("with no terminal attached", () => {
 
 	test("a push typed without Enter and submitted later is judged together", async () => {
 		const first = await executeTermTool("term_send", {
-			sessionId: "s1",
+			sessionId: s1,
 			text: "git push origin ",
 			appendEnter: false,
 		});
@@ -154,7 +167,7 @@ describe("with no terminal attached", () => {
 
 	test("pending input clears once submitted, so a later line is judged alone", async () => {
 		await executeTermTool("term_send", {
-			sessionId: "s1",
+			sessionId: s1,
 			text: "git push origin ",
 			appendEnter: false,
 		});
@@ -166,24 +179,24 @@ describe("with no terminal attached", () => {
 
 	test("a newline inside the text submits, so only the text after it stays pending", async () => {
 		const first = await executeTermTool("term_send", {
-			sessionId: "s1",
+			sessionId: s1,
 			text: "echo a\ngit push origin ",
 			appendEnter: false,
 		});
 		expect(first).toContain('"ok":true');
 		expect(await send("main")).toContain("[PERMISSION DENIED]");
-		await executeTermTool("term_send", { sessionId: "s1", text: "echo b\n", appendEnter: false });
+		await executeTermTool("term_send", { sessionId: s1, text: "echo b\n", appendEnter: false });
 		expect(await send("main")).toContain('"ok":true');
 	});
 
 	test("a denied send leaves the pending line as it was", async () => {
 		await executeTermTool("term_send", {
-			sessionId: "s1",
+			sessionId: s1,
 			text: "git push origin ",
 			appendEnter: false,
 		});
 		expect(
-			await executeTermTool("term_send", { sessionId: "s1", text: "$(x)", appendEnter: false }),
+			await executeTermTool("term_send", { sessionId: s1, text: "$(x)", appendEnter: false }),
 		).toContain("[PERMISSION DENIED]");
 		expect(await send("main")).toContain("[PERMISSION DENIED]");
 	});
@@ -232,18 +245,18 @@ describe("with no terminal attached", () => {
 		const asked: string[] = [];
 		attachTerminal(() => "approve", asked);
 		const typed = (text: string) =>
-			executeTermTool("term_send", { sessionId: "s1", text, appendEnter: false });
+			executeTermTool("term_send", { sessionId: s1, text, appendEnter: false });
 		expect(await typed(`${RM} ${bs}`)).toContain('"ok":true');
 		expect(await typed("\n/")).toContain("[PERMISSION DENIED]");
 		// Enter after a backslash does not submit, so the next piece is still the same command.
-		expect(await executeTermTool("term_send", { sessionId: "s1", text: "echo ok" })).toContain(
+		expect(await executeTermTool("term_send", { sessionId: s1, text: "echo ok" })).toContain(
 			'"ok":true',
 		);
 		expect(await typed(`${RM} ${bs}`)).toContain('"ok":true');
 		expect(await typed("\n")).toContain('"ok":true');
 		expect(await typed("/")).toContain("[PERMISSION DENIED]");
 		// An open quote carried over from the first call is judged with the second.
-		await executeTermTool("term_kill", { sessionId: "s1" });
+		await killAndRespawn();
 		expect(await typed('echo "')).toContain('"ok":true');
 		expect(await typed(`"; ${WIPE_ROOT}`)).toContain("[PERMISSION DENIED]");
 	});
@@ -322,7 +335,7 @@ describe("with a terminal attached", () => {
 
 describe("round two: ANSI-C quotes, literal -l text, pending lifetime", () => {
 	const typed = (text: string) =>
-		executeTermTool("term_send", { sessionId: "s1", text, appendEnter: false });
+		executeTermTool("term_send", { sessionId: s1, text, appendEnter: false });
 
 	test("$' is unreadable: a person is asked, and refused with no terminal", async () => {
 		process.env.EIGHT_HEADLESS = "1";
@@ -358,7 +371,7 @@ describe("round two: ANSI-C quotes, literal -l text, pending lifetime", () => {
 
 	test("pending text is dropped on term_kill", async () => {
 		await typed("git push origin ");
-		await executeTermTool("term_kill", { sessionId: "s1" });
+		await killAndRespawn();
 		expect(await send("main")).toContain('"ok":true');
 	});
 
@@ -406,7 +419,7 @@ describe("round two: ANSI-C quotes, literal -l text, pending lifetime", () => {
 		await typed("true; rm -");
 		await typed("a".repeat(MAX_PENDING_INPUT + 1));
 		expect(await send("rf /")).toContain("blocked by security policy");
-		await executeTermTool("term_kill", { sessionId: "s1" });
+		await killAndRespawn();
 		sent.length = 0;
 		expect(await send("echo hi")).toContain('"ok":true');
 		expect(sent).toEqual(["echo hi"]);

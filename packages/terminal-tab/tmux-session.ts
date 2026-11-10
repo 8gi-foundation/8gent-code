@@ -32,6 +32,24 @@ const execFileAsync = promisify(execFile);
 
 export const SESSIONS_LOG_DIR = join(homedir(), ".8gent", "sessions");
 
+/**
+ * The app's own tmux server (#146). Every call goes through `-L` with this
+ * name, so the term_* tools can never address the person's default tmux
+ * server or the sessions they opened there, and quitting has one server to
+ * clean up. tmux keeps the socket in its per-user directory (mode 0700).
+ */
+export const TMUX_SOCKET_NAME = "8gent-term";
+
+/** Prefix every tmux argv with the app's private socket. */
+export function tmuxArgv(args: string[]): string[] {
+	return ["-L", TMUX_SOCKET_NAME, ...args];
+}
+
+/** Run tmux on the app's private server, argv only, never a shell string. */
+function tmux(args: string[]) {
+	return execFileAsync("tmux", tmuxArgv(args));
+}
+
 // ---------------- Types ----------------
 
 export interface TmuxSpawnOpts {
@@ -181,22 +199,16 @@ export async function spawnTmuxSession(opts: TmuxSpawnOpts): Promise<TmuxSession
 		cols: opts.cols,
 		rows: opts.rows,
 	});
-	await execFileAsync("tmux", newArgs);
+	await tmux(newArgs);
 
 	// 2. Wire the pipe-pane logger
 	const pipeArgs = buildPipePaneArgs(sessionId, logPath);
-	await execFileAsync("tmux", pipeArgs);
+	await tmux(pipeArgs);
 
 	// 3. Probe pid of the running command (the pane's foreground pid)
 	let pid = 0;
 	try {
-		const { stdout } = await execFileAsync("tmux", [
-			"list-panes",
-			"-t",
-			sessionId,
-			"-F",
-			"#{pane_pid}",
-		]);
+		const { stdout } = await tmux(["list-panes", "-t", sessionId, "-F", "#{pane_pid}"]);
 		pid = Number.parseInt(stdout.trim().split("\n")[0] ?? "0", 10) || 0;
 	} catch {
 		/* leave pid=0 */
@@ -215,7 +227,9 @@ export async function spawnTmuxSession(opts: TmuxSpawnOpts): Promise<TmuxSession
 
 /** Open a Terminal.app window attached to the running tmux session. */
 export async function attachInTerminal(sessionId: string): Promise<void> {
-	const cmd = `tmux attach -t ${shellSingleQuote(sessionId)}`;
+	// Terminal.app runs this line in its own shell, so it is the one string form.
+	// Every part is app made: the socket name and a generated session id.
+	const cmd = `tmux -L ${shellSingleQuote(TMUX_SOCKET_NAME)} attach -t ${shellSingleQuote(sessionId)}`;
 	const escaped = cmd.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 	const osa = [
 		'tell application "Terminal"',
@@ -231,13 +245,13 @@ export async function sendKeys(
 	text: string,
 	opts: BuildSendKeysOpts = {},
 ): Promise<void> {
-	if (text.length > 0) await execFileAsync("tmux", buildSendKeysArgs(sessionId, text));
-	if (opts.appendEnter !== false) await execFileAsync("tmux", buildEnterKeyArgs(sessionId));
+	if (text.length > 0) await tmux(buildSendKeysArgs(sessionId, text));
+	if (opts.appendEnter !== false) await tmux(buildEnterKeyArgs(sessionId));
 }
 
 export async function hasSession(sessionId: string): Promise<boolean> {
 	try {
-		await execFileAsync("tmux", ["has-session", "-t", sessionId]);
+		await tmux(["has-session", "-t", sessionId]);
 		return true;
 	} catch {
 		return false;
@@ -246,7 +260,7 @@ export async function hasSession(sessionId: string): Promise<boolean> {
 
 export async function killTmuxSession(sessionId: string): Promise<void> {
 	try {
-		await execFileAsync("tmux", ["kill-session", "-t", sessionId]);
+		await tmux(["kill-session", "-t", sessionId]);
 	} catch {
 		/* already gone */
 	}
@@ -254,7 +268,7 @@ export async function killTmuxSession(sessionId: string): Promise<void> {
 
 export async function listTmuxSessions(): Promise<string[]> {
 	try {
-		const { stdout } = await execFileAsync("tmux", ["list-sessions", "-F", "#{session_name}"]);
+		const { stdout } = await tmux(["list-sessions", "-F", "#{session_name}"]);
 		return stdout
 			.trim()
 			.split("\n")
