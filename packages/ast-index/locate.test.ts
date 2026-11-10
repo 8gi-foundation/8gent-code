@@ -571,6 +571,33 @@ describe("a repo larger than one rg output chunk", () => {
 			},
 			SLOW,
 		);
+
+		test(
+			"a fallback search that ran out of ignore rules is marked incomplete",
+			async () => {
+				// More .gitignore rules than one search will read: the walk cannot know
+				// what it was told to skip, so its answer is partial, not complete.
+				const dir = fs.mkdtempSync(path.join(os.tmpdir(), "locate-rules-"));
+				try {
+					const rules = Array.from({ length: 10_050 }, (_, i) => `ignored-${i}.tmp`).join("\n");
+					fs.writeFileSync(path.join(dir, ".gitignore"), `${rules}\n`);
+					fs.writeFileSync(path.join(dir, "kept.ts"), "export const keptThing = 1;\n");
+					const rg = path.join(dir, "no-such-dir", "rg");
+					const grep = await locate("keptThing", {
+						root: dir,
+						repoId: null,
+						rg,
+						rgTimeoutMs: SLOW,
+					});
+					expect(grep.incomplete).toBe(true);
+					const list = await locate("kept.ts", { root: dir, repoId: null, rg, rgTimeoutMs: SLOW });
+					expect(list.incomplete).toBe(true);
+				} finally {
+					removeDir(dir);
+				}
+			},
+			SLOW,
+		);
 	});
 });
 

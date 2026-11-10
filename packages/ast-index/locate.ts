@@ -590,7 +590,8 @@ async function grepLiteral(
 				allow: readAllowed(root),
 				deadlineMs: state.timeoutMs ?? RG_TIMEOUT_MS,
 			});
-			if (r.deadline || r.capped) state.rgTimedOut = true;
+			// Any early stop (time limit, result cap, walk cap, ignore rules over budget) is a partial answer.
+			if (r.truncated) state.rgTimedOut = true;
 			// A failed search must read as "search unavailable", never as "no matches".
 			if (r.error) state.rgMissing = true;
 			hits.push(...r.hits.map((h) => ({ file: h.file, line: h.line, text: h.text })));
@@ -629,8 +630,8 @@ async function listFiles(ctx: RunCtx): Promise<string[]> {
 			deadlineMs: ctx.state.timeoutMs ?? RG_TIMEOUT_MS,
 		});
 		if (r.error) ctx.state.rgMissing = true;
-		if (r.deadline) ctx.state.rgTimedOut = true;
-		return withIndexed(ctx, r.files, !!r.deadline);
+		if (r.truncated) ctx.state.rgTimedOut = true;
+		return withIndexed(ctx, r.files, !!r.truncated);
 	}
 	const allowed = readAllowed(ctx.root);
 	const files = out.text
