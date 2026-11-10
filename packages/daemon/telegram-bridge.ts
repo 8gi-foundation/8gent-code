@@ -814,7 +814,9 @@ export const VOICE_NEEDS_LOCAL =
  * The one operator whose voice notes are processed in a group, for this rollout (C-G2).
  * On top of TELEGRAM_OPERATOR_USER_IDS, never instead of it.
  */
-export function groupVoiceOperatorId(env: Record<string, string | undefined> = process.env): string {
+export function groupVoiceOperatorId(
+	env: Record<string, string | undefined> = process.env,
+): string {
 	return (env.TELEGRAM_GROUP_VOICE_OPERATOR_ID ?? "").trim();
 }
 export const GROUP_VOICE_MAX_SECONDS = 60;
@@ -1049,25 +1051,51 @@ export function needsToolWork(text: string): boolean {
 	return TOOL_WORK_WORDS.test(text);
 }
 
-/** What one attempt does: the prompt, its timeout, an optional one-time notice, or a final fallback line. */
+/** Why the previous attempt ended without an answer. */
+export interface AttemptEnd {
+	reason: "timeout" | "empty";
+	/** Time since the message arrived, measured, not assumed. */
+	elapsedMs: number;
+}
+
+/** A measured duration in plain words. */
+function spoken(ms: number): string {
+	if (ms < 1000) return "less than a second";
+	const s = Math.round(ms / 1000);
+	return s === 1 ? "1 second" : `${s} seconds`;
+}
+
+/**
+ * What one attempt does: the prompt, its timeout, an optional one-time notice,
+ * or a final fallback line. `ended` says why the previous attempt ended; the
+ * notice and the fallback state that reason and the measured time, nothing else.
+ */
 export function retryPlan(
 	originalText: string,
 	attempt: number,
+	ended?: AttemptEnd,
 ): { prompt: string; timeout: number; notice?: string; final?: string } {
 	const toolWork = needsToolWork(originalText);
-	const lastAttempt = toolWork ? 2 : 4;
+	// Prompts sent: 2 for research, 3 otherwise. Never more than main's 3.
+	const lastAttempt = toolWork ? 2 : 3;
 	if (attempt > lastAttempt) {
+		const tries = attempt - 1;
+		const how =
+			ended?.reason === "empty" ? "the last one came back empty" : "the last one ran out of time";
+		const when = ended ? ` in ${spoken(ended.elapsedMs)}` : "";
 		return {
 			prompt: originalText,
 			timeout: 0,
-			final:
-				"No answer was produced: the request timed out. Send it again or break it into a smaller task.",
+			final: `No answer was produced after ${tries} tries${when}; ${how}. Send it again or break it into a smaller task.`,
 		};
 	}
-	const notice =
-		attempt === 2
-			? `No answer yet after ${FIRST_ATTEMPT_MS / 1000} seconds. Still working.`
-			: undefined;
+	let notice: string | undefined;
+	if (attempt === 2 && ended) {
+		notice =
+			ended.reason === "empty"
+				? `The first try came back empty after ${spoken(ended.elapsedMs)}. Trying again.`
+				: `No answer yet after ${spoken(ended.elapsedMs)}. Still working.`;
+	}
 	if (toolWork) return { prompt: originalText, timeout: FIRST_ATTEMPT_MS, notice };
 	let prompt = originalText;
 	if (attempt === 2) {
@@ -2770,20 +2798,23 @@ class TelegramDaemonBridge {
 	}
 
 	/**
-	 * Retry loop. Attempt 1 sends the prompt as is (2 min). If it times out the
-	 * chat is told once, plainly, that there is no answer yet and work goes on.
+	 * Retry loop. Attempt 1 sends the prompt as is (2 min). If it ends without
+	 * an answer (timed out, or came back empty) the chat is told once, plainly,
+	 * which of the two happened and after how long.
 	 *
 	 * - Work that needs reading (research, review, check, comparison): one
 	 *   retry of the SAME prompt with the full timeout, then stop. Tools and
-	 *   budget are never cut.
+	 *   budget are never cut. The retry resends the full prompt to a fresh
+	 *   session; approvals still gate any step it repeats.
 	 * - Anything else: a brief retry, then a no-tools retry, without further
 	 *   notices.
 	 *
 	 * The last fallback says plainly that no answer was produced and why.
 	 */
-	private retryPrompt(originalText: string, attempt: number): void {
-		this._retryState = { text: originalText, attempt };
-		const plan = retryPlan(originalText, attempt);
+	private retryPrompt(originalText: string, attempt: number, ended?: AttemptEnd): void {
+		const startedAt = attempt === 1 || !this._retryState ? Date.now() : this._retryState.startedAt;
+		this._retryState = { text: originalText, attempt, startedAt };
+		const plan = retryPlan(originalText, attempt, ended);
 
 		if (plan.final) {
 			this.agentBusy = false;
@@ -2808,7 +2839,10 @@ class TelegramDaemonBridge {
 			if (this.agentBusy) {
 				// Create a new session to clear any stuck state
 				this.freshSession();
-				this.retryPrompt(originalText, attempt + 1);
+				this.retryPrompt(originalText, attempt + 1, {
+					reason: "timeout",
+					elapsedMs: Date.now() - startedAt,
+				});
 			}
 		}, plan.timeout);
 
@@ -2817,7 +2851,7 @@ class TelegramDaemonBridge {
 	}
 
 	private _retryTimer: ReturnType<typeof setTimeout> | null = null;
-	private _retryState: { text: string; attempt: number } | null = null;
+	private _retryState: { text: string; attempt: number; startedAt: number } | null = null;
 
 	/** The current attempt came back empty: drop its timer and move to the next retry step. */
 	private failAttempt(): void {
@@ -2828,7 +2862,10 @@ class TelegramDaemonBridge {
 		}
 		if (!state) return;
 		this.freshSession();
-		this.retryPrompt(state.text, state.attempt + 1);
+		this.retryPrompt(state.text, state.attempt + 1, {
+			reason: "empty",
+			elapsedMs: Date.now() - state.startedAt,
+		});
 	}
 
 	/** The operator's private chat with the bot (a DM chat id is the user id). */

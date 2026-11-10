@@ -17,6 +17,7 @@
  * production; a fake event source drives it in tests.
  */
 
+import { isEmptyReplyNote } from "../ai/text-tool-loop";
 import type { DaemonClient, EventPayloads } from "./daemon-client";
 import { FileSender } from "./file-sender";
 import {
@@ -34,6 +35,7 @@ import {
 	truncateForMobile,
 } from "./mobile-formatter";
 import {
+	NO_ANSWER_SENTENCE,
 	ONLY_STARTER_CANCEL,
 	ONLY_STARTER_STEPS,
 	RUN_FINISHED,
@@ -378,6 +380,13 @@ export class TelegramBridgeAdapter {
 		const cur = this.current;
 		this.stopTyping(cur);
 
+		// No answer (empty after reasoning is stripped, or the harness's own
+		// empty-reply note) is a failed run, never a "Done".
+		if (text.trim() === "" || isEmptyReplyNote(text.trim())) {
+			await this.closeFailed(cur, NO_ANSWER_SENTENCE);
+			return;
+		}
+
 		if (cur.status) {
 			const run = cur.status;
 			const outcome = doneOutcome(text);
@@ -452,6 +461,25 @@ export class TelegramBridgeAdapter {
 		try {
 			this.onTurnEnd?.();
 		} catch {}
+	}
+
+	/** Close the current run as failed with one plain sentence; nothing is recorded as succeeded. */
+	private async closeFailed(cur: RunningTask, sentence: string): Promise<void> {
+		if (cur.status) {
+			cur.status.error = sentence;
+			await this.finishStatus(
+				cur.status,
+				"failed",
+				statusText.failed(sentence),
+				taskFailedKeyboard(cur.status.id).inline_keyboard,
+			);
+		} else if (cur.runner) {
+			await cur.runner.fail(sentence, taskFailedKeyboard(cur.runner.task.id));
+			cur.runner.destroy();
+		}
+		this.current = null;
+		this.sessions.linkTask(this.chatId, null);
+		this.endTurn();
 	}
 
 	private async onAgentError(payload: EventPayloads["agent:error"]): Promise<void> {

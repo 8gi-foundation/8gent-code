@@ -262,7 +262,7 @@ import {
 import { resolveHome } from "../core/home";
 import { BRAND } from "../personality/brand.js";
 // Personality voice — the infinite gentleman
-import { COMPLETION_PHRASES, ERROR_PHRASES, GREETINGS, PERSONALITY } from "../personality/voice.js";
+import { PERSONALITY } from "../personality/voice.js";
 import {
 	CONTEXT_NOTE_HEADER,
 	type SentSections,
@@ -913,15 +913,13 @@ export class Agent {
 			this.styleReminder = `${CONTEXT_NOTE_HEADER}\nReminder for your reply: ${communicationStyleLine(style)}`;
 		}
 
-		// Inject the 8gent personality voice into the system prompt. Fixed phrases,
-		// never a random pick: a different phrase per build changed the prompt at
+		// Inject the 8gent personality voice into the system prompt. Fixed text,
+		// and no stock phrase for the model to repeat as if it were the answer.
+		// Never a random pick: a different phrase per build changed the prompt at
 		// byte 17,318 and cost the whole prefix cache (#3222).
 		const personalityBlock = `\n\n## PERSONALITY VOICE: ${BRAND.fullName}: ${PERSONALITY.tagline}
 You are ${PERSONALITY.name}, the infinite gentleman agent coder.
 Traits: refined, witty, confident, helpful, endlessly capable.
-When greeting users, use phrases like: "${GREETINGS[0]}"
-When completing tasks, use phrases like: "${COMPLETION_PHRASES[0]}"
-When encountering errors, stay composed: "${ERROR_PHRASES[0]}"
 Maintain a tone that is sophisticated yet approachable, like a well-dressed engineer who happens to be brilliant.\n`;
 
 		// Inject orchestrator awareness into system prompt
@@ -1281,7 +1279,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * parser accepts come back as tool_calls), and emits the same onToolStart/onToolEnd events the native path
 	 * emits so the TUI step rail and the Pill work-surface render the calls live.
 	 * Returns the final assistant text in the exact shape Agent.chat() normally
-	 * returns (flavored prose), so app.tsx and agent-pool.ts render it unchanged.
+	 * returns (the reply text), so app.tsx and agent-pool.ts render it unchanged.
 	 */
 
 	/**
@@ -2511,10 +2509,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			};
 		}
 
-		// Map into the exact shape chat() normally returns: flavored prose, pushed
+		// Map into the exact shape chat() normally returns: the reply text, pushed
 		// onto the assistant history, with the post-turn bookkeeping the native
-		// path performs (session evidence summary, run log, journal). A reply the
-		// honesty gate rewrote is NOT flavored - no celebration on a failure.
+		// path performs (session evidence summary, run log, journal).
 		// A turn the circuit breaker stopped is not finished: say so, and ask,
 		// instead of passing an announced-but-untaken step off as the answer
 		// (#3409). The question also keeps the TUI from appending its generic
@@ -2544,9 +2541,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			};
 		}
 		// The reply is exactly what the model produced (after the honesty gate): no stock line is added.
-		const flavoredContent = fixCompletedLine(content).text;
-		this.messageHistory.push({ role: "assistant", content: flavoredContent });
-		this.sessionWriter.writeAssistantContent(stepNumber, [{ type: "text", text: flavoredContent }]);
+		const replyContent = fixCompletedLine(content).text;
+		this.messageHistory.push({ role: "assistant", content: replyContent });
+		this.sessionWriter.writeAssistantContent(stepNumber, [{ type: "text", text: replyContent }]);
 
 		const durationSec = Math.round((Date.now() - chatStartTime) / 1000);
 		if (this.enableReporting) {
@@ -2590,7 +2587,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					redacted: false,
 				})),
 				modelOutput: {
-					content: flavoredContent,
+					content: replyContent,
 					// Real accumulated usage from the endpoint (zeros only when the
 					// endpoint reported none) - see #2805.
 					tokens: {
@@ -2606,7 +2603,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			/* journal is best-effort; never break the turn */
 		}
 
-		return flavoredContent;
+		return replyContent;
 	}
 
 	/**
@@ -4505,9 +4502,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				: gatedNative.content;
 
 			// The reply is exactly what the model produced (after the honesty gate): no stock line is added.
-			const flavoredContent = fixCompletedLine(content).text;
+			const replyContent = fixCompletedLine(content).text;
 
-			this.messageHistory.push({ role: "assistant", content: flavoredContent });
+			this.messageHistory.push({ role: "assistant", content: replyContent });
 
 			// Feed successful turn to kernel for personal LoRA training (fire-and-forget).
 			// Connector 2 (ISI wiring): score the turn with the PRM judge instead of a
@@ -4526,7 +4523,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				const toolCallsSucceeded = this.sessionEvidence.filter((e) => !e.verified).length === 0;
 				const turnIndex = this.messageHistory.filter((m) => m.role === "assistant").length;
 				const promptForKernel = textForAgent;
-				const responseForKernel = flavoredContent;
+				const responseForKernel = replyContent;
 				const modelForKernel = this.config.model;
 				// Fire-and-forget: judge scores async, never blocks the turn.
 				void this.kernel
@@ -4604,7 +4601,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					...(blankNative ? { unverified: [emptyReplyStall(this.turnToolLedger.length)] } : {}),
 				});
 			}
-			const finalContent = flavoredContent;
+			const finalContent = replyContent;
 
 			await this.hookManager.executeHooks("onComplete", {
 				sessionId: this.sessionId,
@@ -4642,7 +4639,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					systemPromptLength: this.systemPromptLengthFull,
 					toolCalls: [],
 					modelOutput: {
-						content: flavoredContent,
+						content: replyContent,
 						tokens: { in: 0, out: 0, total: totalTokensUsed },
 					},
 					latencyMs: Date.now() - chatStartTime,
@@ -4651,7 +4648,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			} catch {
 				/* journal is best-effort; never break the turn */
 			}
-			return flavoredContent;
+			return replyContent;
 		} catch (err) {
 			if (sessionWatchdog) {
 				clearTimeout(sessionWatchdog);

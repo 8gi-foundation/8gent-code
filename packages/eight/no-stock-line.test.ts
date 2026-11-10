@@ -110,3 +110,36 @@ describe("no stock line on any reply", () => {
 		}
 	}, 120_000);
 });
+
+describe("the system prompt asks for no stock phrase", () => {
+	test("the personality segment carries no phrase from any list and no instruction to use one", () => {
+		// A native-tool runtime gets the full prompt, personality block included.
+		process.env.EIGHT_TEXT_TOOLS = "0";
+		let agent: AgentT;
+		try {
+			agent = new Agent({
+				model: "m",
+				runtime: "openrouter",
+				workingDirectory: repo,
+				baseUrl: `http://127.0.0.1:${server.port}`,
+			} as ConstructorParameters<typeof Agent>[0]);
+		} finally {
+			process.env.EIGHT_TEXT_TOOLS = ENV.EIGHT_TEXT_TOOLS;
+		}
+		const segments = (agent as unknown as { systemSegments: [string, string][] }).systemSegments;
+		const personality = segments.find(([name]) => name === "personality")?.[1] ?? "";
+		expect(personality).toContain("PERSONALITY VOICE");
+		const prompt = segments.map(([, t]) => t).join("");
+		expect(prompt).not.toMatch(/use phrases like/i);
+		// The stock greeting, completion, error, idle, thinking and progress lines.
+		const stock = [
+			...voice.GREETINGS,
+			...voice.COMPLETION_PHRASES,
+			...voice.ERROR_PHRASES,
+			...voice.IDLE_QUIPS,
+			...voice.THINKING_PHRASES,
+			...voice.PROGRESS_PHRASES,
+		];
+		for (const p of stock) expect(prompt).not.toContain(p);
+	});
+});
