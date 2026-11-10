@@ -1,0 +1,8 @@
+{
+	"name": "letsfg",
+	"version": "0.2.0",
+	"description": "Search flights with LetsFG. Read-only: it cannot book or pay.",
+	"command": "bun",
+	"args": ["letsfg.ts"],
+	"permissions": ["tool:search_flights", "tool:get_flight_results", "tool:get_flight_booking"]
+}
