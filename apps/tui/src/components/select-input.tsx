@@ -83,6 +83,54 @@ export function pickerHint(columns: number | undefined, searchable: boolean): st
 	return `[↑↓] Navigate [Enter] Select [Esc] Cancel${searchable ? " [type] Filter" : ""}`;
 }
 export const PICKER_MIN_VISIBLE = 3;
+/** Rows the app draws around a picker (the figure the #123 border tests use). */
+export const PICKER_APP_ROWS = 11;
+
+export interface PickerLayout {
+	/** Not even one row plus the hint fits: show one line and let Enter do nothing. */
+	refuse: boolean;
+	visible: number;
+	showTitle: boolean;
+	/** Compact: one combined line for the rows above and below. */
+	oneScrollLine: boolean;
+}
+
+/**
+ * How many option rows to draw in the rows the app leaves the picker. From 26
+ * terminal rows up this is the old cap. Under that it counts every row the card
+ * draws (border 2, hint 1, search line, title, one scroll line) against the real
+ * budget, drops the title before it drops a row, and refuses rather than draw
+ * a picker whose rows or hint are clipped.
+ */
+export function pickerLayout(
+	terminalRows: number | undefined,
+	total: number,
+	searching: boolean,
+	maxVisible: number,
+): PickerLayout {
+	if (!isCompactPicker(terminalRows)) {
+		return {
+			refuse: false,
+			visible: fitVisible(maxVisible, terminalRows),
+			showTitle: true,
+			oneScrollLine: false,
+		};
+	}
+	const budget = (terminalRows as number) - PICKER_APP_ROWS;
+	const avail = budget - 3 - (searching ? 1 : 0);
+	const fit = (room: number): number => {
+		if (room < 1) return 0;
+		if (total <= room) return Math.min(total, maxVisible);
+		return Math.min(room - 1, maxVisible);
+	};
+	const withTitle = fit(avail - 1);
+	if (withTitle >= 1 || (total === 0 && avail >= 1)) {
+		return { refuse: false, visible: Math.max(withTitle, 1), showTitle: true, oneScrollLine: true };
+	}
+	const bare = fit(avail);
+	if (bare >= 1) return { refuse: false, visible: bare, showTitle: false, oneScrollLine: true };
+	return { refuse: true, visible: 0, showTitle: false, oneScrollLine: true };
+}
 
 export function fitVisible(maxVisible: number, terminalRows: number | undefined): number {
 	if (!terminalRows || terminalRows <= 0) return maxVisible;
@@ -105,7 +153,6 @@ export function SelectInput<T = string>({
 	highlightColor = "cyan",
 }: SelectInputProps<T>) {
 	const { stdout } = useStdout();
-	const maxVisible = fitVisible(maxVisibleProp, stdout?.rows);
 	const compact = isCompactPicker(stdout?.rows);
 	const inkHighlight = highlightColor as NonNullable<TextProps["color"]>;
 	// useState here intentionally freezes a value at mount; recomputing per render would break stable references downstream.
@@ -124,8 +171,23 @@ export function SelectInput<T = string>({
 		[options, search, searchable],
 	);
 
+	const layout = pickerLayout(stdout?.rows, filteredOptions.length, !!search, maxVisibleProp);
+	const maxVisible = Math.max(1, layout.visible);
+
 	const [scrollOffset, setScrollOffset] = useState(() =>
 		clampScrollOffset(initialIndex, options.length, maxVisible),
+	);
+	// The window is derived each render so the marked row is on screen in the same frame.
+	const shownOffset = Math.max(
+		0,
+		Math.min(
+			selectedIndex < scrollOffset
+				? selectedIndex
+				: selectedIndex >= scrollOffset + maxVisible
+					? selectedIndex - maxVisible + 1
+					: scrollOffset,
+			Math.max(0, filteredOptions.length - maxVisible),
+		),
 	);
 
 	// Ensure selection is within bounds
@@ -153,6 +215,7 @@ export function SelectInput<T = string>({
 		}
 
 		if (key.return) {
+			if (layout.refuse) return;
 			const selected = filteredOptions[selectedIndex];
 			if (selected && !selected.disabled) {
 				onSelect(selected.value);
@@ -198,15 +261,27 @@ export function SelectInput<T = string>({
 	});
 
 	// Visible slice of options
-	const visibleOptions = filteredOptions.slice(scrollOffset, scrollOffset + maxVisible);
+	if (layout.refuse) {
+		return (
+			<Box>
+				<MutedText wrap="truncate-end">
+					Window too short for this list. Make it taller. Esc closes.
+				</MutedText>
+			</Box>
+		);
+	}
+
+	const scrollOffsetShown = shownOffset;
+	const visibleOptions = filteredOptions.slice(scrollOffsetShown, scrollOffsetShown + maxVisible);
 	const hasMore = filteredOptions.length > maxVisible;
-	const canScrollUp = scrollOffset > 0;
-	const canScrollDown = scrollOffset + maxVisible < filteredOptions.length;
+	const canScrollUp = scrollOffsetShown > 0;
+	const canScrollDown = scrollOffsetShown + maxVisible < filteredOptions.length;
+	const below = filteredOptions.length - scrollOffsetShown - maxVisible;
 
 	return (
 		<Card borderColor="blue">
 			{/* Title */}
-			{title && (
+			{title && layout.showTitle && (
 				<Box marginBottom={compact ? 0 : 1}>
 					<Heading color={inkHighlight}>{title}</Heading>
 				</Box>
@@ -214,7 +289,7 @@ export function SelectInput<T = string>({
 
 			{/* Search input (if searchable and has search) */}
 			{searchable && search && (
-				<Inline gap={0} marginBottom={1}>
+				<Inline gap={0} marginBottom={compact ? 0 : 1}>
 					<MutedText>Search: </MutedText>
 					<AppText color="yellow">{search}</AppText>
 					<MutedText> (Backspace to clear)</MutedText>
@@ -222,15 +297,24 @@ export function SelectInput<T = string>({
 			)}
 
 			{/* Scroll up indicator */}
-			{hasMore && canScrollUp && (
+			{hasMore && layout.oneScrollLine && compact && (
 				<Box>
-					<MutedText> ▲ {scrollOffset} more above</MutedText>
+					<MutedText wrap="truncate-end">
+						{canScrollUp ? ` ▲ ${scrollOffsetShown} more above` : ""}
+						{canScrollUp && canScrollDown ? "  " : ""}
+						{canScrollDown ? `▼ ${below} more below` : ""}
+					</MutedText>
+				</Box>
+			)}
+			{hasMore && !compact && canScrollUp && (
+				<Box>
+					<MutedText> ▲ {scrollOffsetShown} more above</MutedText>
 				</Box>
 			)}
 
 			{/* Options */}
 			{visibleOptions.map((option, index) => {
-				const actualIndex = scrollOffset + index;
+				const actualIndex = scrollOffsetShown + index;
 				const isSelected = actualIndex === selectedIndex;
 				const isDisabled = option.disabled;
 
@@ -287,10 +371,10 @@ export function SelectInput<T = string>({
 			})}
 
 			{/* Scroll down indicator */}
-			{hasMore && canScrollDown && (
+			{hasMore && !compact && canScrollDown && (
 				<Box>
 					<MutedText>
-						{"  "}▼ {filteredOptions.length - scrollOffset - maxVisible} more below
+						{"  "}▼ {below} more below
 					</MutedText>
 				</Box>
 			)}
