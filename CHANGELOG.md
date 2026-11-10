@@ -9,6 +9,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.46] - 2026-11-10
+
+### Fixed
+- eight: a tool result starting with ERR: is recorded as a failure ([#149](https://github.com/8gi-foundation/8gent-code/pull/149))
+- tui: Ctrl+C stops the turn and always exits; one shared spinner clock ([#122](https://github.com/8gi-foundation/8gent-code/pull/122))
+- tui: sending snaps to the bottom, PgDn pages the chat, terse asks get no tagline ([#124](https://github.com/8gi-foundation/8gent-code/pull/124))
+- eight: a reply that claims a commit, push or test run needs a matching call ([#111](https://github.com/8gi-foundation/8gent-code/pull/111))
+- locate: honor the time limit and mark cuts incomplete when ripgrep is missing ([#131](https://github.com/8gi-foundation/8gent-code/pull/131))
+- tui: resume hands the transcript to the model; title sessions by first prompt; keep original times (#108) ([#112](https://github.com/8gi-foundation/8gent-code/pull/112))
+- tui: keep the saved model on relaunch, name a busy model, fit the picker, agree with the rail ([#123](https://github.com/8gi-foundation/8gent-code/pull/123))
+
 ## [0.20.45] - 2026-11-09
 
 ### Added

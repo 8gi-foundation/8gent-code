@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-E8610A?style=for-the-badge&labelColor=1A1612" alt="Apache 2.0 License" /></a>
-  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-0.20.45-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v0.20.45" /></a>
+  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-0.20.46-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v0.20.46" /></a>
 </p>
 
 8gent Code reads your project, edits files, runs commands and works through multi-step tasks from a chat interface in your terminal. It is built to be free, local first and private: it starts on a model running on your own machine, needs no account or API key, and your prompts and code go only to a model on your machine unless you turn on a hosted provider. Web search and page fetches go to the web.
