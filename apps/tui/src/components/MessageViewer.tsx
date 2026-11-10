@@ -9,6 +9,7 @@
 
 import { Box, Text, useInput } from "ink";
 import React, { useState } from "react";
+import { t } from "../theme.js";
 
 interface ViewerMessage {
 	id: string;
@@ -36,7 +37,7 @@ const ROLE_COLOR: Record<string, string> = {
 	user: "yellow",
 	assistant: "cyan",
 	system: "gray",
-	tool: "magenta",
+	tool: t.teal,
 };
 
 export function MessageViewer({
