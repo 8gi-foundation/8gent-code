@@ -170,6 +170,10 @@ interface MessageListProps {
 	approvalPending?: boolean;
 	/** Bumped on every submit, slash commands included: the view returns to the live edge. */
 	snapSeq?: number;
+	/** The tab these messages belong to. A change of id swaps in that tab's own scroll position. */
+	tabId?: string;
+	/** Scroll positions by tab; the app owns it so it outlives this list (a terminal tab unmounts it). */
+	scrollMemory?: Map<string, TabScroll>;
 	/**
 	 * Fold the running turn's steps behind one status row (#5170). False (the
 	 * default) draws every step as a row, as before.
@@ -304,6 +308,13 @@ function bodyRows(content: string, w: number): number {
 	return rows;
 }
 
+/** Where a tab's chat was left: messages held back from the bottom, pin state, and how many it had. */
+export interface TabScroll {
+	offset: number;
+	pinned: boolean;
+	total: number;
+}
+
 export function MessageList({
 	messages,
 	animateTyping = true,
@@ -318,6 +329,8 @@ export function MessageList({
 	touchHints = false,
 	approvalPending = false,
 	snapSeq = 0,
+	tabId = "",
+	scrollMemory,
 	foldTrace = false,
 	traceOpen = false,
 	onToggleTrace,
@@ -402,6 +415,35 @@ export function MessageList({
 	const autoScrollRef = useRef(true);
 
 	const total = chatMessages.length;
+
+	// Tab switch: scroll state is per tab. Park the outgoing tab's position and
+	// restore the incoming tab's (the bottom when it has none). Rows that landed
+	// while a tab was away count as new, so a scrolled-up view stays on what it
+	// showed. State is set during render so no frame shows the old position.
+	const ownMemory = useRef(new Map<string, TabScroll>());
+	const memory = scrollMemory ?? ownMemory.current;
+	const shownTabRef = useRef(tabId);
+	if (shownTabRef.current !== tabId) {
+		memory.set(shownTabRef.current, {
+			offset: scrollOffsetRef.current,
+			pinned: autoScrollRef.current,
+			total: prevCountRef.current,
+		});
+		const saved = memory.get(tabId);
+		const back = saved
+			? offsetAfterNewMessages({
+					offset: saved.offset,
+					pinned: saved.pinned,
+					added: saved.total < total ? chatMessages.slice(saved.total) : [],
+					total,
+				})
+			: { offset: 0, pinned: true };
+		shownTabRef.current = tabId;
+		autoScrollRef.current = back.pinned;
+		scrollOffsetRef.current = back.offset;
+		prevCountRef.current = total;
+		setScrollOffset(back.offset);
+	}
 
 	// Walk back from the latest message, fitting as many as the row budget
 	// allows. This is the single source of truth for "what fits on screen".

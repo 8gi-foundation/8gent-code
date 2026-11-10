@@ -83,7 +83,7 @@ import {
 	consumeIfWholeValueIsImagePath,
 	useImageInput,
 } from "./components/image-input.js";
-import { MessageList, StreamingMessage } from "./components/message-list.js";
+import { MessageList, StreamingMessage, type TabScroll } from "./components/message-list.js";
 import {
 	AutoMiniKanban,
 	AutoPlanKanban,
@@ -1795,6 +1795,8 @@ export function App({
 
 	// Per-tab message sync: save current tab's messages, load new tab's messages on switch
 	const prevTabIdRef = useRef(activeTabId);
+	// Each chat tab's scroll position, kept here because a terminal tab unmounts the chat list.
+	const chatScrollMemory = useRef(new Map<string, TabScroll>());
 	// Cascading set-state is intentional sequencing across distinct event classes; consolidating to a reducer would lose per-event identity.
 	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
@@ -9393,6 +9395,8 @@ export function App({
 										touchHints={keysUp}
 										approvalPending={isApprovalPending}
 										snapSeq={snapSeq}
+										tabId={prevTabIdRef.current}
+										scrollMemory={chatScrollMemory.current}
 									/>
 								)}
 							</Box>
