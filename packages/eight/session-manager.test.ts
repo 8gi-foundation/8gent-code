@@ -197,3 +197,64 @@ describe("typed desktop text never reaches the session file (8SO, #4057)", () =>
 		expect(mgr.resume(s.id)?.messages?.[1]).toEqual(m("assistant", body));
 	});
 });
+
+describe("resume keeps the record true", () => {
+	test("an unnamed session is titled by its first user prompt, not its id", () => {
+		const s = mgr.create({ model: "qwen", cwd: "/work/a" });
+		mgr.update(s.id, [m("user", "  Add   a clamp\nhelper "), m("assistant", "done")]);
+		const row = mgr.list().find((x) => x.id === s.id);
+		expect(row?.name).toBeUndefined();
+		expect(row?.title).toBe("Add a clamp helper");
+	});
+
+	test("a long first prompt is cut to one short line", () => {
+		const s = mgr.create({ model: "qwen", cwd: "/work/a" });
+		mgr.update(s.id, [m("user", "x".repeat(300))]);
+		const title = mgr.list()[0].title ?? "";
+		expect(title.length).toBeLessThanOrEqual(60);
+		expect(title.endsWith("…")).toBe(true);
+	});
+
+	test("an old-format session is titled from its first user message", () => {
+		fs.writeFileSync(
+			path.join(dir, "legacy01.json"),
+			JSON.stringify({
+				id: "legacy01",
+				model: "q",
+				provider: "ollama",
+				cwd: "/w",
+				messageCount: 2,
+				createdAt: "2024-01-01T00:00:00.000Z",
+				lastActiveAt: "2024-01-01T00:00:00.000Z",
+				messages: [m("assistant", "hi"), m("user", "fix the login bug")],
+			}),
+		);
+		expect(mgr.list().find((x) => x.id === "legacy01")?.title).toBe("fix the login bug");
+	});
+
+	test("get() returns when each message was written, and saving unchanged keeps the file time", () => {
+		const s = mgr.create({ model: "qwen", cwd: "/work/a" });
+		mgr.update(s.id, [m("user", "one"), m("assistant", "two")]);
+		const file = path.join(dir, "tree", `${s.id}.jsonl`);
+		const when = "2024-03-01T10:00:00.000Z";
+		fs.writeFileSync(
+			file,
+			fs.readFileSync(file, "utf-8").replace(/"ts":"[^"]+"/g, `"ts":"${when}"`),
+		);
+		const old = new Date(when);
+		fs.utimesSync(file, old, old);
+
+		const got = mgr.get(s.id);
+		expect(got?.times).toEqual([when, when]);
+
+		// The TUI saves the restored list straight back: nothing is new, so nothing moves.
+		mgr.update(s.id, got?.messages ?? []);
+		expect(mgr.list().find((x) => x.id === s.id)?.lastActiveAt).toBe(when);
+
+		// A real new message does move it.
+		mgr.update(s.id, [...(got?.messages ?? []), m("user", "three")]);
+		expect(Date.parse(mgr.list().find((x) => x.id === s.id)?.lastActiveAt ?? "")).toBeGreaterThan(
+			old.getTime() + 86_400_000,
+		);
+	});
+});
