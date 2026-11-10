@@ -2316,7 +2316,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 		// A turn that ends in an error is still a run: record it in runs.jsonl
 		// with status "error" and the reason, like a successful turn records "ok".
-		const recordFailedRun = (reason: string) => {
+		const recordFailedRun = async (reason: string, rawError?: string) => {
+			await this.recordTurnFailure(rawError ?? reason, chatStartTime);
 			if (!this.enableReporting) return;
 			try {
 				appendRun({
@@ -2451,7 +2452,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			if (!outcome.ok) {
 				this.abortController = null;
 				this.messageHistory.push({ role: "assistant", content: outcome.message });
-				recordFailedRun(`no local model: ${outcome.message}`);
+				await recordFailedRun(`no local model: ${outcome.message}`);
 				return outcome.message;
 			}
 			if (outcome.rerouted) {
@@ -2471,13 +2472,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// reads as what it is, not as a model failure.
 			if (this.stopRequested && breakerStop === null) {
 				this.messageHistory.push({ role: "assistant", content: "Stopped." });
-				recordFailedRun("stopped by user");
+				await recordFailedRun("stopped by user");
 				return "Stopped.";
 			}
 			const endpoint = resolveTextToolEndpoint(providerName, this.config.baseUrl);
 			const failure = describeLocalTurnFailure(err, { endpoint, timeoutMs: attemptTimeoutMs });
 			this.messageHistory.push({ role: "assistant", content: failure.message });
-			recordFailedRun(failure.reason);
+			await recordFailedRun(failure.reason, err instanceof Error ? err.message : String(err));
 			this.lastTurnFailure = {
 				reason: failure.kind === "unreachable" ? "unreachable" : "turn_failed",
 				message: failure.message,
@@ -2492,7 +2493,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			(agentResult.content.trim() === "" || isEmptyReplyNote(agentResult.content))
 		) {
 			this.messageHistory.push({ role: "assistant", content: "Stopped." });
-			recordFailedRun("stopped by user");
+			await recordFailedRun("stopped by user");
 			return "Stopped.";
 		}
 
@@ -2758,6 +2759,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							// dropped, never delivered into this one (the caller had its chance
 							// to take them with takeQueuedSteers).
 							const turn = ++this.turnCounter;
+							this.turnFailureRecorded = false;
 							this.steerQueue = [];
 							this.activeTurn = turn;
 							try {
@@ -2995,6 +2997,46 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 	private plugSessionStarted = false;
 
+	/** True once this turn's failure is in the session record and onComplete has fired (reset per chat). */
+	private turnFailureRecorded = false;
+
+	/**
+	 * A turn that ends badly (a throw, a provider failure, a stop, a timeout) is
+	 * written to the session record as an error with its real message, and the
+	 * onComplete hook hears it once with status "failed". Never throws: a record
+	 * or hook that fails here must not hide the error the person is about to see.
+	 */
+	private async recordTurnFailure(
+		message: string,
+		startedAt: number,
+		stack?: string,
+	): Promise<void> {
+		if (this.turnFailureRecorded) return;
+		this.turnFailureRecorded = true;
+		try {
+			this.sessionWriter.writeError({
+				message,
+				code: null,
+				stack: stack ?? null,
+				recoverable: false,
+			});
+		} catch {
+			/* the record is best-effort here; the original error still reaches the caller */
+		}
+		try {
+			await this.hookManager.executeHooks("onComplete", {
+				sessionId: this.sessionId,
+				status: "failed",
+				result: `Error: ${message}`,
+				error: message,
+				duration: Date.now() - startedAt,
+				workingDirectory: this.config.workingDirectory || process.cwd(),
+			});
+		} catch {
+			/* a failing hook must not mask the original error */
+		}
+	}
+
 	/** One turn, with the plug events around it (#5055). A failing plug is skipped, never fatal. */
 	private async runTurn(
 		userMessage: string,
@@ -3013,9 +3055,18 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const text = await host.runInput(userMessage, cwd);
 		await host.fire("turn_start", { text }, cwd);
 		let reply: string | undefined;
+		const startedAt = Date.now();
 		try {
 			reply = await this.runTurnCore(text, imageBase64, imageMimeType, imageOriginal);
 			return reply;
+		} catch (err) {
+			// Any throw out of the turn, wherever it came from (no-op if runTurnCore's own catch already recorded it).
+			await this.recordTurnFailure(
+				err instanceof Error ? err.message : String(err),
+				startedAt,
+				err instanceof Error ? err.stack : undefined,
+			);
+			throw err;
 		} finally {
 			await host.fire("turn_end", { text, ...(reply !== undefined ? { reply } : {}) }, cwd);
 		}
@@ -4727,12 +4778,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				}
 			}
 
-			this.sessionWriter.writeError({
-				message: errMsg,
-				code: null,
-				stack: err instanceof Error ? (err.stack ?? null) : null,
-				recoverable: false,
-			});
+			await this.recordTurnFailure(
+				errMsg,
+				chatStartTime,
+				err instanceof Error ? (err.stack ?? undefined) : undefined,
+			);
 
 			// Fire YAML OnError hooks (best-effort)
 			this.hookManager
@@ -4763,13 +4813,6 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					error: errMsg.slice(0, 200),
 				});
 			}
-
-			await this.hookManager.executeHooks("onComplete", {
-				sessionId: this.sessionId,
-				result: `Error: ${errMsg}`,
-				duration: Date.now() - chatStartTime,
-				workingDirectory: this.config.workingDirectory || process.cwd(),
-			});
 
 			// TurnJournal (#2470): partial record for errored turn so audit + replay
 			// can reconstruct what blew up. Best-effort.
