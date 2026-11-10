@@ -1,0 +1,7 @@
+{
+	"lane": "plc-st-slice-1",
+	"label": "simulated, not validated on a machine",
+	"quarantineDir": "~/.8gent/factory-quarantine/plc",
+	"publishPaths": ["~/.8gent/factory-quarantine/plc/out"],
+	"reviewers": ["Artale"]
+}

@@ -1,0 +1,121 @@
+{
+ "note": "Names are the 12 from the 8TO r2 spec section 4 (8SO list). Mutations were written by 8TO. 8SO may add, never remove; 8SO owns the final list.",
+ "faults": [
+  {
+   "name": "missing-estop",
+   "replace": [
+    [
+     "safe := estop_ok AND sensor_ok AND wd_ok;",
+     "safe := sensor_ok AND wd_ok;"
+    ]
+   ]
+  },
+  {
+   "name": "double-driven-output",
+   "replace": [
+    [
+     "motor := run AND safe;",
+     "motor := run AND safe;\n  IF stop THEN motor := FALSE; END_IF;"
+    ]
+   ]
+  },
+  {
+   "name": "output-stuck-after-input-loss",
+   "replace": [
+    [
+     "safe := estop_ok AND sensor_ok AND wd_ok;",
+     "IF estop_ok AND sensor_ok AND wd_ok THEN safe := TRUE; END_IF;"
+    ]
+   ]
+  },
+  {
+   "name": "input-fault-not-safe",
+   "replace": [
+    [
+     "safe := estop_ok AND sensor_ok AND wd_ok;",
+     "safe := estop_ok AND wd_ok;"
+    ]
+   ]
+  },
+  {
+   "name": "watchdog-never-trips",
+   "replace": [
+    [
+     "wd_ok := hb_stale < 3;",
+     "wd_ok := TRUE;"
+    ]
+   ]
+  },
+  {
+   "name": "stuck-output-ignores-off",
+   "replace": [
+    [
+     "ELSIF stop THEN run := FALSE; count := 0;",
+     "ELSIF stop THEN count := 0;"
+    ]
+   ]
+  },
+  {
+   "name": "timeout-overrun",
+   "replace": [
+    [
+     "IF count >= 50 THEN",
+     "IF count >= 500 THEN"
+    ]
+   ]
+  },
+  {
+   "name": "unbounded-loop-in-scan",
+   "replace": [
+    [
+     "start_edge := start AND NOT start_prev;",
+     "WHILE count < 0 DO count := count + 1; END_WHILE;\n  start_edge := start AND NOT start_prev;"
+    ]
+   ]
+  },
+  {
+   "name": "estop-in-one-branch",
+   "replace": [
+    [
+     "IF NOT safe THEN run := FALSE; count := 0;",
+     "IF NOT safe AND NOT run THEN run := FALSE; count := 0;"
+    ],
+    [
+     "motor := run AND safe;",
+     "motor := run;"
+    ]
+   ]
+  },
+  {
+   "name": "safe-state-one-scan-late",
+   "replace": [
+    [
+     "safe := estop_ok AND sensor_ok AND wd_ok;",
+     "safe := estop_prev AND sensor_ok AND wd_ok;\n  estop_prev := estop_ok;"
+    ],
+    [
+     "    safe : BOOL := FALSE;",
+     "    safe : BOOL := FALSE;\n    estop_prev : BOOL := TRUE;"
+    ]
+   ]
+  },
+  {
+   "name": "latch-survives-reset",
+   "replace": [
+    [
+     "IF NOT safe THEN run := FALSE; count := 0;",
+     "IF NOT safe THEN count := 0;"
+    ]
+   ]
+  },
+  {
+   "name": "reset-restarts-motor",
+   "replace": [
+    [
+     "start_prev := start;",
+     "start_prev := start AND safe;"
+    ]
+   ]
+  }
+ ]
+}
