@@ -842,7 +842,8 @@ export function buildTextToolCall(opts: {
 	 * Send each declared tool's description (default true). False declares name
 	 * and parameters only: the parser needs only those to keep a native call,
 	 * and the text protocol in the system prompt already describes every tool,
-	 * so a headless run does not pay for the descriptions twice per call.
+	 * so a turn does not pay for the descriptions twice per call. The agent
+	 * always passes false (#133).
 	 */
 	declareDescriptions?: boolean;
 	/**

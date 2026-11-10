@@ -268,8 +268,8 @@ import {
 	GREETINGS,
 	PERSONALITY,
 	flavorResponse,
-	wantsBareReply,
 	voice as personalityVoice,
+	wantsBareReply,
 } from "../personality/voice.js";
 import {
 	CONTEXT_NOTE_HEADER,
@@ -1821,10 +1821,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			}
 			if (shouldDeclareTools(providerName, specs)) {
 				for (const t of specs) {
-					const fn =
-						this.config.headless === true
-							? { name: t.name, parameters: t.parameters }
-							: { name: t.name, description: t.description, parameters: t.parameters };
+					// Declared as the text-tool turn sends them: name and parameters only (#133).
+					const fn = { name: t.name, parameters: t.parameters };
 					tools.push({
 						name: t.name,
 						kind: kind(t.name),
@@ -2202,9 +2200,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// Declared to Ollama so a native tool call its parser accepts comes
 				// back in message.tool_calls instead of being silently dropped.
 				tools: tools.map((t) => t.spec),
-				// Headless: name and parameters only; the system prompt carries the
-				// descriptions, so a run does not pay for them twice on every call.
-				declareDescriptions: this.config.headless !== true,
+				// Name and parameters only: the system prompt's tool list already
+				// describes every tool, and the parser needs only these to keep a
+				// native call. Descriptions here were about 16 KB of the 34 KB of
+				// declared tools, prefilled again on every call (#133).
+				declareDescriptions: false,
 				// #3655: per-request prefill/decode counts into the session log,
 				// only with EIGHT_PREFIX_METER=1.
 				onRound: prefixMeterSink(this.sessionWriter),
