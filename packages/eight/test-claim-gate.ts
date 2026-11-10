@@ -63,7 +63,7 @@ function sentenceClaims(sentence: string): boolean {
 
 // A test command at the start of a shell segment, so `echo "bun test"` does not count.
 const TEST_CMD =
-	/(?:^|[;&|]\s*|&&\s*)(?:cd\s+\S+\s*&&\s*)?(?:(?:bun|npm|pnpm|yarn)\s+(?:run\s+)?test|(?:python3?\s+-m\s+)?pytest|cargo\s+test|go\s+test|(?:npx\s+|bunx\s+)?(?:vitest|jest))\b/;
+	/(?:^|[;&|]\s*|&&\s*)(?:cd\s+\S+\s*&&\s*)?(?:(?:bun|npm|pnpm|yarn)\s+(?:run\s+)?test|(?:python3?\s+-m\s+)?pytest|cargo\s+test|go\s+test|make\s+(?:-\S+\s+)*(?:test|tests|check)|(?:\.\/)?gradlew?\s+test|mvn\s+(?:-\S+\s+)*test|dotnet\s+test|swift\s+test|deno\s+test|ctest|rspec|phpunit|tox|nox|(?:npx\s+|bunx\s+)?(?:vitest|jest|mocha))\b/;
 
 export function isDoneGateEnabled(
 	env: Record<string, string | undefined> = process.env,
@@ -78,7 +78,7 @@ export function claimsTestsPass(reply: string): boolean {
 	return reply.split(/(?<=[.!?])\s+|\n+/).some(sentenceClaims);
 }
 
-function isTestRun(e: TestGateEntry): boolean {
+export function isTestRun(e: TestGateEntry): boolean {
 	return (
 		e.name === "run_command" && typeof e.args?.command === "string" && TEST_CMD.test(e.args.command)
 	);
