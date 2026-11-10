@@ -116,7 +116,7 @@ import { useAutoKanban } from "./hooks/useAutoKanban.js";
 import { chatRowBudget, useMeasuredHeight } from "./hooks/useMeasuredHeight.js";
 import { resolveSpecForRole, usePerTabAgents } from "./hooks/usePerTabAgents.js";
 import { useProcessPanel } from "./hooks/useProcessPanel.js";
-import { writeToTerminal } from "./hooks/useTerminal.js";
+import { pruneTerminals, writeToTerminal } from "./hooks/useTerminal.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
 import { useViewport } from "./hooks/useViewport.js";
 import { useVoiceChat } from "./hooks/useVoiceChat.js";
@@ -1716,6 +1716,11 @@ export function App({
 
 	// Workspace tabs
 	const workspaceTabs = useWorkspaceTabs();
+	// A terminal tab's session lives until its tab is closed, not until its view
+	// unmounts on a tab switch (see hooks/useTerminal.ts).
+	useEffect(() => {
+		pruneTerminals(new Set(workspaceTabs.tabs.map((t) => t.id)));
+	}, [workspaceTabs.tabs]);
 	const activeTabType = workspaceTabs.activeTab?.type || "chat";
 	const activeTabId = workspaceTabs.activeTab?.id || "default";
 

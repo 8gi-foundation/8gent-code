@@ -50,6 +50,8 @@ export const ACTION_TOOLS: ReadonlySet<string> = new Set([
 	"make_xlsx",
 	"make_pptx",
 	"speak",
+	"write_terminal",
+	"term_send",
 	"render_video_deck",
 	"run_computer_task",
 	"desktop_click",
@@ -161,7 +163,7 @@ export function buildNoActionReply(): string {
 // git log still showed only the init commit). A claim of one specific action
 // has to be backed by a successful call of that action, not by any call.
 
-type ActionClaimKind = "commit" | "push" | "tests";
+type ActionClaimKind = "commit" | "push" | "tests" | "terminal";
 
 interface ActionClaim {
 	kind: ActionClaimKind;
@@ -476,6 +478,14 @@ const couldNot = (what: string, why?: keyof typeof WHY) =>
 const UNREADABLE =
 	"the repository state could not be read, so only a plain successful command counts";
 
+/** The tools that reach a terminal tab or session; run_command does not. */
+const TERMINAL_TOOLS: ReadonlySet<string> = new Set([
+	"write_terminal",
+	"read_terminal",
+	"term_send",
+	"term_read",
+]);
+
 const ACTION_CLAIMS: readonly ActionClaim[] = [
 	{
 		kind: "commit",
@@ -502,6 +512,13 @@ const ACTION_CLAIMS: readonly ActionClaim[] = [
 		says: /\b(?:ran|executed)\s+(?:the\s+|all\s+|your\s+|our\s+)?(?:unit\s+|full\s+)?(?:tests?|test\s+suite)\b/i,
 		backed: (ledger) => ledger.some((e) => e.success && isTestRun(e)),
 		note: () => "Could not confirm a test run.",
+	},
+	{
+		kind: "terminal",
+		says: /(?:\b(?:typed|sent|wrote|pasted|entered|fed|ran|executed)\b|\bI(?:'ve|\s+have)?\s+read\b)[^.]{0,60}?\b(?:terminal\s+(?:tab|session|window)|term\s+tab|tab\s+\d+)\b/i,
+		backed: (ledger) => ledger.some((e) => e.success && TERMINAL_TOOLS.has(e.name)),
+		note: () =>
+			"Could not confirm anything was typed into or read from a terminal tab: only write_terminal, read_terminal, term_send and term_read reach one, and none ran.",
 	},
 ];
 
