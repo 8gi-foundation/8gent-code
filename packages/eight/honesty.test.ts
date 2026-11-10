@@ -1037,6 +1037,13 @@ describe("terminal tab claims", () => {
 		}
 	});
 
+	it("an instruction to read a tab is not a claim", () => {
+		for (const reply of ["Read terminal tab 2 to see it.", "Then read tab 2 for the result."]) {
+			expect(note(reply, [])).toEqual([]);
+		}
+		expect(note("I have read tab 2.", [])).toHaveLength(1);
+	});
+
 	it("a failed terminal call does not back the claim", () => {
 		const failed: ToolLedgerEntry = { name: "write_terminal", success: false };
 		expect(note("I sent it to the terminal tab.", [failed])).toHaveLength(1);

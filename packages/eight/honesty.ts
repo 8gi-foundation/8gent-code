@@ -515,7 +515,7 @@ const ACTION_CLAIMS: readonly ActionClaim[] = [
 	},
 	{
 		kind: "terminal",
-		says: /\b(?:typed|sent|wrote|pasted|entered|fed|read|ran|executed)\b[^.]{0,60}?\b(?:terminal\s+(?:tab|session|window)|term\s+tab|tab\s+\d+)\b/i,
+		says: /(?:\b(?:typed|sent|wrote|pasted|entered|fed|ran|executed)\b|\bI(?:'ve|\s+have)?\s+read\b)[^.]{0,60}?\b(?:terminal\s+(?:tab|session|window)|term\s+tab|tab\s+\d+)\b/i,
 		backed: (ledger) => ledger.some((e) => e.success && TERMINAL_TOOLS.has(e.name)),
 		note: () =>
 			"Could not confirm anything was typed into or read from a terminal tab: only write_terminal, read_terminal, term_send and term_read reach one, and none ran.",
