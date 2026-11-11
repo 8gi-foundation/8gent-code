@@ -10,7 +10,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { askOneYes } from "../core/one-yes";
+import { askOneYes, forcedUnattended, ownedPaneAncestry } from "../core/one-yes";
 import { activeShellKind } from "../core/shell";
 import { blockedReason, commandArgvs } from "./always-blocked";
 import { writeFileAtomic } from "./atomic-write";
@@ -111,11 +111,13 @@ function sessionKey(command: string, where?: string): string {
 /**
  * Headless opt-in: with no terminal, anything that would prompt is refused
  * unless this process sets EIGHT_HEADLESS_APPROVE=1. Never read from a saved file.
+ * Never in an owned terminal session or with EIGHT_UNATTENDED set: nobody is present
+ * there, whatever the variable says (one-yes.ts forcedUnattended).
  */
 export function headlessApproveOptIn(
 	env: Record<string, string | undefined> = process.env,
 ): boolean {
-	return env.EIGHT_HEADLESS_APPROVE === "1";
+	return !forcedUnattended(env) && env.EIGHT_HEADLESS_APPROVE === "1";
 }
 
 export interface PermissionConfig {
@@ -629,6 +631,8 @@ export class PermissionManager {
 	private gitState: GitState = repoGitState();
 
 	constructor(configPath?: string) {
+		// Read the process's parents once, at start, before any turn can change what they are.
+		ownedPaneAncestry();
 		const dataDir = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
 		this.configPath = configPath || path.join(dataDir, "permissions.json");
 		this.config = this.loadConfig();
@@ -664,6 +668,8 @@ export class PermissionManager {
 	 * Check if infinite mode is active (accounts for expiry).
 	 */
 	isInfiniteMode(): boolean {
+		// Nobody is present in an owned terminal session: Infinite mode is inert there.
+		if (forcedUnattended()) return false;
 		// A call made by an agent that holds a permission mode (#3170) answers
 		// from that mode, not from this process-wide flag: one tab in Infinite
 		// never makes another tab's call infinite, and the reverse. A call with
@@ -1145,7 +1151,8 @@ export class PermissionManager {
 		}
 
 		// Auto-approve if configured and not dangerous
-		if (this.config.autoApprove && command && !this.isDangerous(command)) {
+		// Not in an owned terminal session: nobody is present, so auto-approve approves nothing.
+		if (this.config.autoApprove && command && !this.isDangerous(command) && !forcedUnattended()) {
 			request.approved = true;
 			request.autoApproved = true;
 			this.log.requests.push(request);
@@ -1227,7 +1234,7 @@ export class PermissionManager {
 	 * Detect if running in headless mode (no TTY, e.g. Docker container, daemon)
 	 */
 	private isHeadless(): boolean {
-		return !process.stdin.isTTY || !!process.env.EIGHT_HEADLESS;
+		return !process.stdin.isTTY || !!process.env.EIGHT_HEADLESS || forcedUnattended();
 	}
 
 	/**
@@ -1242,6 +1249,12 @@ export class PermissionManager {
 		/** What the person is shown: `command`, naming its folder after a cd prefix (#3199). */
 		shown: string | undefined = command,
 	): Promise<boolean> {
+		// Nobody is present in an owned terminal session (or with EIGHT_UNATTENDED set): no card,
+		// no channel approver, no opt-in. Every question is No.
+		if (forcedUnattended()) {
+			console.log(`[permissions] DENIED (unattended pane): ${command || action}`);
+			return false;
+		}
 		// A daemon turn for a TUI has no card surface: refuse, never auto-approve (#4829).
 		if (_noCardSurface.getStore() && !_channelApprover.getStore()) {
 			console.log(`[permissions] DENIED (no card surface in this turn): ${command || action}`);
