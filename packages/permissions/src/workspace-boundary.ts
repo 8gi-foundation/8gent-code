@@ -55,6 +55,9 @@ function hostOf(host: Partial<BoundaryHost> = {}): BoundaryHost {
 	return { platform: host.platform ?? process.platform, env: host.env ?? boundaryEnv() };
 }
 
+/** The refusal for a path word that runs code; same wording as the shell sanitizer's. */
+export const SUBSTITUTION_REASON = "Command substitution $(...) or backticks is not allowed in a path argument";
+
 /** A word the shell fills by running code (`$(...)`, backticks): no check can know its value. */
 function substitutes(rawWord: string): boolean {
 	return /\$\(|`/.test(expandable(rawWord));
@@ -875,7 +878,7 @@ export function extractAndCheckPaths(
 			const operand = operandOf(token, platform);
 			if (operand === null) return;
 			if (reading === POSIX_SHELL && substitutes(rawWord)) {
-				flag(token, "<unresolved>", `Path argument ${unknown}`);
+				flag(token, "<unresolved>", SUBSTITUTION_REASON);
 				return;
 			}
 			const scopes = scopesFor(operand);
