@@ -158,6 +158,8 @@ import {
 	selfQuestionNote,
 } from "./self-questions";
 import { SMALL_TALK_NOTE, isGreeting, isSmallTalk } from "./small-talk";
+import { termSessionBlock } from "./term-session-list";
+import { newTermTurn, ownedSessions } from "./term-tools";
 import { replyIsTextToolCall } from "./text-call-fallback";
 import { verifyNudgeFor } from "./verify-gate";
 import { buildWelcome, gatherWelcomeFacts } from "./welcome";
@@ -497,6 +499,9 @@ export class Agent {
 	private contextNoteMessages: Array<{ role: string; content: string }> = [];
 	/** #4708: last ME block sent, so an unchanged block is not repeated each turn. */
 	private lastMeBlock: string | null = null;
+	/** #180: last terminal-session block sent, and the note that carried it. */
+	private lastTermBlock = "";
+	private termNote: { role: string; content: string } | null = null;
 	private hookManager: HookManager;
 	private sessionId: string;
 	/** $TMPDIR/8gent-<session id>/ (#4711): created at start, removed in cleanup() and at process exit. */
@@ -1706,6 +1711,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			...CORE_TOOLS,
 			...(cuaConfigured ? DESKTOP_TOOLS : []),
 			...localDelegationTools(this.config.role),
+			// #180: once this app has opened a terminal session, its read and send tools are offered
+			// (they reach only that registry, #148). No session, no tools: the lean set is unchanged.
+			...(ownedSessions().length > 0 ? ["term_list", "term_read", "term_send"] : []),
 			// Posting (#3595): offered only where the tg-group helper is installed.
 			...(postMessageAvailable() ? ["post_message"] : []),
 			// Mid-task note to the boardroom (#4344).
@@ -3293,6 +3301,22 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			if (meBlock && meBlock !== this.lastMeBlock) {
 				this.lastMeBlock = meBlock;
 				this.messageHistory.push({ role: "user", content: harnessNote(meBlock) });
+			}
+		}
+
+		// #180: the terminal sessions this app opened, rebuilt from real state each turn
+		// and sent when they changed (or when a compaction dropped the last note).
+		newTermTurn();
+		if (!isVerbatimScope(this.config.agentScope)) {
+			const termBlock = await termSessionBlock();
+			const dropped = this.termNote !== null && !this.messageHistory.includes(this.termNote);
+			if (termBlock !== this.lastTermBlock || (dropped && termBlock)) {
+				if (termBlock || this.lastTermBlock) {
+					const body = termBlock || "No terminal sessions opened by this app are open now.";
+					this.termNote = { role: "user", content: harnessNote(body) };
+					this.messageHistory.push(this.termNote);
+				}
+				this.lastTermBlock = termBlock;
 			}
 		}
 

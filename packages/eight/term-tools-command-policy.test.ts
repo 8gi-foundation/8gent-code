@@ -67,7 +67,7 @@ import {
 	_resetTuiApprovalChannel,
 	registerTuiApprovalHandler,
 } from "../permissions/tui-approval-channel";
-import { MAX_PENDING_INPUT, executeTermTool } from "./term-tools";
+import { MAX_PENDING_INPUT, executeTermTool, newTermTurn } from "./term-tools";
 
 const git: GitState = {
 	currentBranch: () => "feature",
@@ -80,6 +80,19 @@ const git: GitState = {
 const WIPE_ROOT = ["rm", "-rf", "/"].join(" ");
 const RM = ["rm", "-rf"].join(" ");
 const WIPE_HOME = WIPE_ROOT;
+
+// Consent to read and type in a session is covered in term-session-list.test.ts. This file is
+// about the command gate, so the person says yes to that one prompt here and to nothing else.
+const consentPatched = new WeakSet<object>();
+function consentGranted(pm: { askPerson: (a: string, d: string, c?: string) => Promise<boolean> }) {
+	if (consentPatched.has(pm)) return;
+	consentPatched.add(pm);
+	const ask = pm.askPerson.bind(pm);
+	pm.askPerson = (a, d, c) =>
+		/^(Read|Type Into) Terminal Session$/.test(a) && d.startsWith("The assistant wants to")
+			? Promise.resolve(true)
+			: ask(a, d, c);
+}
 
 const savedTTY = process.stdin.isTTY;
 const savedHeadless = process.env.EIGHT_HEADLESS;
@@ -106,6 +119,8 @@ function attachTerminal(answer: () => "approve" | "deny", asked: string[]) {
 }
 
 beforeEach(async () => {
+	consentGranted(getPermissionManager());
+	newTermTurn();
 	if (s1) await executeTermTool("term_kill", { sessionId: s1 });
 	s1 = JSON.parse(await executeTermTool("term_spawn", { command: "cat" })).sessionId;
 	sent.length = 0;
