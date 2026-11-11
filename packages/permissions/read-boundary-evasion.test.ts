@@ -26,7 +26,6 @@ let base: string;
 let ws: string;
 let home: string;
 const savedHome = process.env.HOME;
-const savedOldpwd = process.env.OLDPWD;
 let cards: string[] = [];
 
 beforeAll(() => {
@@ -71,16 +70,11 @@ beforeAll(() => {
 	fs.symlinkSync(path.join(base, "x"), path.join(ws, "link-out"));
 	fs.symlinkSync(base, path.join(ws, "dir-out"));
 	process.env.HOME = home; // the tokenizer expands ~ from process.env.HOME
-	// The tokenizer also expands $OLDPWD from process.env. A shell that cd'd before starting bun
-	// (a build wrapper does) exports it, and the check then sees where it points. The gap test
-	// below needs it unset, as in a fresh shell.
-	Reflect.deleteProperty(process.env, "OLDPWD");
 });
 
 afterAll(() => {
 	if (savedHome === undefined) Reflect.deleteProperty(process.env, "HOME");
 	else process.env.HOME = savedHome;
-	if (savedOldpwd !== undefined) process.env.OLDPWD = savedOldpwd;
 	_resetSystemOne();
 	resetReadAllow();
 	fs.rmSync(base, { recursive: true, force: true });
