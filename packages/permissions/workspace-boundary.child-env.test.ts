@@ -1,15 +1,22 @@
 /**
- * The boundary check judges a `$VAR` path by the value the run_command shell will see, not the
- * value in the 8gent process. The shell gets a minimal environment (child-env.ts), so a name
- * the 8gent process has and the shell does not expands to nothing there, and the check must
- * judge that same, empty expansion. Production call shapes: the read boundary through
- * systemOneGate, the write boundary through evaluatePolicy("run_command").
+ * The boundary check judges a `$VAR` path by the value the shell that runs the command will see,
+ * not the value in the 8gent process. Every judged spawner starts its shell with judgedShellEnv
+ * (child-env.ts), and the check expands from the same function. Production call shapes: the
+ * read boundary through systemOneGate, the write boundary through evaluatePolicy("run_command"),
+ * and each spawner (the tool executor's run_command, the native run_command and background_start)
+ * through its real tool.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { buildChildEnv, runCommandEnv } from "../eight/harness/child-env";
+import {
+	buildChildEnv,
+	judgedShellEnv,
+	runCommandEnv,
+	withShellEnv,
+} from "../eight/harness/child-env";
 import { ToolExecutor } from "../eight/tools";
+import { toolShellEnv } from "./nested-guard";
 import { evaluatePolicy } from "./policy-engine";
 import { resetReadAllow } from "./read-allow";
 import { boundaryEnv } from "./src/workspace-boundary";
@@ -38,6 +45,9 @@ const TOUCHED = [
 	"EIGHT_SHELL_ENV_PASS",
 	"XDG_CACHE_HOME",
 	"EIGHT_HEADLESS_APPROVE",
+	"ZZ_BCE_DEEP",
+	"EIGHT_DECIDE_OLLAMA_HOST",
+	"OLLAMA_HOST",
 ];
 const saved = new Map(TOUCHED.map((k) => [k, process.env[k]]));
 const restore = () => {
@@ -58,6 +68,8 @@ beforeAll(() => {
 	fs.writeFileSync(outFile, "OUTSIDE");
 	fs.writeFileSync(path.join(ws, "inside.txt"), "inside");
 	fs.mkdirSync(path.join(ws, "src"), { recursive: true });
+	fs.writeFileSync(path.join(outDir, "x"), "OUTSIDE-DEEP");
+	fs.mkdirSync(path.join(outDir, "deep"));
 });
 
 afterAll(() => {
@@ -69,6 +81,9 @@ afterAll(() => {
 
 beforeEach(() => {
 	_setSystemOneOverridesForTests({ askHuman: async () => null }); // nobody can answer
+	// No judge model is reachable, so no verdict depends on one.
+	process.env.EIGHT_DECIDE_OLLAMA_HOST = "http://127.0.0.1:9";
+	process.env.OLLAMA_HOST = "http://127.0.0.1:9";
 });
 afterEach(restore);
 
@@ -160,7 +175,7 @@ describe("an unset variable expands to nothing", () => {
 	});
 });
 
-describe("forms the check cannot resolve are never judged inside", () => {
+describe("on the write path, forms the check cannot resolve are never judged inside", () => {
 	test("${VAR:-x} with a withheld name", () => {
 		withhold("ZZ_BCE_WITHHELD", ws);
 		expect(write(`touch \${ZZ_BCE_WITHHELD:-}${outDir}/f`)).toBe("refused");
@@ -192,8 +207,28 @@ const parseEnv = (out: string) =>
 /** Names a POSIX shell sets for itself whatever it was handed. */
 const SHELL_OWN = new Set(["PWD", "OLDPWD", "SHLVL", "_"]);
 
+/** The names and values a shell printed, against the ones the check judged with. */
+const sameEnv = (out: string, judged: Record<string, string | undefined>) => {
+	const shell = parseEnv(out);
+	const names = (keys: Iterable<string>) => [...keys].filter((k) => !SHELL_OWN.has(k)).sort();
+	expect(names(shell.keys())).toEqual(names(Object.keys(judged)));
+	for (const k of names(shell.keys()))
+		expect([k, shell.get(k)]).toEqual([k, judged[k]?.split("\n")[0]]);
+};
+
+/** The native tools (the ones capable providers call), bound to the test workspace. */
+const native = async (name: string, input: Record<string, unknown>): Promise<string> => {
+	const ai = await import("../ai/tools");
+	ai.setToolContext({ workingDirectory: ws });
+	const tools = ai.agentTools as unknown as Record<
+		string,
+		{ execute: (i: unknown, o: unknown) => Promise<unknown> }
+	>;
+	return String(await tools[name].execute(input, { toolCallId: "bce", messages: [] }));
+};
+
 describe("the check and the shell build their environment in one place", () => {
-	test("the boundary's environment is runCommandEnv's, not the process's", () => {
+	test("the boundary's environment is judgedShellEnv's: runCommandEnv's unless a spawner binds one", () => {
 		process.env.EIGHT_SHELL_ENV_PASS = "ZZ_BCE_PASSED";
 		process.env.ZZ_BCE_PASSED = ws;
 		process.env.ZZ_BCE_WITHHELD = ws;
@@ -202,22 +237,55 @@ describe("the check and the shell build their environment in one place", () => {
 			expect(boundaryEnv()[k]).toBe(process.env[k]);
 		expect(boundaryEnv().ZZ_BCE_PASSED).toBe(ws);
 		expect("ZZ_BCE_WITHHELD" in boundaryEnv()).toBe(false);
+		const bound = toolShellEnv(process.env);
+		withShellEnv(bound, () => {
+			expect(judgedShellEnv()).toBe(bound);
+			expect(boundaryEnv()).toBe(bound);
+		});
 	});
+});
 
-	test("the real run_command shell sees exactly the names and values the boundary judged", async () => {
+describe("every judged spawner: its real shell sees exactly what the check judged", () => {
+	beforeEach(() => {
 		process.env.EIGHT_HEADLESS_APPROVE = "1";
 		process.env.EIGHT_SHELL_ENV_PASS = "ZZ_BCE_PASSED";
 		process.env.ZZ_BCE_PASSED = ws;
 		process.env.ZZ_BCE_WITHHELD = ws;
-		const out = String(await new ToolExecutor(ws).execute("run_command", { command: "env" }));
-		const shell = parseEnv(out);
-		const judged = boundaryEnv();
-		const names = (keys: Iterable<string>) => [...keys].filter((k) => !SHELL_OWN.has(k)).sort();
-		expect(names(shell.keys())).toEqual(names(Object.keys(judged)));
-		for (const k of names(shell.keys())) expect([k, shell.get(k)]).toEqual([k, judged[k]?.split("\n")[0]]);
 	});
 
-	test("through the real run_command, a withheld variable does not carry a read outside", async () => {
+	test("tool executor run_command", async () => {
+		const out = String(await new ToolExecutor(ws).execute("run_command", { command: "env" }));
+		sameEnv(out, boundaryEnv());
+	});
+
+	test("native run_command (keeps the full process environment)", async () => {
+		sameEnv(await native("run_command", { command: "env" }), toolShellEnv(process.env));
+	});
+
+	test("spawn_agent, shell runtime (keeps the full process environment plus its depth)", async () => {
+		const orch = await import("../orchestration");
+		const started = await native("spawn_agent", { task: "env", runtime: "shell" });
+		const id = JSON.parse(started).agentId as string;
+		let stdout: string | undefined;
+		for (let i = 0; i < 100 && stdout === undefined; i++) {
+			stdout = orch.getCLIAgentStatus(id)?.result?.stdout;
+			if (stdout === undefined) await Bun.sleep(100);
+		}
+		const depth = { [orch.AGENT_DEPTH_ENV]: String(orch.currentAgentDepth() + 1) };
+		sameEnv(stdout ?? "", { ...process.env, ...depth });
+	});
+
+	test("native background_start", async () => {
+		const started = await native("background_start", { command: "env" });
+		const id = /Background task started: (\S+)/.exec(started)?.[1];
+		expect(id).toBeDefined();
+		await native("background_wait", { taskId: id, timeout_s: 30 });
+		sameEnv(await native("background_output", { taskId: id }), boundaryEnv());
+	});
+});
+
+describe("through each real tool, a variable cannot carry a read outside", () => {
+	test("tool executor run_command: a name its shell does not get", async () => {
 		process.env.EIGHT_HEADLESS_APPROVE = "1";
 		withhold("ZZ_BCE_WITHHELD", ws);
 		const out = String(
@@ -225,5 +293,99 @@ describe("the check and the shell build their environment in one place", () => {
 		);
 		expect(out).not.toContain("OUTSIDE");
 		expect(out).toContain("[BLOCKED]");
+	});
+
+	test("native run_command: a name only its full-environment shell has", async () => {
+		process.env.EIGHT_HEADLESS_APPROVE = "1";
+		withhold("ZZ_BCE_DEEP", path.join(outDir, "deep"));
+		const out = await native("run_command", { command: "cat ${ZZ_BCE_DEEP}/../x" });
+		expect(out).not.toContain("OUTSIDE-DEEP");
+		expect(out).toContain("[BLOCKED]");
+	});
+});
+
+describe("spawn_agent's shell child: a variable cannot carry a read outside", () => {
+	test("a name only its full-environment shell has", async () => {
+		process.env.EIGHT_HEADLESS_APPROVE = "1";
+		withhold("ZZ_BCE_DEEP", path.join(outDir, "deep"));
+		const out = await native("spawn_agent", { task: "cat ${ZZ_BCE_DEEP}/../x", runtime: "shell" });
+		expect(out).not.toContain("agentId");
+		expect(out).toContain("[BLOCKED]");
+	});
+});
+
+describe("a new spawner cannot skip the shared environment", () => {
+	const root = path.resolve(import.meta.dir, "..", "..");
+	const sources = [...new Bun.Glob("{packages,apps}/**/*.{ts,tsx}").scanSync({ cwd: root })].filter(
+		(f) =>
+			!/(^|\/)(node_modules|__tests__|fixtures|eval)\//.test(f) &&
+			!/\.(test|spec|probe)\.tsx?$/.test(f),
+	);
+	const read = (f: string) => fs.readFileSync(path.join(root, f), "utf8");
+	/** Each call of `name(` in a file, with the text up to the call's closing line. */
+	const calls = (text: string, name: RegExp) =>
+		[...text.matchAll(name)].map((m) => {
+			const rest = text.slice(m.index);
+			const end = rest.indexOf("});");
+			return end === -1 ? rest.slice(0, 400) : rest.slice(0, end);
+		});
+
+	test("only the known callers judge a shell command; a new one must be added here and given a spawner test", () => {
+		const judges = sources
+			.filter((f) => /\b(systemOneGate|checkCommandBoundary|extractAndCheckPaths)\(/.test(read(f)))
+			.sort();
+		expect(judges).toEqual([
+			"packages/ai/tools.ts",
+			"packages/eight/tools.ts",
+			"packages/orchestration/delegation-tools.ts",
+			"packages/permissions/policy-engine.ts",
+			"packages/permissions/read-boundary.ts",
+			"packages/permissions/src/workspace-boundary.ts",
+			"packages/permissions/system-one-gate.ts",
+		]);
+	});
+
+	/**
+	 * Every shell launched on text: the judged ones take judgedShellEnv(); the rest run text the
+	 * boundary never judges, each with the reason. A new launch fails here until it is one or
+	 * the other.
+	 */
+	const UNJUDGED: Record<string, [count: number, why: string]> = {
+		"packages/core/shell.ts": [1, "the spawnShell primitive itself"],
+		"apps/tui/src/lib/bang-command.ts": [1, "a `!` command the person typed"],
+		"apps/tui/src/lib/external-agent-runner.ts": [1, "a preset install the person chose"],
+		"packages/daemon/cron.ts": [2, "scheduled jobs from the gateway; not judged by the boundary"],
+		"packages/daemon/routes/store/fs.ts": [1, "fs.exec has its own confinement, minimal env"],
+		"packages/hooks/index.ts": [2, "the person's own hook commands"],
+		"packages/install-runner/install-runner.ts": [1, "a fixed install recipe"],
+		"packages/permissions/sandbox.ts": [1, "runSandboxed has no caller"],
+		"packages/skills/experiment.ts": [1, "a skill's own experiment command"],
+		"packages/telegram/index.ts": [1, "/run from an allowed Telegram user"],
+		"packages/validation/evidence.ts": [1, "fixed evidence commands"],
+		"packages/validation/healing.ts": [1, "a configured check command; no importer"],
+		"packages/orchestration/universal-spawner.ts": [
+			1,
+			"the shell runtime's env comes from its caller: delegation-tools passes judgedShellEnv()",
+		],
+	};
+
+	test("every shell launch takes judgedShellEnv() or is a listed unjudged launch", () => {
+		const found: Record<string, number> = {};
+		for (const f of sources) {
+			for (const call of calls(read(f), /\b(spawnShell|shellInvocation)\((?!command: string)/g)) {
+				if (/^\w+\(\s*command: string/.test(call)) continue; // a declaration
+				// The tool executor's done-gate branch is the gap the pull request names as not closed.
+				if (/\benv: (env === undefined \? )?judgedShellEnv\(\)/.test(call)) continue;
+				found[f] = (found[f] ?? 0) + 1;
+			}
+		}
+		const expected = Object.fromEntries(Object.entries(UNJUDGED).map(([f, [n]]) => [f, n]));
+		expect(found).toEqual(expected);
+	});
+
+	test("the shell runtime's caller binds and passes the judged environment", () => {
+		const text = read("packages/orchestration/delegation-tools.ts");
+		expect(text).toContain("withShellEnv({ ...process.env, ...depthEnv }");
+		expect(text).toContain('env: effectiveRuntime === "shell" ? (judgedShellEnv() as Record<string, string>)');
 	});
 });

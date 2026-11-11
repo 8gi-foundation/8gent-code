@@ -7,6 +7,7 @@
  * credential read it in-process from the parent, not through a shell.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { toolShellEnv } from "../../permissions/nested-guard";
 
 type Env = Record<string, string | undefined>;
@@ -166,10 +167,29 @@ export const SPAWN_NON_INTERACTIVE_ENV = {
 };
 
 /**
- * The environment a run_command shell gets. The workspace boundary expands `$VAR` and `~` from
- * this same function (src/workspace-boundary.ts), so the check and the shell cannot disagree
- * about what a path is. `base` replaces the minimal set: the done gate hands in its own.
+ * The environment a run_command shell gets. `base` replaces the minimal set: the done gate
+ * hands in its own.
  */
 export function runCommandEnv(source: Env = process.env, base?: Env): NodeJS.ProcessEnv {
 	return toolShellEnv({ ...(base ?? buildChildEnv(source)), ...SPAWN_NON_INTERACTIVE_ENV });
+}
+
+const _shellEnv = new AsyncLocalStorage<NodeJS.ProcessEnv>();
+
+/**
+ * Judge and start a shell with `env`: inside `fn`, judgedShellEnv() is `env`. A tool whose
+ * shell does not get runCommandEnv's environment wraps its checks and its spawn in this.
+ */
+export function withShellEnv<T>(env: NodeJS.ProcessEnv, fn: () => T): T {
+	return _shellEnv.run(env, fn);
+}
+
+/**
+ * The one environment a judged shell is started with and the workspace boundary expands
+ * `$VAR` and `~` from (src/workspace-boundary.ts): the one bound by withShellEnv, else
+ * runCommandEnv's. Every spawner of model text spawns with this, so the check and the shell
+ * cannot disagree about what a path is.
+ */
+export function judgedShellEnv(): NodeJS.ProcessEnv {
+	return _shellEnv.getStore() ?? runCommandEnv(process.env);
 }

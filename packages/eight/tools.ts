@@ -280,6 +280,7 @@ import {
 	GIT_ENV_NAMES,
 	GIT_NON_INTERACTIVE_ENV,
 	buildChildEnv,
+	judgedShellEnv,
 	runCommandEnv,
 	withheldAny,
 } from "./harness/child-env";
@@ -4056,9 +4057,9 @@ export class ToolExecutor {
 				stdio: ["ignore", "pipe", "pipe"],
 				processGroup: true,
 				windowsShell,
-				// The done gate hands in an already scrubbed env; everything else gets the minimal one.
-				// The workspace boundary judged `$VAR` paths against this same runCommandEnv.
-				env: runCommandEnv(process.env, env),
+				// The done gate hands in an already scrubbed env; everything else gets the
+				// environment the workspace boundary judged against (judgedShellEnv).
+				env: env === undefined ? judgedShellEnv() : runCommandEnv(process.env, env),
 			});
 
 			// Registered so quitting the TUI ends it, whatever its timer does (live-shells.ts).

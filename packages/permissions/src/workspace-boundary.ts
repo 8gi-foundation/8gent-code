@@ -14,7 +14,7 @@ import * as fs from "node:fs";
 import { type HomeEnv, resolveHome } from "../../core/home";
 import { isPathWithin, pathFor } from "../../core/path-within";
 import { fromLongPath } from "../../core/win-path";
-import { runCommandEnv } from "../../eight/harness/child-env";
+import { judgedShellEnv } from "../../eight/harness/child-env";
 
 // ============================================
 // Types
@@ -46,13 +46,9 @@ export interface BoundaryHost {
 	env: HomeEnv;
 }
 
-/**
- * The environment a command's `$VAR` and `~` expand from: the one the run_command shell gets,
- * built by the same function (runCommandEnv), never this process's own. A name the shell will
- * not have expands to nothing here, as it will there, and the path that leaves is what is judged.
- */
+/** The environment a command's `$VAR` and `~` expand from: the shell's own (judgedShellEnv). */
 export function boundaryEnv(): HomeEnv {
-	return runCommandEnv(process.env);
+	return judgedShellEnv();
 }
 
 function hostOf(host: Partial<BoundaryHost> = {}): BoundaryHost {
