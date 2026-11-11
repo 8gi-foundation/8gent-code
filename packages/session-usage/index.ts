@@ -6,6 +6,7 @@
  * docs/specs/SESSION-USAGE-RECORD.md.
  */
 
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -32,6 +33,12 @@ export interface SessionUsageRow extends SessionUsageRecord {
 }
 
 export const DEFAULT_STALE_MS = 5 * 60 * 1000;
+/** Largest record file that is read; anything bigger is skipped. */
+export const MAX_RECORD_BYTES = 64 * 1024;
+/** Longest session name kept when a record is parsed. */
+export const MAX_SESSION_CHARS = 200;
+/** Longest string printed to a terminal in one cell or line. */
+export const MAX_PRINT_CHARS = 120;
 
 /** Same resolution as packages/daemon/data-dir.ts, kept local so this package has no imports. */
 export function usageDir(): string {
@@ -39,17 +46,50 @@ export function usageDir(): string {
 	return path.join(root, "session-usage");
 }
 
+/**
+ * File-name stem for a session. Clean names up to 120 characters are used as
+ * they are. Any other name is cleaned, cut, and given "-" plus 8 hex characters
+ * of the SHA-256 of the original, so two different sessions never share a file.
+ */
 export function safeName(session: string): string {
-	return session.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120) || "unnamed";
+	const cleaned = session.replace(/[^A-Za-z0-9._-]/g, "_");
+	if (cleaned === session && session.length > 0 && session.length <= 120) return session;
+	const hash = crypto.createHash("sha256").update(session).digest("hex").slice(0, 8);
+	return `${cleaned.slice(0, 120) || "unnamed"}-${hash}`;
 }
 
-/** Write atomically: temp file in the same folder, then rename over the record. */
+/**
+ * Make a stored string safe to print: C0, DEL and C1 control characters become
+ * "?" and the length is capped, so a hostile value cannot drive the terminal.
+ */
+export function printable(s: string, max = MAX_PRINT_CHARS): string {
+	return s.replace(/[\u0000-\u001f\u007f-\u009f]/g, "?").slice(0, max);
+}
+
+/**
+ * Write atomically: exclusive temp file in the same folder, then rename over
+ * the record. The folder is created 0o700 and files 0o600. An existing folder
+ * is left as it is. If anything already sits at the temp name the write fails
+ * and that file is not touched.
+ */
 export function writeRecord(record: SessionUsageRecord, dir = usageDir()): string {
-	fs.mkdirSync(dir, { recursive: true });
+	fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 	const file = path.join(dir, `${safeName(record.session)}.json`);
 	const tmp = `${file}.${process.pid}.tmp`;
-	fs.writeFileSync(tmp, `${JSON.stringify(record)}\n`);
-	fs.renameSync(tmp, file);
+	const fd = fs.openSync(tmp, "wx", 0o600);
+	try {
+		try {
+			fs.writeSync(fd, `${JSON.stringify(record)}\n`);
+		} finally {
+			fs.closeSync(fd);
+		}
+		fs.renameSync(tmp, file);
+	} catch (err) {
+		try {
+			fs.unlinkSync(tmp);
+		} catch {}
+		throw err;
+	}
 	return file;
 }
 
@@ -65,7 +105,7 @@ function parseRecord(raw: string): SessionUsageRecord | null {
 		if (typeof o.updatedAt !== "string" || Number.isNaN(Date.parse(o.updatedAt))) return null;
 		return {
 			version: 1,
-			session: o.session,
+			session: o.session.slice(0, MAX_SESSION_CHARS),
 			workspace: strOrNull(o.workspace),
 			harness: strOrNull(o.harness),
 			account: strOrNull(o.account),
@@ -81,6 +121,8 @@ function parseRecord(raw: string): SessionUsageRecord | null {
 
 export function readRecord(file: string): SessionUsageRecord | null {
 	try {
+		const st = fs.lstatSync(file);
+		if (!st.isFile() || st.size > MAX_RECORD_BYTES) return null;
 		return parseRecord(fs.readFileSync(file, "utf8"));
 	} catch {
 		return null;
@@ -126,9 +168,9 @@ export function formatRows(rows: SessionUsageRow[]): string {
 	if (rows.length === 0) return "No session records.";
 	const head = ["SESSION", "ACCOUNT", "HARNESS", "CONTEXT", "LIMIT", "STATE"];
 	const body = rows.map((r) => [
-		r.session,
-		unk(r.account),
-		unk(r.harness),
+		printable(r.session),
+		printable(unk(r.account)),
+		printable(unk(r.harness)),
 		pct(r.contextPct),
 		pct(r.usagePct),
 		r.stale ? "stale" : "live",

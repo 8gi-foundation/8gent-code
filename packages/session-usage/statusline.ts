@@ -1,15 +1,18 @@
 /**
  * Reader for a harness whose status line passes JSON on stdin.
  *
- *   <harness status line command> | bun packages/session-usage/statusline.ts \
+ * The harness puts its JSON on the stdin of its status line command, so this
+ * file is run AS that command (or a wrapper hands it a copy of that stdin):
+ *
+ *   bun packages/session-usage/statusline.ts \
  *     --harness <name> --account <label> [--session <name>]
  *
- * Reads stdin, writes one record, prints one short line. No model call, no
+ * Reads stdin, writes one record, prints the session name (shown as the status text). No model call, no
  * network. Every number is optional: what the harness did not send is null.
  */
 
 import * as path from "node:path";
-import { type SessionUsageRecord, writeRecord } from "./index";
+import { printable, type SessionUsageRecord, writeRecord } from "./index";
 
 const num = (v: unknown): number | null =>
 	typeof v === "number" && Number.isFinite(v) ? v : null;
@@ -34,10 +37,14 @@ export function recordFromStatusJson(
 	if (!session) return null;
 	const cw = input.context_window ?? {};
 	const window = num(cw.context_window_size);
-	let used = num(cw.total_input_tokens);
 	const usedPct = num(cw.used_percentage);
-	if (used === null && usedPct !== null && window !== null) {
+	// The reported percentage wins: total_input_tokens may be a running total,
+	// not the current fill. It is used only when no percentage is reported.
+	let used: number | null;
+	if (usedPct !== null && window !== null && window > 0) {
 		used = Math.round((usedPct / 100) * window);
+	} else {
+		used = num(cw.total_input_tokens);
 	}
 	const dir = str(input.workspace?.project_dir) ?? str(input.workspace?.current_dir) ?? str(input.cwd);
 	return {
@@ -68,7 +75,7 @@ if (import.meta.main) {
 		});
 		if (rec) {
 			writeRecord(rec);
-			console.log(rec.session);
+			console.log(printable(rec.session));
 		}
 	} catch {
 		// A status line must never break the session it sits in.
