@@ -8,7 +8,9 @@ import {
 	currentBootAt,
 	markClosed,
 	markOpen,
+	finishRestore,
 	offerRestore,
+	restoreOnStart,
 	reopenCommand,
 	shellQuote,
 	restorableSessions,
@@ -223,5 +225,101 @@ describe("stale records", () => {
 		expect(restorableSessions({ dir })).toEqual([]);
 		await offerRestore(io([]).i, { dir });
 		expect(fs.existsSync(f)).toBe(false);
+	});
+});
+
+describe("restoreOnStart (the call index.tsx makes)", () => {
+	const launch = process.cwd();
+	afterEach(() => process.chdir(launch));
+	const open = (cwd: string, prompts = ["hi"]) => {
+		const id = saved(cwd, ...prompts);
+		markOpen(id, { dir, pid: deadPid() });
+		return id;
+	};
+
+	test("yes: enters the folder, resumes it, and the record goes only when the resumed session is opened", async () => {
+		const work = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "work-")));
+		const id = open(work);
+		const t = io(["y"]);
+		const r = await restoreOnStart(t.i, { dir });
+		expect(r.sessionResume).toBe(id);
+		expect(process.cwd()).toBe(work);
+		expect(restorableSessions({ dir }).map((s) => s.id)).toEqual([id]); // still listed: resume not yet done
+		markOpen(id, { dir }); // what the app does once the session is active
+		expect(restorableSessions({ dir })).toEqual([]);
+		fs.rmSync(work, { recursive: true, force: true });
+	});
+
+	test("a folder that became a file: no crash, says so, not resumed, still offered next start", async () => {
+		const f = path.join(dir, "now-a-file");
+		fs.writeFileSync(f, "x");
+		const id = open(f);
+		const t = io(["y"]);
+		const r = await restoreOnStart(t.i, { dir });
+		expect(r.sessionResume).toBeUndefined();
+		expect(process.cwd()).toBe(launch);
+		expect(t.lines.join("\n")).toContain("Not resumed");
+		expect(restorableSessions({ dir }).map((s) => s.id)).toEqual([id]);
+	});
+
+	test("a missing folder: says it no longer exists, not resumed, kept", async () => {
+		const id = open(path.join(dir, "gone"));
+		const t = io(["y"]);
+		const r = await restoreOnStart(t.i, { dir });
+		expect(r.sessionResume).toBeUndefined();
+		expect(t.lines.join("\n")).toContain("no longer exists");
+		expect(restorableSessions({ dir }).map((s) => s.id)).toEqual([id]);
+	});
+
+	test("an unreadable folder: no crash, not resumed", async () => {
+		const locked = path.join(dir, "locked");
+		fs.mkdirSync(locked);
+		fs.chmodSync(locked, 0o000);
+		try {
+			open(locked);
+			const r = await restoreOnStart(io(["y"]).i, { dir });
+			if (process.getuid?.() !== 0) expect(r.sessionResume).toBeUndefined();
+			expect(process.cwd()).toBe(process.getuid?.() === 0 ? locked : launch);
+		} finally {
+			fs.chmodSync(locked, 0o700);
+		}
+	});
+
+	test("a folder whose name was not shown is not entered; resumes where launched, and says so", async () => {
+		const odd = path.join(dir, "odd\x1b[2J");
+		fs.mkdirSync(odd);
+		const id = open(odd);
+		const t = io(["y"]);
+		const r = await restoreOnStart(t.i, { dir });
+		expect(r.sessionResume).toBe(id);
+		expect(process.cwd()).toBe(launch);
+		expect(t.lines.join("\n")).toContain("could not be shown");
+		expect(t.lines.join("\n")).not.toContain("\x1b");
+	});
+
+	test("nobody answers: the question times out to No, says so, and nothing is forgotten", async () => {
+		const id = open("/work/a");
+		const t = io([]);
+		t.i.ask = () => new Promise<string>(() => {});
+		t.i.timeoutMs = 30;
+		const r = await restoreOnStart(t.i, { dir });
+		expect(r).toEqual({ later: [] });
+		expect(t.lines.join("\n")).toContain("No answer in");
+		expect(restorableSessions({ dir }).map((s) => s.id)).toEqual([id]);
+	});
+
+	test("a second yes is shown after exit, then forgotten", async () => {
+		const work = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "work-")));
+		const a = open("/work/a"); // older
+		const b = open(work);
+		const r = await restoreOnStart(io(["y", "y"]).i, { dir });
+		expect(r.sessionResume).toBe(b);
+		expect(r.later.map((s) => s.id)).toEqual([a]);
+		const out: string[] = [];
+		finishRestore(r.later, (l) => out.push(l), { dir });
+		expect(out[0]).toContain(`8gent --resume ${a}`);
+		markOpen(b, { dir });
+		expect(restorableSessions({ dir })).toEqual([]);
+		fs.rmSync(work, { recursive: true, force: true });
 	});
 });

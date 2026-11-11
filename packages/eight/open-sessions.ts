@@ -84,6 +84,12 @@ export function markOpen(sessionId: string, opts: OpenOpts = {}): void {
 	try {
 		fs.mkdirSync(openDir(dir), { recursive: true, mode: 0o700 });
 		fs.writeFileSync(recordFile(dir, pid), JSON.stringify(rec), { mode: 0o600 });
+		// This session is open again: the dead process's record has done its job.
+		for (const o of readRecords(dir)) {
+			if (o.rec.pid !== pid && o.rec.sessionId === sessionId && !isRunning(o.rec, rec.bootAt)) {
+				fs.rmSync(o.file, { force: true });
+			}
+		}
 	} catch {
 		// A read-only home must not stop the app; the session still saves on its own.
 	}
@@ -156,12 +162,12 @@ export function restorableSessions(opts: OpenOpts = {}): RestorableSession[] {
 	return out;
 }
 
-/** Forget every record with no live process: the person has now been asked once. */
-export function forgetStale(opts: OpenOpts = {}): void {
+/** Forget every record with no live process, except the sessions named in `keep`. */
+export function forgetStale(opts: OpenOpts = {}, keep: ReadonlySet<string> = new Set()): void {
 	const dir = opts.dir ?? defaultSessionsDir();
 	const bootAt = opts.bootAt ?? currentBootAt();
 	for (const { file, rec } of readRecords(dir)) {
-		if (!isRunning(rec, bootAt)) fs.rmSync(file, { force: true });
+		if (!isRunning(rec, bootAt) && !keep.has(rec.sessionId)) fs.rmSync(file, { force: true });
 	}
 }
 
@@ -185,6 +191,23 @@ export interface RestoreIo {
 	write(line: string): void;
 	/** Resolves the person's answer line. */
 	ask(question: string): Promise<string>;
+	/** How long to wait for an answer; an unanswered question is No. Default: no limit (tests); index.tsx passes oneYesTimeoutMs(). */
+	timeoutMs?: number;
+}
+
+const TIMED_OUT = Symbol("timed out");
+
+async function askWithin(io: RestoreIo, question: string): Promise<string | typeof TIMED_OUT> {
+	if (io.timeoutMs === undefined) return io.ask(question);
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const limit = new Promise<typeof TIMED_OUT>((r) => {
+		timer = setTimeout(() => r(TIMED_OUT), io.timeoutMs);
+	});
+	try {
+		return await Promise.race([io.ask(question), limit]);
+	} finally {
+		clearTimeout(timer);
+	}
 }
 
 /**
@@ -210,9 +233,65 @@ export async function offerRestore(io: RestoreIo, opts: OpenOpts = {}): Promise<
 		const last = s.lastUserMessage ? ` last message: "${s.lastUserMessage}"` : "";
 		const folder = hasControl(s.cwd) ? "(folder name not shown)" : safeLine(s.cwd, 120);
 		io.write(`  ${label}  ${folder}  last active ${s.lastActiveAt}${last}`);
-		const a = (await io.ask("  Resume it and open it in that folder? [y/N] ")).trim().toLowerCase();
-		if (a === "y" || a === "yes") accepted.push(s);
+		const a = await askWithin(io, "  Resume it and open it in that folder? [y/N] ");
+		if (a === TIMED_OUT) {
+			// Nobody answered: that is No, for this and the rest. Nothing is forgotten, so a person is asked next time.
+			io.write(`\n  No answer in ${Math.round((io.timeoutMs ?? 0) / 1000)} s: nothing was resumed.`);
+			return [];
+		}
+		const yes = a.trim().toLowerCase();
+		if (yes === "y" || yes === "yes") accepted.push(s);
 	}
-	forgetStale(opts);
+	// A No is forgotten now. A Yes stays until its resume has happened (markOpen) or its command was shown.
+	forgetStale(opts, new Set(accepted.map((a) => a.id)));
 	return accepted;
+}
+
+export interface StartRestore {
+	/** Session id to hand to the app as --resume, if one was resumed. */
+	sessionResume?: string;
+	/** Yeses after the first: shown with finishRestore after the app exits, where they stay visible. */
+	later: RestorableSession[];
+}
+
+/**
+ * The whole start-up step: offer, then enter the first accepted session's
+ * folder. Never throws. If the folder cannot be entered the session is not
+ * resumed and its record stays, so it is offered again; one plain line says so.
+ * A folder whose name was not shown is not entered, and the session resumes
+ * where 8gent Code was launched, which the line says.
+ */
+export async function restoreOnStart(io: RestoreIo, opts: OpenOpts = {}): Promise<StartRestore> {
+	let accepted: RestorableSession[];
+	try {
+		accepted = await offerRestore(io, opts);
+	} catch {
+		return { later: [] };
+	}
+	const [first, ...later] = accepted;
+	if (!first) return { later: [] };
+	if (hasControl(first.cwd)) {
+		io.write(`  Its folder name could not be shown, so it resumed here, in ${safeLine(process.cwd(), 120)}.`);
+		return { sessionResume: first.id, later };
+	}
+	try {
+		process.chdir(first.cwd);
+		return { sessionResume: first.id, later };
+	} catch (e) {
+		const why = (e as NodeJS.ErrnoException).code === "ENOENT" ? "it no longer exists" : "it cannot be opened";
+		io.write(`  Could not open ${safeLine(first.cwd, 120)}: ${why}. Not resumed, and it is still listed for the next start.`);
+		return { later };
+	}
+}
+
+/** After the app has exited: show the reopen commands for later yeses, then forget them. */
+export function finishRestore(later: RestorableSession[], write: (line: string) => void, opts: OpenOpts = {}): void {
+	for (const s of later) write(`To reopen ${s.id}: ${reopenCommand(s)}`);
+	const dir = opts.dir ?? defaultSessionsDir();
+	const ids = new Set(later.map((s) => s.id));
+	for (const { file, rec } of readRecords(dir)) {
+		if (ids.has(rec.sessionId) && !isRunning(rec, opts.bootAt ?? currentBootAt())) {
+			fs.rmSync(file, { force: true });
+		}
+	}
 }

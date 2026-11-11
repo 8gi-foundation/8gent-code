@@ -18,7 +18,6 @@ import { markInkMounted } from "./lib/early-input.js";
 // Then the colour policy, so NO_COLOR holds for every byte Ink draws
 // (lib/colour-policy.ts).
 import "./lib/colour-startup.js";
-import { existsSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { render } from "ink";
 import React from "react";
@@ -28,8 +27,13 @@ import React from "react";
 // react-doctor-disable-next-line react-doctor/no-barrel-import
 import { enableInfiniteMode } from "../../../packages/permissions/index.js";
 import { setDurableEnabled } from "../../../packages/specifications/session/durable-ledger.js";
-import { unattended } from "../../../packages/core/one-yes.js";
-import { markClosed, offerRestore, reopenCommand } from "../../../packages/eight/open-sessions.js";
+import { oneYesTimeoutMs, unattended } from "../../../packages/core/one-yes.js";
+import {
+	type RestorableSession,
+	finishRestore,
+	markClosed,
+	restoreOnStart,
+} from "../../../packages/eight/open-sessions.js";
 import { App } from "./app.js";
 import { startMouse } from "./lib/mouse-wiring.js";
 import { tuiRenderOptions } from "./lib/render-options.js";
@@ -85,22 +89,20 @@ startMouse();
 
 // Sessions that were open when 8gent Code last stopped (#196): asked once, default No,
 // and never with nobody at the terminal. The first yes resumes here, in its own folder;
-// each further yes is named with the command that reopens it.
+// each further yes is named with its reopen command after the app exits.
 let sessionResume = parsed.sessionResume;
+let laterRestores: RestorableSession[] = [];
 if (command === "repl" && sessionResume === undefined) {
 	const interactive = !unattended();
 	const rl = interactive ? createInterface({ input: process.stdin, output: process.stdout }) : null;
-	const accepted = await offerRestore({
+	const started = await restoreOnStart({
 		interactive,
 		write: (line) => console.log(line),
 		ask: (q) => (rl ? rl.question(q) : Promise.resolve("")),
+		timeoutMs: oneYesTimeoutMs(),
 	}).finally(() => rl?.close());
-	for (const [i, s] of accepted.entries()) {
-		if (i === 0) {
-			sessionResume = s.id;
-			if (existsSync(s.cwd)) process.chdir(s.cwd);
-		} else console.log(`To reopen ${s.id}: ${reopenCommand(s)}`);
-	}
+	sessionResume = started.sessionResume;
+	laterRestores = started.later;
 }
 
 // Render the TUI
@@ -121,4 +123,11 @@ const instance = render(
 // inside Ink's own mount is not covered by the watchdog.
 markInkMounted();
 // A deliberate quit closes the open-session record; a restart or a kill leaves it.
-void instance.waitUntilExit().then(() => markClosed());
+// The reopen commands for any further yes are printed here, after the screen is released.
+void instance
+	.waitUntilExit()
+	.then(() => {
+		markClosed();
+		finishRestore(laterRestores, (line) => console.log(line));
+	})
+	.catch(() => {});
