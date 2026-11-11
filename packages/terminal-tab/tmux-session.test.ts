@@ -526,7 +526,7 @@ describe("EIGHT_UNATTENDED in every session", () => {
 				buildTmuxNewSessionArgs({ sessionId: "x", command: "env", cwd: "/" }, env).slice(-1)[0],
 			],
 			{
-				env: { TERM: "screen", EIGHT_UNATTENDED: "0", PATH: process.env.PATH ?? "" },
+				env: { ...process.env, TERM: "screen", EIGHT_UNATTENDED: "0" },
 				encoding: "utf-8",
 			},
 		);
