@@ -48,6 +48,8 @@ const TOUCHED = [
 	"ZZ_BCE_DEEP",
 	"EIGHT_DECIDE_OLLAMA_HOST",
 	"OLLAMA_HOST",
+	"EIGHT_WORKSPACE_ROOT",
+	"ZZ_BCE_OUT",
 ];
 const saved = new Map(TOUCHED.map((k) => [k, process.env[k]]));
 const restore = () => {
@@ -314,6 +316,56 @@ describe("spawn_agent's shell child: a variable cannot carry a read outside", ()
 	});
 });
 
+describe("spawn_agent's shell child: the workspace write boundary, with a root set", () => {
+	beforeEach(() => {
+		process.env.EIGHT_HEADLESS_APPROVE = "1";
+		process.env.EIGHT_WORKSPACE_ROOT = ws;
+	});
+
+	/** Runs the task through a real spawn_agent; when a child started, waits for it to end. */
+	const spawnShell = async (via: "native" | "executor" | "infinite", task: string) => {
+		const orch = await import("../orchestration");
+		const input = { task, runtime: "shell" };
+		let out: string;
+		if (via === "native") out = await native("spawn_agent", input);
+		else if (via === "executor") out = String(await new ToolExecutor(ws).execute("spawn_agent", input));
+		else {
+			const { createPermissionHolder, runWithPermissionHolder } = await import("./permission-mode");
+			const { spawnAgentTool } = await import("../orchestration/delegation-tools");
+			out = await runWithPermissionHolder(createPermissionHolder("infinite"), () =>
+				spawnAgentTool(ws, task, "shell"),
+			);
+		}
+		const id = /"agentId": "([^"]+)"/.exec(out)?.[1];
+		for (let i = 0; id && i < 100 && !orch.getCLIAgentStatus(id)?.result; i++) await Bun.sleep(100);
+		return out;
+	};
+
+	// Checked by outcome: the executor rewords a workspace-boundary refusal for the model.
+	for (const via of ["native", "executor", "infinite"] as const) {
+		test(`${via}: a literal outside write is refused and nothing is written`, async () => {
+			const target = path.join(outDir, `lit-${via}`);
+			const out = await spawnShell(via, `touch ${target}`);
+			expect(out).not.toContain("agentId");
+			expect(fs.existsSync(target)).toBe(false);
+		});
+
+		test(`${via}: an outside write built from a variable its shell has is refused`, async () => {
+			process.env.ZZ_BCE_OUT = outDir;
+			const out = await spawnShell(via, `touch $ZZ_BCE_OUT/var-${via}`);
+			expect(out).not.toContain("agentId");
+			expect(fs.existsSync(path.join(outDir, `var-${via}`))).toBe(false);
+		});
+
+		test(`${via}: a write inside the workspace still runs`, async () => {
+			const target = path.join(ws, `in-${via}`);
+			const out = await spawnShell(via, `touch ${target}`);
+			expect(out).toContain("agentId");
+			expect(fs.existsSync(target)).toBe(true);
+		});
+	}
+});
+
 describe("a new spawner cannot skip the shared environment", () => {
 	const root = path.resolve(import.meta.dir, "..", "..");
 	const sources = [...new Bun.Glob("{packages,apps}/**/*.{ts,tsx}").scanSync({ cwd: root })].filter(
@@ -387,5 +439,22 @@ describe("a new spawner cannot skip the shared environment", () => {
 		const text = read("packages/orchestration/delegation-tools.ts");
 		expect(text).toContain("withShellEnv({ ...process.env, ...depthEnv }");
 		expect(text).toContain('env: effectiveRuntime === "shell" ? (judgedShellEnv() as Record<string, string>)');
+	});
+
+	test("every route that judges a shell command also meets the run_command policy gate", () => {
+		const routes = sources
+			.filter((f) => !/^packages\/(permissions|decide\/eval)\//.test(f))
+			.filter((f) => /\bsystemOneGate\(/.test(read(f)))
+			.sort();
+		expect(routes).toEqual([
+			"packages/ai/tools.ts",
+			"packages/eight/tools.ts",
+			"packages/orchestration/delegation-tools.ts",
+		]);
+		for (const f of routes) expect([f, /\.gate\(/.test(read(f))]).toEqual([f, true]);
+		// The shell child: one gate, on both its branches (with and without a permission mode).
+		const text = read("packages/orchestration/delegation-tools.ts");
+		expect(text).toContain('.gate("primary", "run_command", {');
+		expect(text.match(/await runCommandPolicyRefusal\(/g)?.length).toBe(2);
 	});
 });
