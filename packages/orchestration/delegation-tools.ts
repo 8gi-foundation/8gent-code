@@ -23,6 +23,7 @@ import {
 	runWithPermissionHolder,
 	systemOneEnvFor,
 } from "../permissions/permission-mode";
+import { judgedShellEnv, withShellEnv } from "../eight/harness/child-env";
 import { hostedAllowed } from "../providers/failover";
 import { currentProviderPin } from "./provider-pin";
 
@@ -183,7 +184,14 @@ export async function spawnAgentTool(
 		}
 
 		// CLI runtimes: claude and shell
-		if (effectiveRuntime === "claude" || effectiveRuntime === "shell") {
+		// A process child starts at this depth, so an 8gent it runs is capped too.
+		const depthEnv = { [AGENT_DEPTH_ENV]: String(currentAgentDepth() + 1) };
+		// The shell child keeps this process's environment plus its depth. Its checks below and
+		// its spawn both read that one environment (judgedShellEnv), so `$VAR` agrees.
+		if (effectiveRuntime === "shell")
+			return withShellEnv({ ...process.env, ...depthEnv }, () => startCliChild("shell"));
+		if (effectiveRuntime === "claude") return startCliChild("claude");
+		async function startCliChild(effectiveRuntime: "claude" | "shell"): Promise<string> {
 			// runtime "shell" runs the task through sh -c, so it is a shell command.
 			if (effectiveRuntime === "shell" && child) {
 				const blocked = await gateShellChild(task, workingDirectory, child);
@@ -204,8 +212,7 @@ export async function spawnAgentTool(
 			const agent = spawnCLIAgent(effectiveRuntime, runTask, {
 				workingDirectory: workingDirectory,
 				timeout: timeout || undefined,
-				// A process child starts at this depth, so an 8gent it runs is capped too.
-				env: { [AGENT_DEPTH_ENV]: String(currentAgentDepth() + 1) },
+				env: effectiveRuntime === "shell" ? (judgedShellEnv() as Record<string, string>) : depthEnv,
 			});
 			return JSON.stringify(
 				{

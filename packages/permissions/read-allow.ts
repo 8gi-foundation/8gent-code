@@ -410,6 +410,8 @@ export function terminalBoundaryText(text: unknown, cwd: string, home = homedir(
 			text,
 		) ?? /^\[TOOLG8 BLOCKED\][^\n]*\[workspace-boundary\][^\n]*? -> (\S+)/.exec(text);
 	if (!m) return null;
+	// A substitution is a refusal of the command, not a folder to allow: keep its own reason.
+	if (m[1] === "<unresolved>" && text.includes("Command substitution")) return null;
 	const r = noteBoundaryBlock(expand(m[1], home, cwd));
 	if (r.end && cur().stop === null) cur().stop = r.end;
 	return r.text;

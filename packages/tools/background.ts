@@ -7,8 +7,7 @@
 import type { ChildProcess } from "node:child_process";
 import * as path from "node:path";
 import { killProcessTree, spawnShell } from "../core/shell";
-import { buildChildEnv } from "../eight/harness/child-env";
-import { toolShellEnv } from "../permissions/nested-guard";
+import { judgedShellEnv } from "../eight/harness/child-env";
 import { osReadSpec } from "../permissions/read-boundary";
 import { wrapRunCommand } from "../permissions/run-command-sandbox";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
@@ -76,7 +75,6 @@ export class BackgroundTaskManager {
 		command: string,
 		options: {
 			workingDirectory?: string;
-			env?: Record<string, string>;
 			timeout?: number;
 			/** A person said yes on a card for this command: the OS read rule opens what it named (#4890). */
 			approved?: boolean;
@@ -107,10 +105,8 @@ export class BackgroundTaskManager {
 		const readScope = osReadSpec(command, { cwd: workingDirectory, approved: options.approved });
 		const proc = spawnShell(wrapRunCommand(command, readScope), {
 			cwd: workingDirectory,
-			env: toolShellEnv({
-				...(buildChildEnv() as NodeJS.ProcessEnv),
-				...options.env,
-			}),
+			// The environment its command was judged against (judgedShellEnv), so `$VAR` agrees.
+			env: judgedShellEnv(),
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 
