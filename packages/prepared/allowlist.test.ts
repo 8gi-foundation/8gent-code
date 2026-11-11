@@ -125,10 +125,15 @@ describe("the gate config is out of the patch's reach", () => {
 		sh(f.ws, "git add -A && git commit -q -m ts");
 		f.setGate(`${JSON.stringify(process.execPath)} ${JSON.stringify(TSC)} --noEmit`);
 		const outside = path.join(f.root, "home", ".8gent", "officers", "8GO", "review-ledger.txt");
+		// The same file, spelled relative to tsconfig.json. The absolute path would put the temp dir name
+		// into the diff, and that name carries the process id: a run whose pid has seven digits makes the
+		// personal-data check refuse the patch for that number before the tsconfig rule is reached, so the
+		// test passed or failed by pid length.
+		const relOutside = path.relative(f.ws, outside);
 		const before = fs.readFileSync(path.join(f.ws, "tsconfig.json"), "utf8");
 		const after = `${JSON.stringify(
 			{
-				compilerOptions: { strict: true, incremental: true, tsBuildInfoFile: outside },
+				compilerOptions: { strict: true, incremental: true, tsBuildInfoFile: relOutside },
 				include: ["src"],
 			},
 			null,
@@ -143,6 +148,7 @@ describe("the gate config is out of the patch's reach", () => {
 	test("a tsconfig tsBuildInfoFile patch is refused at prepare and no outside file is written", async () => {
 		const f = tsFixture();
 		expect(f.diff).toContain("tsBuildInfoFile");
+		expect(f.diff).not.toContain(f.root);
 		const r = await runPass(f.io, {
 			now: NOW,
 			candidates: [cand(1)],

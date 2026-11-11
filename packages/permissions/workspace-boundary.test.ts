@@ -264,23 +264,28 @@ describe("legitimate workspace paths pass", () => {
 // Allow-prefix escape hatch
 // ============================================
 
-// "/usr/bin" has no drive letter on Windows; the workspace resolves it against its own drive, so the
-// prefix is spelled the same way (a no-op on POSIX).
-const USR_BIN = path.resolve(WORKSPACE, "/usr/bin");
+// The allowed prefix is a real directory this test made outside the workspace, spelled as the
+// boundary check sees it (realpath). A system directory such as /usr/bin would tie the test to the
+// host: on a merged-usr box with Rust coreutils /usr/bin/env is a symlink into /usr/lib/cargo/bin,
+// so the resolved path leaves the prefix and the check correctly refuses it.
+const ALLOWED_PREFIX = fs.realpathSync(OUTSIDE);
+const ALLOWED_FILE = path.join(ALLOWED_PREFIX, "secret.txt");
 
 describe("allowedAbsolutePrefixes escape hatch", () => {
 	test("explicitly allowed prefix bypasses boundary", () => {
-		const result = checkCommandBoundary("cat /usr/bin/env", WORKSPACE, [USR_BIN]);
+		expect(checkCommandBoundary(`cat ${ALLOWED_FILE}`, WORKSPACE).allowed).toBe(false);
+		const result = checkCommandBoundary(`cat ${ALLOWED_FILE}`, WORKSPACE, [ALLOWED_PREFIX]);
 		expect(result.allowed).toBe(true);
 	});
 
 	test("read_file under explicitly allowed prefix is permitted", () => {
-		const result = checkFilePathBoundary("/usr/bin/env", WORKSPACE, [USR_BIN]);
+		expect(checkFilePathBoundary(ALLOWED_FILE, WORKSPACE).allowed).toBe(false);
+		const result = checkFilePathBoundary(ALLOWED_FILE, WORKSPACE, [ALLOWED_PREFIX]);
 		expect(result.allowed).toBe(true);
 	});
 
 	test("non-allowlisted absolute path still rejected", () => {
-		const result = checkFilePathBoundary("/etc/passwd", WORKSPACE, [USR_BIN]);
+		const result = checkFilePathBoundary("/etc/passwd", WORKSPACE, [ALLOWED_PREFIX]);
 		expect(result.allowed).toBe(false);
 	});
 });

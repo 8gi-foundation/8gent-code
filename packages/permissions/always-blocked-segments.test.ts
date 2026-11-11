@@ -567,7 +567,8 @@ const GLOB_BLOCKED = [
 	`${RMW} -rf ${HOME_PARENT}/[!/]${HOME_NAME.slice(1)}`,
 	`${RMW} -rf ${HOME_PARENT}/[^/]${HOME_NAME.slice(1)}`,
 	`${RMW} -rf ${HOME_PARENT}/[[:alpha:]]${HOME_NAME.slice(1)}`,
-	`${RMW} -rf /*/${HOME_NAME}`,
+	// one star per directory above the home, so the glob reaches it whatever its depth (/home/me, /var/lib/me)
+	`${RMW} -rf ${"/*".repeat(HOME_PARENT.split("/").filter(Boolean).length)}/${HOME_NAME}`,
 	`${RMW} -rf /[${HOME_PARENT[1]}]${HOME_PARENT.slice(2)}/${HOME_NAME}`,
 	`${RMW} -rf [/]`,
 	`${RMW} -rf /[/]`,
