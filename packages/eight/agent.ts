@@ -159,7 +159,7 @@ import {
 } from "./self-questions";
 import { SMALL_TALK_NOTE, isGreeting, isSmallTalk } from "./small-talk";
 import { termSessionBlock } from "./term-session-list";
-import { ownedSessions } from "./term-tools";
+import { newTermTurn, ownedSessions } from "./term-tools";
 import { replyIsTextToolCall } from "./text-call-fallback";
 import { verifyNudgeFor } from "./verify-gate";
 import { buildWelcome, gatherWelcomeFacts } from "./welcome";
@@ -3306,6 +3306,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 		// #180: the terminal sessions this app opened, rebuilt from real state each turn
 		// and sent when they changed (or when a compaction dropped the last note).
+		newTermTurn();
 		if (!isVerbatimScope(this.config.agentScope)) {
 			const termBlock = await termSessionBlock();
 			const dropped = this.termNote !== null && !this.messageHistory.includes(this.termNote);

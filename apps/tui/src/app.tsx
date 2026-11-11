@@ -199,7 +199,7 @@ import {
 } from "../../../packages/eight/auto-provider.js";
 import { runBugCommand } from "../../../packages/eight/bug-command.js";
 import { safeSpawn } from "../../../packages/eight/safe-spawn.js";
-import { openAndAnnounce } from "../../../packages/eight/term-session-list.js";
+import { noticeMayReach, openAndAnnounce } from "../../../packages/eight/term-session-list.js";
 import { openOwnedSession } from "../../../packages/eight/term-tools.js";
 import {
 	dotenvKeyIsAllowed,
@@ -3358,7 +3358,9 @@ export function App({
 			`The last turn in this session was cut off, so this tab resumed in ${permissionModeLabel(start.mode)}. You will be asked once to go back.`,
 		);
 	}, [activeSessionId, addSystemMessage, permHolderFor, setTabPermMode]);
-	const submitRef = useRef<((text: string, tabId?: string) => Promise<void>) | null>(null);
+	const submitRef = useRef<
+		((text: string, tabId?: string, mode?: "steer" | "followUp") => Promise<void>) | null
+	>(null);
 
 	// Android (#4706): spoken replies via termux-tts-speak; a missing tool says so in the chat, not on stderr.
 	useEffect(() => {
@@ -7750,7 +7752,18 @@ export function App({
 									source: resolved.source,
 								});
 							const chatTab = activeTabIdRef.current;
-							const tellModel = (text: string) => void submitRef.current?.(text, chatTab);
+							// The notice goes to this machine's model turn only: never to a shared-session
+							// daemon or Telegram, never as the answer to a question the person is in. A
+							// running turn gets it queued behind it, not steered.
+							const tellModel = (text: string) => {
+								const mayReach = noticeMayReach({
+									telegram: telegramTab.owns(chatTab),
+									daemonLinked: Boolean(daemonLinkRef.current?.client.sessionId),
+									questionPending:
+										Boolean(djInstallAnswerRef.current) || nameQuestionOpen || showOnboarding,
+								});
+								if (mayReach) void submitRef.current?.(text, chatTab, "followUp");
+							};
 							// The new tab takes the screen, so the line goes to the chat it came from.
 							const say = (content: string) =>
 								appendToTabLatest.current(chatTab, {

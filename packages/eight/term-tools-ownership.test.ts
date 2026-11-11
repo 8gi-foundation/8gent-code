@@ -105,6 +105,7 @@ mock.module("../terminal-tab/index.js", () => ({
 	},
 }));
 
+import { getPermissionManager } from "../permissions";
 import {
 	type ExitHost,
 	endOwnedSessions,
@@ -112,6 +113,19 @@ import {
 	executeTermTool,
 	ownedSessions,
 } from "./term-tools";
+
+// Consent to read and type in a session is covered in term-session-list.test.ts. This file is
+// about the command gate, so the person says yes to that one prompt here and to nothing else.
+const consentPatched = new WeakSet<object>();
+function consentGranted(pm: { askPerson: (a: string, d: string, c?: string) => Promise<boolean> }) {
+	if (consentPatched.has(pm)) return;
+	consentPatched.add(pm);
+	const ask = pm.askPerson.bind(pm);
+	pm.askPerson = (a, d, c) =>
+		/^(Read|Type Into) Terminal Session$/.test(a) && d.startsWith("The assistant wants to")
+			? Promise.resolve(true)
+			: ask(a, d, c);
+}
 
 const SOCKET = ["-S", runB.socketPath];
 
@@ -152,6 +166,7 @@ function fakeRunner(serverSurvives = false) {
 }
 
 beforeEach(() => {
+	consentGranted(getPermissionManager());
 	endOwnedSessions(fakeRunner().run);
 	tmuxCalls.length = 0;
 	spawnedTargets.length = 0;
