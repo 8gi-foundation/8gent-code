@@ -28,7 +28,8 @@ import React from "react";
 // react-doctor-disable-next-line react-doctor/no-barrel-import
 import { enableInfiniteMode } from "../../../packages/permissions/index.js";
 import { setDurableEnabled } from "../../../packages/specifications/session/durable-ledger.js";
-import { markClosed, offerRestore } from "../../../packages/eight/open-sessions.js";
+import { unattended } from "../../../packages/core/one-yes.js";
+import { markClosed, offerRestore, reopenCommand } from "../../../packages/eight/open-sessions.js";
 import { App } from "./app.js";
 import { startMouse } from "./lib/mouse-wiring.js";
 import { tuiRenderOptions } from "./lib/render-options.js";
@@ -87,7 +88,7 @@ startMouse();
 // each further yes is named with the command that reopens it.
 let sessionResume = parsed.sessionResume;
 if (command === "repl" && sessionResume === undefined) {
-	const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+	const interactive = !unattended();
 	const rl = interactive ? createInterface({ input: process.stdin, output: process.stdout }) : null;
 	const accepted = await offerRestore({
 		interactive,
@@ -98,7 +99,7 @@ if (command === "repl" && sessionResume === undefined) {
 		if (i === 0) {
 			sessionResume = s.id;
 			if (existsSync(s.cwd)) process.chdir(s.cwd);
-		} else console.log(`To reopen ${s.id}: cd ${s.cwd} && 8gent --resume ${s.id}`);
+		} else console.log(`To reopen ${s.id}: ${reopenCommand(s)}`);
 	}
 }
 

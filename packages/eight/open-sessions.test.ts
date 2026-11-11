@@ -9,6 +9,8 @@ import {
 	markClosed,
 	markOpen,
 	offerRestore,
+	reopenCommand,
+	shellQuote,
 	restorableSessions,
 } from "./open-sessions";
 import { SessionManager } from "./session-manager";
@@ -144,5 +146,82 @@ describe("offerRestore", () => {
 		const t = io([]);
 		expect(await offerRestore(t.i, { dir })).toEqual([]);
 		expect(t.lines).toEqual([]);
+	});
+});
+
+describe("what is printed from a session record (#199 read)", () => {
+	const shown = async (cwd: string, ...prompts: string[]) => {
+		const id = saved(cwd, ...prompts);
+		markOpen(id, { dir, pid: deadPid() });
+		const t = io(["n"]);
+		await offerRestore(t.i, { dir });
+		return { id, text: t.lines.join("\n"), asked: t.asked.join("") };
+	};
+
+	test("ESC and other control bytes in the last message never reach the screen", async () => {
+		const r = await shown("/work/a", "hi\x1b[2J\x1b]0;forged\x07\x1b[31m there\r\x08\x00");
+		expect(r.text).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/);
+		expect(r.text).toContain("hi");
+	});
+
+	test("a secret in the last message is redacted, even with an escape byte inside it", async () => {
+		const r = await shown(
+			"/work/a",
+			`use sk-ant-abcdefghijklmnopqrstuvwxyz012345 and ghp_${"a".repeat(36)} and sk-ant-abcdefghij\x1b[0mklmnopqrstuvwxyz`,
+		);
+		expect(r.text).not.toContain("ghp_aaaa");
+		expect(r.text).not.toContain("abcdefghij");
+		expect(r.text).toContain("REDACTED");
+	});
+
+	test("the preview is short", async () => {
+		const r = await shown("/work/a", "x ".repeat(500));
+		expect(r.text.length).toBeLessThan(400);
+	});
+
+	test("the prompt says the folder changes", async () => {
+		expect((await shown("/work/a", "hi")).asked).toContain("open it in that folder");
+	});
+
+	test("a folder name with control bytes is not printed", async () => {
+		const r = await shown("/work/\x1b[2Jevil", "hi");
+		expect(r.text).not.toContain("\x1b");
+		expect(r.text).toContain("folder name not shown");
+	});
+});
+
+describe("printed reopen command", () => {
+	test("a hostile folder name stays one quoted word", () => {
+		const cwd = "/tmp/a b; touch pwned $(id) `id` it's";
+		const cmd = reopenCommand({ id: "abc123", cwd });
+		expect(cmd.endsWith(" && 8gent --resume abc123")).toBe(true);
+		// run the printed folder word through a real shell: it must come back as exactly the folder
+		const word = cmd.slice("cd ".length, -" && 8gent --resume abc123".length);
+		const r = spawnSync("sh", ["-c", `printf %s ${word}`]);
+		expect(r.stdout.toString()).toBe(cwd);
+		expect(shellQuote("it's")).toBe("'it'\\''s'");
+	});
+
+	test("a folder with a newline or escape drops the cd and keeps the id", () => {
+		expect(reopenCommand({ id: "abc123", cwd: "/x\n; touch pwned" })).toBe("8gent --resume abc123");
+	});
+});
+
+describe("stale records", () => {
+	test("same-boot pid reuse by a live stranger is never offered (fails safe)", () => {
+		markOpen(saved("/work/a", "hi"), { dir, pid: process.pid });
+		expect(restorableSessions({ dir })).toEqual([]);
+	});
+
+	test("a record older than 30 days is not offered and is forgotten", async () => {
+		const id = saved("/work/a", "hi");
+		const pid = deadPid();
+		markOpen(id, { dir, pid });
+		const f = path.join(dir, "open", `${pid}.json`);
+		const old = new Date(Date.now() - 31 * 24 * 3600 * 1000);
+		fs.utimesSync(f, old, old);
+		expect(restorableSessions({ dir })).toEqual([]);
+		await offerRestore(io([]).i, { dir });
+		expect(fs.existsSync(f)).toBe(false);
 	});
 });

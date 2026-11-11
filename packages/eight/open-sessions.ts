@@ -16,6 +16,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { redact } from "../memory/redact.js";
+import { sanitizeForDisplay } from "./changelog-view.js";
 import { chatMessages } from "./session-messages.js";
 import { SessionStore, defaultSessionsDir, isSessionId, listSessions } from "./session-store.js";
 
@@ -31,7 +33,7 @@ export interface RestorableSession {
 	name?: string;
 	cwd: string;
 	lastActiveAt: string;
-	/** The last thing the person typed, one line; empty when the record has none. */
+	/** The last thing the person typed: control bytes removed, secrets redacted, short; empty when none. */
 	lastUserMessage: string;
 }
 
@@ -42,6 +44,32 @@ export interface OpenOpts {
 }
 
 const BOOT_TOLERANCE_SECONDS = 120;
+/** A record older than this with no process behind it is dropped, not offered. */
+export const MAX_STALE_AGE_MS = 30 * 24 * 3600 * 1000;
+const PREVIEW_CHARS = 80;
+
+/**
+ * Text from a session record, made safe to print: control and escape bytes
+ * removed, secrets redacted (in that order, so an escape byte cannot split a
+ * token past the redactor), one line, cut after redaction.
+ */
+export function safeLine(text: string, max = 200): string {
+	const one = redact(sanitizeForDisplay(text).replace(/\s+/g, " ").trim());
+	return one.length > max ? `${one.slice(0, max)}...` : one;
+}
+
+/** Quote one word for a POSIX shell: single quotes, embedded single quotes escaped. */
+export function shellQuote(word: string): string {
+	return `'${word.replace(/'/g, `'\\''`)}'`;
+}
+
+const hasControl = (s: string) => /[\x00-\x1f\x7f-\x9f]/.test(s);
+
+/** The command that reopens a session in its folder, safe to paste. A folder with control bytes is left out. */
+export function reopenCommand(s: Pick<RestorableSession, "id" | "cwd">): string {
+	const resume = `8gent --resume ${s.id}`;
+	return hasControl(s.cwd) ? resume : `cd ${shellQuote(s.cwd)} && ${resume}`;
+}
 
 export const currentBootAt = (): number => Math.round(Date.now() / 1000 - os.uptime());
 const openDir = (dir: string) => path.join(dir, "open");
@@ -67,20 +95,20 @@ export function markClosed(opts: OpenOpts = {}): void {
 	fs.rmSync(recordFile(dir, opts.pid ?? process.pid), { force: true });
 }
 
-function readRecords(dir: string): Array<{ file: string; rec: OpenRecord }> {
+function readRecords(dir: string): Array<{ file: string; rec: OpenRecord; mtimeMs: number }> {
 	let names: string[];
 	try {
 		names = fs.readdirSync(openDir(dir));
 	} catch {
 		return [];
 	}
-	const out: Array<{ file: string; rec: OpenRecord }> = [];
+	const out: Array<{ file: string; rec: OpenRecord; mtimeMs: number }> = [];
 	for (const n of names) {
 		const file = path.join(openDir(dir), n);
 		try {
 			const r = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<OpenRecord>;
 			if (Number.isInteger(r.pid) && isSessionId(r.sessionId) && typeof r.bootAt === "number") {
-				out.push({ file, rec: r as OpenRecord });
+				out.push({ file, rec: r as OpenRecord, mtimeMs: fs.statSync(file).mtimeMs });
 			} else fs.rmSync(file, { force: true });
 		} catch {
 			fs.rmSync(file, { force: true });
@@ -110,14 +138,16 @@ export function restorableSessions(opts: OpenOpts = {}): RestorableSession[] {
 	const records = readRecords(dir);
 	const live = new Set(records.filter((r) => isRunning(r.rec, bootAt)).map((r) => r.rec.sessionId));
 	const stale = new Set(
-		records.filter((r) => !isRunning(r.rec, bootAt)).map((r) => r.rec.sessionId),
+		records
+			.filter((r) => !isRunning(r.rec, bootAt) && Date.now() - r.mtimeMs < MAX_STALE_AGE_MS)
+			.map((r) => r.rec.sessionId),
 	);
 	const out: RestorableSession[] = [];
 	for (const s of listSessions({ sessionsDir: dir })) {
 		if (!stale.has(s.id) || live.has(s.id)) continue;
 		out.push({
 			id: s.id,
-			...(s.name !== undefined ? { name: s.name } : {}),
+			...(s.name !== undefined ? { name: safeLine(s.name, 60) } : {}),
 			cwd: s.cwd,
 			lastActiveAt: s.lastActiveAt,
 			lastUserMessage: lastUserLine(s.id, dir),
@@ -140,7 +170,7 @@ function lastUserLine(id: string, dir: string): string {
 		const msgs = chatMessages(SessionStore.open(id, dir)?.messages() ?? []);
 		for (let i = msgs.length - 1; i >= 0; i--) {
 			if (msgs[i].role === "user") {
-				return String(msgs[i].content).replace(/\s+/g, " ").trim().slice(0, 120);
+				return safeLine(String(msgs[i].content), PREVIEW_CHARS);
 			}
 		}
 	} catch {
@@ -150,7 +180,7 @@ function lastUserLine(id: string, dir: string): string {
 }
 
 export interface RestoreIo {
-	/** True only with a person at the terminal. */
+	/** True only with a person at the terminal (the caller folds in CI and EIGHT_UNATTENDED). */
 	interactive: boolean;
 	write(line: string): void;
 	/** Resolves the person's answer line. */
@@ -178,8 +208,9 @@ export async function offerRestore(io: RestoreIo, opts: OpenOpts = {}): Promise<
 	for (const s of found) {
 		const label = s.name ? `${s.name} (${s.id})` : s.id;
 		const last = s.lastUserMessage ? ` last message: "${s.lastUserMessage}"` : "";
-		io.write(`  ${label}  ${s.cwd}  last active ${s.lastActiveAt}${last}`);
-		const a = (await io.ask("  Resume it? [y/N] ")).trim().toLowerCase();
+		const folder = hasControl(s.cwd) ? "(folder name not shown)" : safeLine(s.cwd, 120);
+		io.write(`  ${label}  ${folder}  last active ${s.lastActiveAt}${last}`);
+		const a = (await io.ask("  Resume it and open it in that folder? [y/N] ")).trim().toLowerCase();
 		if (a === "y" || a === "yes") accepted.push(s);
 	}
 	forgetStale(opts);
