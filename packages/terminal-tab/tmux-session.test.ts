@@ -9,9 +9,17 @@
 
 import { afterAll, describe, expect, it } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
 	SESSION_ENV_ALLOW,
 	buildEnterKeyArgs,
@@ -25,12 +33,14 @@ import {
 	newTmuxRun,
 	parseLogTail,
 	readSessionLog,
+	recordServerPid,
 	releaseRun,
 	sendKeys,
 	sessionEnv,
 	sessionShellCommand,
 	setTmuxRunForTest,
 	spawnTmuxSession,
+	sweepDeadRuns,
 	thisTmuxRun,
 	tmuxArgv,
 } from "./tmux-session.js";
@@ -282,7 +292,10 @@ describe("spawnTmuxSession — live", () => {
 			// This run's socket and owner record sit in a 0700 directory.
 			expect(statSync(thisTmuxRun().dir).mode & 0o777).toBe(0o700);
 			expect(existsSync(thisTmuxRun().socketPath)).toBe(true);
-			expect(readFileSync(thisTmuxRun().ownerPath, "utf-8")).toBe(`${process.pid}\n`);
+			// Line 1 is this process; line 2 is the tmux server's pid (recordServerPid).
+			expect(readFileSync(thisTmuxRun().ownerPath, "utf-8")).toMatch(
+				new RegExp(`^${process.pid}\\n[1-9][0-9]*\\n$`),
+			);
 
 			// Kill it
 			await killTmuxSession(handle.sessionId);
@@ -437,7 +450,7 @@ describe("composeShellCommand", () => {
 
 /** Variables /bin/sh itself may set, besides the ones the wrapper passes. */
 const SHELL_OWN = new Set(["PWD", "OLDPWD", "SHLVL", "_"]);
-const ALLOWED = new Set<string>([...SESSION_ENV_ALLOW, "TERM", ...SHELL_OWN]);
+const ALLOWED = new Set<string>([...SESSION_ENV_ALLOW, "TERM", "EIGHT_UNATTENDED", ...SHELL_OWN]);
 
 describe("session environment", () => {
 	const run = thisTmuxRun();
@@ -497,4 +510,177 @@ describe("session environment", () => {
 		expect(out).not.toContain(run.socketPath);
 		expect(out).not.toContain("canary");
 	});
+});
+
+// -------------------------------------------------------
+// S0: an 8gent in a session has nobody present (issue 180)
+// -------------------------------------------------------
+
+describe("EIGHT_UNATTENDED in every session", () => {
+	const run = thisTmuxRun();
+	const out = (env: Record<string, string>) =>
+		execFileSync(
+			"/bin/sh",
+			[
+				"-c",
+				buildTmuxNewSessionArgs({ sessionId: "x", command: "env", cwd: "/" }, env).slice(-1)[0],
+			],
+			{
+				env: { TERM: "screen", EIGHT_UNATTENDED: "0", PATH: process.env.PATH ?? "" },
+				encoding: "utf-8",
+			},
+		);
+
+	it("the shell command carries EIGHT_UNATTENDED=1, whatever the parent or the env map holds", () => {
+		expect(sessionShellCommand("cat")).toContain(" EIGHT_UNATTENDED=1 ");
+		expect(sessionShellCommand("cat", { EIGHT_UNATTENDED: "0", PATH: "/bin" })).not.toContain(
+			"EIGHT_UNATTENDED='0'",
+		);
+		expect(
+			sessionEnv({ ...process.env, EIGHT_UNATTENDED: "0" }, run).EIGHT_UNATTENDED,
+		).toBeUndefined();
+	});
+
+	it("the program sees EIGHT_UNATTENDED=1 even when the parent environment says 0", () => {
+		expect(out(sessionEnv({ ...process.env, EIGHT_UNATTENDED: "0" }, run))).toContain(
+			"EIGHT_UNATTENDED=1\n",
+		);
+		expect(out({ EIGHT_UNATTENDED: "0", PATH: process.env.PATH ?? "" })).not.toContain(
+			"EIGHT_UNATTENDED=0",
+		);
+	});
+
+	it("recordServerPid adds line 2 to the owner record and the startup sweep still reads it", () => {
+		const dir = join(TMP, "sweep");
+		const dead = newTmuxRun(dir, 2147483000);
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		writeFileSync(dead.socketPath, "");
+		recordServerPid(777, dead);
+		expect(readFileSync(dead.ownerPath, "utf-8")).toBe("2147483000\n777\n");
+		expect(statSync(dead.ownerPath).mode & 0o777).toBe(0o600);
+		recordServerPid(1, dead);
+		recordServerPid(Number.NaN, dead);
+		expect(readFileSync(dead.ownerPath, "utf-8")).toBe("2147483000\n777\n");
+		const noServer = () => {
+			throw Object.assign(new Error("no server running"), { status: 1 });
+		};
+		const swept = sweepDeadRuns(dir, noServer, () => false, newTmuxRun(dir, process.pid));
+		expect(swept).toEqual([dead.id]);
+		expect(existsSync(dead.ownerPath)).toBe(false);
+	});
+});
+
+// The child is a real bun process inside a real tmux server. It prints what core/one-yes.ts
+// and the permission manager say about it, found by its own parents (ps), nothing injected.
+describe("a child 8gent in an owned tmux session (live)", () => {
+	const HOME = join(TMP, "h");
+	const probe = join(TMP, "probe.ts");
+	const root = join(dirname(new URL(import.meta.url).pathname), "..");
+	const writeProbe = () =>
+		writeFileSync(
+			probe,
+			`import { forcedUnattended, inOwnedPane, unattended } from "${root}/core/one-yes";
+import { PermissionManager } from "${root}/permissions/index";
+const ask = process.argv[2] === "ask";
+const approved = ask ? await new PermissionManager().requestPermission("Run", "a tool", "somecustomtool --go") : null;
+console.log(JSON.stringify({ pane: inOwnedPane(), forced: forcedUnattended(), var: process.env.EIGHT_UNATTENDED ?? null, tty: unattended({}, { isTTY: true }, { isTTY: true }), approved }));
+`,
+		);
+	const wait = async (file: string) => {
+		for (let i = 0; i < 100 && !existsSync(file); i++) await new Promise((r) => setTimeout(r, 100));
+		if (!existsSync(file)) return null;
+		// The permission manager logs its refusal on stdout first: the verdict is the last line.
+		const lines = readFileSync(file, "utf-8").trim().split("\n");
+		return JSON.parse(lines[lines.length - 1]);
+	};
+	const dataDir = join(TMP, "data");
+
+	it.if(live)(
+		"is unattended, EIGHT_HEADLESS_APPROVE=1 does not approve, and env -u or unset does not restore prompts",
+		async () => {
+			writeProbe();
+			const prev = thisTmuxRun();
+			const ownedRun = newTmuxRun(join(HOME, ".8gent", "term"));
+			setTmuxRunForTest(ownedRun);
+			const pre = `HOME='${HOME}' EIGHT_DATA_DIR='${dataDir}'`;
+			const files = ["direct", "typed", "envu", "unset"].map((n) => join(TMP, `pane-${n}.json`));
+			let id = "";
+			try {
+				const handle = await spawnTmuxSession({
+					command: "sh",
+					args: [
+						"-c",
+						[
+							`${pre} bun '${probe}' ask > '${files[0]}.tmp' && mv '${files[0]}.tmp' '${files[0]}'`,
+							`${pre} EIGHT_HEADLESS_APPROVE=1 bun '${probe}' ask > '${files[1]}.tmp' && mv '${files[1]}.tmp' '${files[1]}'`,
+							`env -u EIGHT_UNATTENDED ${pre} EIGHT_HEADLESS_APPROVE=1 bun '${probe}' ask > '${files[2]}.tmp' && mv '${files[2]}.tmp' '${files[2]}'`,
+							`unset EIGHT_UNATTENDED; ${pre} EIGHT_HEADLESS_APPROVE=1 bun '${probe}' ask > '${files[3]}.tmp' && mv '${files[3]}.tmp' '${files[3]}'`,
+							"sleep 60",
+						].join("; "),
+					],
+					cwd: process.cwd(),
+					logPath: tmpLog("pane-child"),
+				});
+				id = handle.sessionId;
+				const got: Record<string, unknown>[] = [];
+				for (const f of files) got.push(await wait(f));
+				for (const g of got) {
+					expect(g).not.toBeNull();
+					expect(g.pane).toBe(true);
+					expect(g.forced).toBe(true);
+					expect(g.tty).toBe(true);
+					expect(g.approved).toBe(false);
+				}
+				// The marker variable really was there on the first run and really was stripped on the others.
+				expect(got[0].var).toBe("1");
+				expect(got[2].var).toBeNull();
+				expect(got[3].var).toBeNull();
+				// The pid line the spawner recorded names the server this child sits under.
+				const rec = readFileSync(ownedRun.ownerPath, "utf-8").split("\n");
+				expect(Number(rec[1])).toBeGreaterThan(1);
+			} finally {
+				if (id) await killTmuxSession(id);
+				setTmuxRunForTest(prev);
+			}
+		},
+		60000,
+	);
+
+	it.if(tmuxServes)(
+		"a process outside the run's socket, and an 8gent in a person's own tmux, are not unattended",
+		async () => {
+			writeProbe();
+			const env = { ...process.env, HOME } as Record<string, string | undefined>;
+			Reflect.deleteProperty(env, "EIGHT_UNATTENDED");
+			Reflect.deleteProperty(env, "CI");
+			const plain = JSON.parse(
+				execFileSync("bun", [probe], { env: env as NodeJS.ProcessEnv, encoding: "utf-8" }),
+			);
+			expect(plain).toMatchObject({ pane: false, forced: false, tty: false });
+
+			// A person's own tmux: its own server on a socket that is not under ~/.8gent/term.
+			const sock = join(TMP, "own.sock");
+			const file = join(TMP, "own.json");
+			execFileSync(
+				"tmux",
+				[
+					"-S",
+					sock,
+					"new-session",
+					"-d",
+					"-s",
+					"own",
+					`HOME='${HOME}' EIGHT_DATA_DIR='${dataDir}' bun '${probe}' > '${file}.tmp' && mv '${file}.tmp' '${file}'; sleep 30`,
+				],
+				{ stdio: "ignore" },
+			);
+			try {
+				const own = await wait(file);
+				expect(own).toMatchObject({ pane: false, forced: false, var: null, tty: false });
+			} finally {
+				execFileSync("tmux", ["-S", sock, "kill-server"], { stdio: "ignore" });
+			}
+		},
+		60000,
+	);
 });
