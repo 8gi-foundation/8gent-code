@@ -505,3 +505,89 @@ describe("1a - today's behaviour is unchanged when no lock is configured", () =>
 		fs.rmSync(tmp, { recursive: true, force: true });
 	});
 });
+
+describe("1a - holes closed inside the locked store", () => {
+	it("forged edit: rewriting a signed row keeps James's signature over other words, so any human edit is refused", () => {
+		const f = lockedFixture();
+		const p = f.signedPost(f.james, "human:james", "I approve the transfer");
+		const posted = f.frame("human:james", p).message as { id: string };
+		// The attack: a foothold binds human:james and rewrites the words under the real signature.
+		const state: TableRouteState = { subscribedChannels: new Set(), participantId: "human:james", remoteAddress: "127.0.0.1" };
+		const { deps, sent } = makeDeps(f.store, state);
+		handleTableFrame(deps, { type: "message:edit", id: 9, messageId: posted.id, content: "I approve the transfer to the attacker" });
+		expect(sent[0].type).toBe("table:error");
+		expect(sent[0].code).toBe("TABLE_AUTH");
+		expect(() => f.store.editMessage({ messageId: posted.id, editorId: "human:james", content: "forged" })).toThrow(/post again/);
+		const row = f.store.listMessages(f.channel.id, { viewerId: "human:james" })[0];
+		expect(row.content).toBe("I approve the transfer");
+		expect(row.editedAt).toBeUndefined();
+		fs.rmSync(f.tmp, { recursive: true, force: true });
+	});
+
+	it("delete and attach-audio by a human are refused under the lock, and the row survives", () => {
+		const f = lockedFixture();
+		const posted = f.frame("human:james", f.signedPost(f.james, "human:james", "keep me")).message as { id: string };
+		expect(() => f.store.deleteMessage({ messageId: posted.id, deleterId: "human:james" })).toThrow(/post again/);
+		expect(() => f.store.deleteMessage({ messageId: posted.id, deleterId: "human:local" })).toThrow(/post again/);
+		expect(() =>
+			f.store.attachAudio({ messageId: posted.id, actorId: "human:james", audioUrl: "/table/audio/x/y.wav", audioDurationMs: 10 }),
+		).toThrow(/post again/);
+		const row = f.store.listMessages(f.channel.id, { viewerId: "human:james" })[0];
+		expect(row.deletedAt).toBeUndefined();
+		expect(row.audioUrl).toBeUndefined();
+		fs.rmSync(f.tmp, { recursive: true, force: true });
+	});
+
+	it("audio fields on a person's post are refused, signed or not", () => {
+		const f = lockedFixture();
+		const p = f.signedPost(f.james, "human:james", "words with a voice attached");
+		const r = f.frame("human:james", { ...p, audioUrl: "/table/audio/msg_abc/x.wav", audioDurationMs: 1200 });
+		expect(r.code).toBe("TABLE_AUTH");
+		expect(() =>
+			f.store.postMessage({ channelId: f.channel.id, authorId: "human:james", ...p, audioDurationMs: 5 }),
+		).toThrow(/audio/);
+		expect(f.store.listMessages(f.channel.id, { viewerId: "human:james" }).length).toBe(0);
+		expect(f.frame("human:james", p).type).toBe("message:posted");
+		fs.rmSync(f.tmp, { recursive: true, force: true });
+	});
+
+	it("text that is not well-formed is refused: two lone surrogates would otherwise share one signature", () => {
+		const f = lockedFixture();
+		expect(Buffer.from("\uD800", "utf8").equals(Buffer.from("\uDBFF", "utf8"))).toBe(true);
+		const base = { storeName: STORE_NAME, deviceId: "dev-james", channelId: f.channel.id, authorId: "human:james", createdAt: CLOCK };
+		expect(() => rowSigningBytes({ ...base, content: "\uD800" })).toThrow(/well-formed/);
+		expect(() => rowSigningBytes({ ...base, content: "ok", replyTo: "\uDBFF" })).toThrow(/well-formed/);
+		expect(rowSigningBytes({ ...base, content: "paired \u{1F600}" }).length).toBeGreaterThan(0);
+		// On the live path a signer cannot even produce bytes for it, and a hand-made signature does not verify.
+		expect(f.frame("human:james", { content: "\uD800", sig: VECTORS.validSigRaw, createdAt: CLOCK, deviceId: "dev-james" }).code).toBe("TABLE_VALIDATION");
+		fs.rmSync(f.tmp, { recursive: true, force: true });
+	});
+});
+
+describe("1a - tripwire: no non-test code constructs the store with the lock on", () => {
+	// This test exists so that whoever wires personLock into the daemon (slice 1a-ii) must delete it in a
+	// reviewed change, and so must face what has to be true first: (F-d) no default `human:local` actor on
+	// frames other than posts, (F-e) bindParticipant is called with mintKey=false (gateway.ts) so no person
+	// key is minted, the device list is root-owned and read-only to the store user, and 8SO's list for
+	// the wiring change is met. Do not weaken it to make a wiring change pass; remove it deliberately.
+	it("finds no `personLock:` option outside store.ts and test files under packages/ and apps/", () => {
+		const root = path.resolve(import.meta.dir, "../../..");
+		const hits: string[] = [];
+		const walk = (dir: string) => {
+			for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+				if (e.name === "node_modules" || e.name === ".git" || e.name === "dist" || e.name === ".next") continue;
+				const full = path.join(dir, e.name);
+				if (e.isDirectory()) {
+					if (e.name === "__tests__") continue;
+					walk(full);
+				} else if (/\.(ts|tsx|js|mjs|cjs)$/.test(e.name) && !/\.(test|spec)\./.test(e.name)) {
+					if (full.endsWith(path.join("packages", "table", "store.ts"))) continue;
+					if (/\bpersonLock\s*[:,}]/.test(fs.readFileSync(full, "utf8"))) hits.push(path.relative(root, full));
+				}
+			}
+		};
+		walk(path.join(root, "packages"));
+		if (fs.existsSync(path.join(root, "apps"))) walk(path.join(root, "apps"));
+		expect(hits).toEqual([]);
+	});
+});

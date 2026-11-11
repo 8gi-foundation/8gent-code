@@ -158,6 +158,10 @@ export function rowSigningBytes(input: {
 	replyTo?: string;
 	createdAt: number;
 }): Buffer {
+	// A lone surrogate encodes to U+FFFD, so two different strings would share bytes and one signature.
+	for (const f of [input.storeName, input.deviceId, input.channelId, input.authorId, input.content, input.replyTo ?? ""]) {
+		if (/\p{Surrogate}/u.test(f)) throw new TableValidationError("signed text must be well-formed (no lone surrogates)");
+	}
 	for (const f of [input.storeName, input.deviceId, input.channelId, input.authorId, input.replyTo ?? ""]) {
 		if (f.includes("\n")) throw new TableValidationError("signed fields other than content must not contain a newline");
 	}
@@ -324,6 +328,8 @@ export class TableStore {
 		deviceId?: string;
 		createdAt?: number;
 		gateActor?: boolean;
+		audioUrl?: string;
+		audioDurationMs?: number;
 	}): { createdAt: number; deviceId: string } | undefined {
 		const lock = this.personLock;
 		if (!lock || !input.authorId.startsWith("human:")) return undefined;
@@ -333,6 +339,10 @@ export class TableStore {
 		}
 		if (!PERSON_IDS.has(input.authorId)) {
 			throw new TableAuthError(`${input.authorId} may not post to this store`);
+		}
+		// Audio rides outside the signed bytes, so a person's signed post may not carry any.
+		if (input.audioUrl !== undefined || input.audioDurationMs !== undefined) {
+			throw new TableAuthError("audio fields are not allowed on a person's post under the person lock");
 		}
 		const { deviceId, sig, createdAt } = input;
 		if (!deviceId || !sig || typeof createdAt !== "number" || !Number.isInteger(createdAt)) {
@@ -363,6 +373,17 @@ export class TableStore {
 			throw new TableAuthError(`signature does not verify for device ${deviceId}`);
 		}
 		return { createdAt, deviceId };
+	}
+
+	/**
+	 * Under the lock a person's row is final: edit, delete and attach-audio would change
+	 * what a signature covers (or leave it over rewritten content), so any `human:` actor
+	 * is refused and a person reposts. Unlocked stores are unchanged.
+	 */
+	private refuseHumanMutation(actor: ParticipantId, verb: string): void {
+		if (this.personLock && actor.startsWith("human:")) {
+			throw new TableAuthError(`${actor} cannot ${verb} on a store with the person lock; post again instead`);
+		}
 	}
 
 	/** Expose the ledger for verification / inspection (e.g. tests, `ledger.verify()`). */
@@ -814,6 +835,7 @@ export class TableStore {
 		editorId: ParticipantId;
 		content: string;
 	}): Message {
+		this.refuseHumanMutation(input.editorId, "edit");
 		const row = this.getMessageRow(input.messageId);
 		if (!row || row.deleted_at !== null) {
 			throw new TableNotFoundError(`message ${input.messageId} not found`);
@@ -860,6 +882,7 @@ export class TableStore {
 		audioUrl: string;
 		audioDurationMs: number;
 	}): Message {
+		this.refuseHumanMutation(input.actorId, "attach audio");
 		const row = this.getMessageRow(input.messageId);
 		if (!row || row.deleted_at !== null) {
 			throw new TableNotFoundError(`message ${input.messageId} not found`);
@@ -892,6 +915,7 @@ export class TableStore {
 	}
 
 	deleteMessage(input: { messageId: string; deleterId: ParticipantId }): Message {
+		this.refuseHumanMutation(input.deleterId, "delete");
 		const row = this.getMessageRow(input.messageId);
 		if (!row || row.deleted_at !== null) {
 			throw new TableNotFoundError(`message ${input.messageId} not found`);
