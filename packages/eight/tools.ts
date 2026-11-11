@@ -173,7 +173,6 @@ import {
 	askMcpStartApproval,
 	mcpPolicyContext,
 } from "../permissions/mcp-gate";
-import { toolShellEnv } from "../permissions/nested-guard";
 import { filterToolOutput } from "../permissions/output-filter";
 import { type PathAccess, validatePath as guardPath } from "../permissions/path-guard.js";
 import {
@@ -279,7 +278,9 @@ import {
 	ENV_PASS_HINT,
 	GH_ENV_NAMES,
 	GIT_ENV_NAMES,
+	GIT_NON_INTERACTIVE_ENV,
 	buildChildEnv,
+	runCommandEnv,
 	withheldAny,
 } from "./harness/child-env";
 import { isErrorToolResult } from "./honesty";
@@ -652,20 +653,6 @@ export function confineRead(named: string, workingDirectory: string): string {
  * Execute a git command safely using spawn with argument arrays.
  * Prevents shell injection from LLM-generated arguments.
  */
-const GIT_NON_INTERACTIVE_ENV = {
-	GIT_TERMINAL_PROMPT: "0",
-	GIT_ASKPASS: "/usr/bin/true",
-	SSH_ASKPASS: "/usr/bin/true",
-	SSH_ASKPASS_REQUIRE: "force",
-	GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o StrictHostKeyChecking=no",
-};
-
-const SPAWN_NON_INTERACTIVE_ENV = {
-	...GIT_NON_INTERACTIVE_ENV,
-	DEBIAN_FRONTEND: "noninteractive",
-	NPM_CONFIG_YES: "true",
-};
-
 function spawnGit(args: string[], cwd: string): Promise<string> {
 	const TIMEOUT_MS = 30_000;
 	return new Promise(async (resolve) => {
@@ -4069,11 +4056,9 @@ export class ToolExecutor {
 				stdio: ["ignore", "pipe", "pipe"],
 				processGroup: true,
 				windowsShell,
-				env: toolShellEnv({
-					// The done gate hands in an already scrubbed env; everything else gets the minimal one.
-					...((env as NodeJS.ProcessEnv | undefined) ?? (buildChildEnv() as NodeJS.ProcessEnv)),
-					...SPAWN_NON_INTERACTIVE_ENV,
-				}),
+				// The done gate hands in an already scrubbed env; everything else gets the minimal one.
+				// The workspace boundary judged `$VAR` paths against this same runCommandEnv.
+				env: runCommandEnv(process.env, env),
 			});
 
 			// Registered so quitting the TUI ends it, whatever its timer does (live-shells.ts).

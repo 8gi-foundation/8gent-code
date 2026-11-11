@@ -14,6 +14,7 @@ import * as fs from "node:fs";
 import { type HomeEnv, resolveHome } from "../../core/home";
 import { isPathWithin, pathFor } from "../../core/path-within";
 import { fromLongPath } from "../../core/win-path";
+import { runCommandEnv } from "../../eight/harness/child-env";
 
 // ============================================
 // Types
@@ -36,16 +37,31 @@ export interface BoundaryCheckResult {
 /**
  * The machine a command will run on. Paths are parsed with its separator and
  * case rules, and `~`, `$VAR` and `%VAR%` expand from its environment.
- * Defaults to the current process; tests inject a foreign platform, and the
- * real filesystem is consulted only when the platform is the host's own.
+ * Defaults to the current process's platform and the environment its
+ * run_command shell gets (boundaryEnv); tests inject a foreign platform, and
+ * the real filesystem is consulted only when the platform is the host's own.
  */
 export interface BoundaryHost {
 	platform: NodeJS.Platform;
 	env: HomeEnv;
 }
 
+/**
+ * The environment a command's `$VAR` and `~` expand from: the one the run_command shell gets,
+ * built by the same function (runCommandEnv), never this process's own. A name the shell will
+ * not have expands to nothing here, as it will there, and the path that leaves is what is judged.
+ */
+export function boundaryEnv(): HomeEnv {
+	return runCommandEnv(process.env);
+}
+
 function hostOf(host: Partial<BoundaryHost> = {}): BoundaryHost {
-	return { platform: host.platform ?? process.platform, env: host.env ?? process.env };
+	return { platform: host.platform ?? process.platform, env: host.env ?? boundaryEnv() };
+}
+
+/** A word the shell fills by running code (`$(...)`, backticks): no check can know its value. */
+function substitutes(rawWord: string): boolean {
+	return /\$\(|`/.test(expandable(rawWord));
 }
 
 /**
@@ -833,6 +849,12 @@ export function extractAndCheckPaths(
 		let cwd = workspaceRoot;
 		/** The directory before the last `cd` on this line; `null` until one runs. */
 		let previous: string | null = null;
+		/** The shell keeps PWD (the folder it is in) and, after a `cd`, OLDPWD itself. */
+		const here = (): BoundaryHost => {
+			if (reading !== POSIX_SHELL) return host;
+			const env = { ...host.env, PWD: cwd };
+			return { platform, env: previous === null ? env : { ...env, OLDPWD: previous } };
+		};
 
 		/**
 		 * The scopes a word must be checked under: one, or one per combination
@@ -853,9 +875,13 @@ export function extractAndCheckPaths(
 			return scopes.length > 0 ? scopes : null;
 		};
 
-		const checkToken = (token: string): void => {
+		const checkToken = (token: string, rawWord: string): void => {
 			const operand = operandOf(token, platform);
 			if (operand === null) return;
+			if (reading === POSIX_SHELL && substitutes(rawWord)) {
+				flag(token, "<unresolved>", `Path argument ${unknown}`);
+				return;
+			}
 			const scopes = scopesFor(operand);
 			if (scopes === null) {
 				flag(token, "<unresolved>", `Path argument ${unknown}`);
@@ -865,7 +891,7 @@ export function extractAndCheckPaths(
 		};
 
 		const checkOperand = (token: string, operand: string, scope: ExpandScope): void => {
-			const candidate = expand(operand, host, reading, scope);
+			const candidate = expand(operand, here(), reading, scope);
 			if (candidate.unresolved) {
 				flag(token, "<unresolved>", `Path argument ${unknown}`);
 				return;
@@ -883,6 +909,8 @@ export function extractAndCheckPaths(
 		segments.forEach((segment, index) => {
 			const argv = tokenize(segment.text, reading.escapes);
 			if (argv.length === 0) return;
+			// The same words with their quotes, to tell `$(x)` from a quoted '$(x)'.
+			const rawArgv = words(segment.text, reading.escapes, true);
 
 			// `do cd x`, `then cd x`: the reserved words are not the command.
 			const lead = reading === POSIX_SHELL ? leadingKeywords(argv) : 0;
@@ -896,7 +924,7 @@ export function extractAndCheckPaths(
 			}
 			if (isCd && argv.length === at && reading === POSIX_SHELL) {
 				// A bare `cd` goes to $HOME.
-				const home = expand("~", host, reading, scope);
+				const home = expand("~", here(), reading, scope);
 				const resolved = resolveSafe(home.text, cwd, platform);
 				if (home.unresolved) {
 					flag(argv[lead], "<unresolved>", `cd target ${unknown}`);
@@ -914,7 +942,8 @@ export function extractAndCheckPaths(
 				const operand = operandOf(argv[at], platform) ?? argv[at];
 				// A `cd` into a loop variable lands in one place only if the loop has one value.
 				const scopes = scopesFor(operand);
-				const target = expand(operand, host, reading, scopes?.[0] ?? scope);
+				const target = expand(operand, here(), reading, scopes?.[0] ?? scope);
+				const ranCode = reading === POSIX_SHELL && substitutes(rawArgv[at] ?? "");
 				// `cd -` goes to $OLDPWD, also when a variable expands to `-` (`D=-; cd $D`).
 				const back =
 					operand === "-" || (scopes?.length === 1 && !target.unresolved && target.text === "-");
@@ -926,7 +955,7 @@ export function extractAndCheckPaths(
 					[previous, cwd] = [cwd, previous ?? cwd];
 				} else {
 					const resolved = resolveSafe(target.text, cwd, platform);
-					if (target.unresolved || plan.cdpath || scopes?.length !== 1) {
+					if (target.unresolved || ranCode || plan.cdpath || scopes?.length !== 1) {
 						flag(argv[at], "<unresolved>", `cd target ${unknown}`);
 					} else if (!isConfined(resolved, workspaceRoot, allowedAbsolutePrefixes, platform)) {
 						flag(argv[at], resolved, `cd target escapes workspace root (${workspaceRoot})`);
@@ -938,13 +967,13 @@ export function extractAndCheckPaths(
 			}
 
 			argv.forEach((token, word) => {
-				if (word >= first) checkToken(token);
+				if (word >= first) checkToken(token, rawArgv[word] ?? token);
 				const assignment = plan.assignments.find((a) => a.segment === index && a.word === word);
 				if (assignment && assignment.value !== null) {
 					const untrusted = plan.allUnresolved || plan.unresolved.has(assignment.name);
 					locals.set(
 						assignment.name,
-						untrusted ? null : assignedValue(assignment.value, host, locals, plan.home),
+						untrusted ? null : assignedValue(assignment.value, here(), locals, plan.home),
 					);
 				}
 			});

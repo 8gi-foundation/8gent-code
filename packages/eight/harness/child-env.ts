@@ -7,6 +7,8 @@
  * credential read it in-process from the parent, not through a shell.
  */
 
+import { toolShellEnv } from "../../permissions/nested-guard";
+
 type Env = Record<string, string | undefined>;
 
 /** Exact names (compared upper-case, so Windows casing works). */
@@ -146,3 +148,28 @@ export function withheldAny(
 
 export const ENV_PASS_HINT =
 	"Note: commands run with a minimal environment. To pass a variable by name, export EIGHT_SHELL_ENV_PASS=NAME in the shell that launches 8gent.";
+
+/** Git and ssh never stop to ask for a password in a tool shell. */
+export const GIT_NON_INTERACTIVE_ENV = {
+	GIT_TERMINAL_PROMPT: "0",
+	GIT_ASKPASS: "/usr/bin/true",
+	SSH_ASKPASS: "/usr/bin/true",
+	SSH_ASKPASS_REQUIRE: "force",
+	GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o StrictHostKeyChecking=no",
+};
+
+/** Installers and git never wait for a keypress in a run_command shell. */
+export const SPAWN_NON_INTERACTIVE_ENV = {
+	...GIT_NON_INTERACTIVE_ENV,
+	DEBIAN_FRONTEND: "noninteractive",
+	NPM_CONFIG_YES: "true",
+};
+
+/**
+ * The environment a run_command shell gets. The workspace boundary expands `$VAR` and `~` from
+ * this same function (src/workspace-boundary.ts), so the check and the shell cannot disagree
+ * about what a path is. `base` replaces the minimal set: the done gate hands in its own.
+ */
+export function runCommandEnv(source: Env = process.env, base?: Env): NodeJS.ProcessEnv {
+	return toolShellEnv({ ...(base ?? buildChildEnv(source)), ...SPAWN_NON_INTERACTIVE_ENV });
+}
