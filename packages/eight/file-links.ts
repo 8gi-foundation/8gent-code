@@ -71,6 +71,8 @@ function codeFiles(root: string, lim: Limits, t0: number): { files: string[]; tr
 		} catch {
 			continue;
 		}
+		// readdir order is filesystem-defined (hash order on ext4); sort so a truncated walk keeps the same files everywhere.
+		entries.sort((x, y) => (x.name < y.name ? -1 : x.name > y.name ? 1 : 0));
 		for (const e of entries) {
 			if (e.isDirectory()) {
 				if (!SKIP_DIRS.has(e.name) && !e.name.startsWith(".")) stack.push(path.join(dir, e.name));
