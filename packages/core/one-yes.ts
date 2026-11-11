@@ -11,7 +11,9 @@
  * recorded in the denial ledger (<home>/.8gent/one-yes-denials.jsonl).
  */
 
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
+import { userInfo } from "node:os";
 import * as path from "node:path";
 import { resolveHome } from "./home";
 
@@ -56,7 +58,125 @@ export interface OneYesOptions {
 
 const isSet = (v: string | undefined) => !!v && v !== "0" && v.toLowerCase() !== "false";
 
-/** CI, EIGHT_UNATTENDED, EIGHT_HEADLESS, or no terminal: nobody can answer. */
+// ---------------- Owned terminal sessions: nobody is present ----------------
+//
+// An 8gent that another 8gent opened in a terminal session (/term, term_spawn) has no person
+// at its keyboard: the keystrokes come from the model that opened it. An environment variable
+// cannot mark that, because the model types into a shell and `env -u`, `unset` or a
+// `HOME=...` prefix removes or redirects it. So the child looks at its own parents: if one is
+// a tmux server started on a socket under ~/.8gent/term (the app's private servers, see
+// terminal-tab/tmux-session.ts), it is inside an owned session. A shell cannot change who its
+// parents are. Where a platform's tmux does not show the socket path in its command line, the
+// server's pid is read from the run's owner record, which the spawner writes.
+
+/** The walk up from this process stops here, so a broken table cannot loop. */
+export const OWNED_PANE_MAX_HOPS = 32;
+
+export interface ProcessRow {
+	ppid: number;
+	command: string;
+}
+export type ProcessLookup = (pid: number) => ProcessRow | undefined;
+
+const psLookup: ProcessLookup = (pid) => {
+	try {
+		const r = spawnSync("ps", ["-ww", "-o", "ppid=,command=", "-p", String(pid)], {
+			encoding: "utf8",
+			timeout: 2000,
+		});
+		if (r.status !== 0) return undefined;
+		const m = /^\s*(\d+)\s+(\S[\s\S]*)$/.exec(r.stdout.trim());
+		return m ? { ppid: Number(m[1]), command: m[2] } : undefined;
+	} catch {
+		return undefined;
+	}
+};
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** The directories the app's private tmux sockets live in: the account's home, and the HOME in use. */
+function termDirs(env: Env): string[] {
+	const homes = new Set<string>();
+	try {
+		homes.add(userInfo().homedir);
+	} catch {
+		// no passwd entry: the env home below still applies
+	}
+	homes.add(resolveHome(env));
+	return [...homes].filter(Boolean).map((h) => path.join(h, ".8gent", "term"));
+}
+
+/** Server pids the spawner recorded: line 2 of each <run>.pid owner record. */
+function recordedServerPids(dirs: string[]): Set<number> {
+	const out = new Set<number>();
+	for (const dir of dirs) {
+		let names: string[] = [];
+		try {
+			names = fs.readdirSync(dir).filter((n) => n.endsWith(".pid"));
+		} catch {
+			continue;
+		}
+		for (const n of names) {
+			try {
+				const n2 = Number(fs.readFileSync(path.join(dir, n), "utf8").split("\n")[1]);
+				if (Number.isInteger(n2) && n2 > 1) out.add(n2);
+			} catch {
+				// unreadable record: skip it
+			}
+		}
+	}
+	return out;
+}
+
+/**
+ * True when a parent process of `pid` is a tmux server of the app's private run (see above).
+ * Walks at most OWNED_PANE_MAX_HOPS parents. A process table that cannot be read answers false.
+ */
+export function inOwnedPane(
+	opts: { pid?: number; env?: Env; lookup?: ProcessLookup; dirs?: string[] } = {},
+): boolean {
+	const env = opts.env ?? process.env;
+	const lookup = opts.lookup ?? psLookup;
+	const dirs = opts.dirs ?? termDirs(env);
+	const socketArg = new RegExp(`(?:-S\\s*|\\()(?:${dirs.map(escapeRe).join("|")})/`);
+	let servers: Set<number> | undefined;
+	const start = opts.pid ?? process.pid;
+	let pid = start;
+	let row = lookup(pid);
+	for (let hop = 0; hop < OWNED_PANE_MAX_HOPS && row; hop++) {
+		const exe = path.basename(row.command.split(/\s+/)[0] ?? "");
+		if (pid !== start && (exe === "tmux" || row.command.startsWith("tmux:"))) {
+			if (socketArg.test(row.command)) return true;
+			servers ??= recordedServerPids(dirs);
+			if (servers.has(pid)) return true;
+		}
+		if (row.ppid <= 1) return false;
+		pid = row.ppid;
+		row = lookup(pid);
+	}
+	return false;
+}
+
+let ancestryCache: boolean | undefined;
+/** The answer for this process, read once: a child's parents do not change what it was started in. */
+export function ownedPaneAncestry(): boolean {
+	ancestryCache ??= inOwnedPane();
+	return ancestryCache;
+}
+
+/**
+ * Nobody is present, whatever any setting says: EIGHT_UNATTENDED is set, or the process runs
+ * inside an owned terminal session. This outranks EIGHT_HEADLESS_APPROVE, auto-approve and
+ * Infinite mode. `ancestry` is for tests; product code leaves it to the process's own parents.
+ */
+export function forcedUnattended(
+	env: Env = process.env,
+	ancestry: boolean = ownedPaneAncestry(),
+): boolean {
+	return isSet(env.EIGHT_UNATTENDED) || ancestry;
+}
+
+/** CI, EIGHT_UNATTENDED, an owned terminal session, EIGHT_HEADLESS, or no terminal: nobody can answer. */
 export function unattended(
 	env: Env = process.env,
 	stdin: { isTTY?: boolean } = process.stdin,
@@ -64,7 +184,7 @@ export function unattended(
 ): boolean {
 	return (
 		isSet(env.CI) ||
-		isSet(env.EIGHT_UNATTENDED) ||
+		forcedUnattended(env) ||
 		isSet(env.EIGHT_HEADLESS) ||
 		!stdin.isTTY ||
 		!stdout.isTTY
@@ -105,7 +225,7 @@ export function refuseIfUnattended(
 	const output = opts.output ?? process.stdout;
 	if (!unattended(env, input, output)) return false;
 	const reason: OneYesReason =
-		isSet(env.CI) || isSet(env.EIGHT_UNATTENDED) || isSet(env.EIGHT_HEADLESS)
+		isSet(env.CI) || forcedUnattended(env) || isSet(env.EIGHT_HEADLESS)
 			? "unattended-env"
 			: "no-tty";
 	const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
@@ -145,6 +265,8 @@ export async function askOneYesDetailed(
 	const ownStream = opts.input !== undefined && opts.input !== process.stdin;
 	const envOff = isSet(env.CI) || isSet(env.EIGHT_UNATTENDED) || isSet(env.EIGHT_HEADLESS);
 	if (envOff && !ownStream) return deny("unattended-env");
+	// Where the process runs is not a stream a caller hands in: an owned session is nobody present.
+	if (ownedPaneAncestry()) return deny("unattended-env");
 	// A person answers on the input; a piped output (a log, a redirect) does not make it unattended.
 	if (!opts.assumeAttended && !input.isTTY) return deny("no-tty");
 

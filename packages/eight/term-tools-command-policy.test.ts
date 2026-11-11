@@ -449,3 +449,63 @@ describe("round two: ANSI-C quotes, literal -l text, pending lifetime", () => {
 		expect(sent).toEqual([]);
 	});
 });
+
+// S0 of the terminal session ownership spec: a line that changes the settings a child 8gent
+// runs with never goes through on policy alone. A person is asked, and No is the default.
+const ALTERING_LINES = [
+	"EIGHT_HEADLESS_APPROVE=1 8gent",
+	"env EIGHT_UNATTENDED=0 8gent",
+	"export EIGHT_UNATTENDED=0",
+	"unset EIGHT_UNATTENDED",
+	"env -u EIGHT_UNATTENDED 8gent",
+	"env -i PATH=$PATH 8gent",
+	"env --unset=EIGHT_UNATTENDED 8gent",
+	"CI=0 8gent",
+	"export CI=",
+	"unset CI",
+	"8gent --yes",
+	"8gent -y",
+	"8gent --infinite",
+	"8gent -i",
+	"cd /tmp && EIGHT_AUTO_APPROVE=1 8gent",
+];
+
+describe("a line that changes the permission settings of a child 8gent", () => {
+	test("is refused with no terminal, even with EIGHT_HEADLESS_APPROVE=1 in the test run", async () => {
+		process.env.EIGHT_HEADLESS = "1";
+		expect(process.env.EIGHT_HEADLESS_APPROVE).toBe("1");
+		for (const line of ALTERING_LINES) {
+			expect(await send(line)).toContain("[PERMISSION DENIED]");
+		}
+		expect(sent).toEqual([]);
+	});
+
+	test("asks a person in every form, naming the line, and a No sends nothing", async () => {
+		const asked: string[] = [];
+		attachTerminal(() => "deny", asked);
+		for (const line of ALTERING_LINES) {
+			asked.length = 0;
+			expect(await send(line)).toContain("[PERMISSION DENIED]");
+			expect(asked.length).toBe(1);
+			expect(asked[0]).toContain(line);
+		}
+		expect(sent).toEqual([]);
+	});
+
+	test("asks in Infinite mode too, and a person who says yes is obeyed", async () => {
+		const asked: string[] = [];
+		attachTerminal(() => "approve", asked);
+		getPermissionManager().enableInfiniteMode();
+		expect(await send("unset EIGHT_UNATTENDED")).toContain('"ok":true');
+		expect(asked.length).toBe(1);
+		expect(sent).toEqual(["unset EIGHT_UNATTENDED"]);
+	});
+
+	test("ordinary lines are not caught by the new question", async () => {
+		const { altersPermissionEnvironment } = await import("./term-tools");
+		for (const line of ["echo hi", "ls -la", "git status", "8gent --help", "print CIRCLE", "env"]) {
+			expect(altersPermissionEnvironment(line)).toBe(false);
+		}
+		for (const line of ALTERING_LINES) expect(altersPermissionEnvironment(line)).toBe(true);
+	});
+});
