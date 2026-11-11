@@ -121,6 +121,8 @@ export function bindParticipant(
 	state: { participantId?: string },
 	declared: unknown,
 	keyDir?: KeyDir,
+	/** Slice 1a: a store with a personLock never mints a key for a person (callers pass false). */
+	mintKey = true,
 ): { ok: boolean; error?: string } {
 	const pid = String(declared ?? "").trim();
 	if (!/^human:.+/.test(pid)) {
@@ -137,7 +139,7 @@ export function bindParticipant(
 	}
 	try {
 		// Live-path exercise of packages/table/identity.ts (custodied key).
-		ensureIdentity(pid, keyDir);
+		if (mintKey) ensureIdentity(pid, keyDir);
 	} catch {
 		// Key-dir issues in dev must not brick the bind; identity is best-effort
 		// custody here, the pin above is the hard guarantee.
@@ -305,7 +307,10 @@ export function handleTableFrame(deps: TableRouteDeps, msg: Record<string, unkno
 				// Unsigned frames fall through to the loopback + pinned-identity trust.
 				const sig = typeof msg.sig === "string" ? (msg.sig as string) : undefined;
 				const createdAt = typeof msg.createdAt === "number" ? (msg.createdAt as number) : undefined;
-				if (sig !== undefined) {
+				// Slice 1a: a store with a personLock verifies a P-256 device signature itself
+				// (store.postMessage); the ed25519 path below is the unlocked, unchanged one.
+				const locked = store.hasPersonLock();
+				if (sig !== undefined && !locked) {
 					if (createdAt === undefined) {
 						throw new TableError(
 							"TABLE_VALIDATION",
@@ -346,6 +351,8 @@ export function handleTableFrame(deps: TableRouteDeps, msg: Record<string, unkno
 					sig,
 					audioUrl,
 					audioDurationMs,
+					deviceId: locked && typeof msg.deviceId === "string" ? msg.deviceId : undefined,
+					createdAt: locked ? createdAt : undefined,
 				});
 				// (1) ack to sender.
 				sendRaw({ type: "message:posted", id, message });
