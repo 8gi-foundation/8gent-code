@@ -23,6 +23,7 @@ import {
 	runWithPermissionHolder,
 	systemOneEnvFor,
 } from "../permissions/permission-mode";
+import { judgedShellEnv, withShellEnv } from "../eight/harness/child-env";
 import { hostedAllowed } from "../providers/failover";
 import { currentProviderPin } from "./provider-pin";
 
@@ -62,6 +63,31 @@ async function legacyParentMode(): Promise<PermissionMode> {
 }
 
 /**
+ * The shell child's task runs through sh -c, so it meets the policy decision both run_command
+ * routes meet: the same ToolG8 gate (the workspace write boundary when a root is set, the
+ * per-segment bash check, the policy rules), with the command and the folder it runs in.
+ * Called inside the child's withShellEnv scope, so `$VAR` is judged on its shell's values.
+ * Anything short of an allow refuses, and so does a check that throws. Null: may run.
+ */
+async function runCommandPolicyRefusal(command: string, cwd: string): Promise<string | null> {
+	try {
+		const { ToolG8 } = await import("../permissions/toolg8");
+		const { blockedToolMessage } = await import("../permissions/write-content-gate");
+		const { readPrefixesFor } = await import("../eight/read-chain");
+		const prefixes = readPrefixesFor(command);
+		const result = ToolG8.instance().gate("primary", "run_command", {
+			command,
+			cwd,
+			...(prefixes ? { allowedAbsolutePrefixes: prefixes } : {}),
+		});
+		if (result.allowed) return null;
+		return blockedToolMessage("spawn_agent", false, undefined, result.reason, result.alternative);
+	} catch (err) {
+		return `[BLOCKED] spawn_agent did NOT run: the policy check could not decide (${err}). Command: ${command}`;
+	}
+}
+
+/**
  * A shell-runtime child runs its task through sh -c, so in a permission mode
  * it passes the same gate run_command does, in the child's (clamped) mode:
  * the permission check, System One (forced on in guarded), then the card
@@ -90,6 +116,9 @@ async function gateShellChild(
 			const check = pm.checkPermission(command, undefined, undefined, cwd);
 			if (check === "denied")
 				return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
+			// Before any card: a refused command is never put to the person.
+			const policy = await runCommandPolicyRefusal(command, cwd);
+			if (policy) return policy;
 			const { systemOneGate } = await import("../permissions/system-one-gate");
 			const systemOne = await systemOneGate(command, systemOneEnvFor(mode), cwd);
 			if (!systemOne.run) return systemOne.message as string;
@@ -183,7 +212,14 @@ export async function spawnAgentTool(
 		}
 
 		// CLI runtimes: claude and shell
-		if (effectiveRuntime === "claude" || effectiveRuntime === "shell") {
+		// A process child starts at this depth, so an 8gent it runs is capped too.
+		const depthEnv = { [AGENT_DEPTH_ENV]: String(currentAgentDepth() + 1) };
+		// The shell child keeps this process's environment plus its depth. Its checks below and
+		// its spawn both read that one environment (judgedShellEnv), so `$VAR` agrees.
+		if (effectiveRuntime === "shell")
+			return withShellEnv({ ...process.env, ...depthEnv }, () => startCliChild("shell"));
+		if (effectiveRuntime === "claude") return startCliChild("claude");
+		async function startCliChild(effectiveRuntime: "claude" | "shell"): Promise<string> {
 			// runtime "shell" runs the task through sh -c, so it is a shell command.
 			if (effectiveRuntime === "shell" && child) {
 				const blocked = await gateShellChild(task, workingDirectory, child);
@@ -192,6 +228,8 @@ export async function spawnAgentTool(
 				const { sanitizeShellCommand } = await import("../permissions/shell-sanitizer");
 				const validation = sanitizeShellCommand(task);
 				if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${task}`;
+				const policy = await runCommandPolicyRefusal(task, workingDirectory);
+				if (policy) return policy;
 				const { systemOneGate } = await import("../permissions/system-one-gate");
 				// Judged where it runs, so the read boundary resolves its paths there (#4880).
 				const systemOne = await systemOneGate(task, process.env, workingDirectory);
@@ -204,8 +242,7 @@ export async function spawnAgentTool(
 			const agent = spawnCLIAgent(effectiveRuntime, runTask, {
 				workingDirectory: workingDirectory,
 				timeout: timeout || undefined,
-				// A process child starts at this depth, so an 8gent it runs is capped too.
-				env: { [AGENT_DEPTH_ENV]: String(currentAgentDepth() + 1) },
+				env: effectiveRuntime === "shell" ? (judgedShellEnv() as Record<string, string>) : depthEnv,
 			});
 			return JSON.stringify(
 				{
