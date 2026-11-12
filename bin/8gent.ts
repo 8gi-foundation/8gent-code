@@ -98,8 +98,8 @@ COMMANDS:
                               --image <path> attaches one png/jpg/gif/webp: max 20 MB, downscaled to fit 2560x2560,
                               must be inside the working directory (local vision model, text-tool path only)
   doctor                      Check system health (Ollama, models, tools, config)
-  check-offline               Run a short local session with the network blocked and list the connection attempts it can see
-                              (exit 0 = none, 1 = some, 2 = no local model to run with)
+  check-offline               Run a short local session with the network blocked by the operating system and list the attempts
+                              (exit 0 = none, 1 = some, 2 = no local model, 3 = this machine cannot block the network)
   model-pin [model]           Accept the current digest and quantisation of a pinned local model
   deck render <spec.json> [out.mp4]  Render a JSON deck spec into an mp4: the same deterministic
                               renderer as the render_video_deck tool, paths inside the current directory

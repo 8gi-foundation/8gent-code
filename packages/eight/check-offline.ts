@@ -1,18 +1,24 @@
 /**
- * `8gent check-offline` (slice 1 of #240): run a short scripted local session
- * with outbound network blocked inside this process, and list every attempt.
+ * `8gent check-offline` (#240): run a short scripted session in a child process
+ * whose outbound network is denied by the operating system, and list what it
+ * tried. The verdict comes from that enforcement, never from observation.
  *
- * Refuses and records; it never sends. Loopback and unix sockets are local to
- * the device, so they pass and are not counted. It never downloads, installs or
- * calls a model off-box. Known gap: Bun gives ESM named imports of node:net,
- * node:tls, node:http(s) their own bindings, so `import { connect } from "node:net"`
- * can bypass the patch; fetch, default imports, require and Socket.connect are caught.
- * Exit 0 = no attempts, 1 = attempts, 2 = could not run.
+ * macOS: sandbox-exec with (deny network*), loopback and unix sockets allowed.
+ * Linux: unshare -rn (a new empty network namespace, loopback brought up).
+ * If neither works here it says so and exits 3. It never reports a clean run
+ * without enforcement. In-process hooks (fetch, net, tls, http(s), WebSocket,
+ * Bun.connect) only LIST attempts so the user can see who tried; they are not
+ * the guarantee. It never downloads, installs or calls a model off-box.
+ *
+ * Exit 0 = ran enforced, nothing listed. 1 = attempts listed. 2 = no local
+ * model. 3 = could not enforce, or the child did not report.
  */
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 // ESM namespaces are read-only; the CommonJS module objects can be patched.
 const req = createRequire(import.meta.url);
@@ -34,9 +40,6 @@ const LOOPBACK = new RegExp(
 	"i",
 );
 
-/** Stated in the clean-run line and pinned by a test: the scope, and what is not covered. */
-export const CLEAN_LINE =
-	"check-offline: 0 attempts seen by the fetch/net/tls/http(s)/WebSocket/Bun.connect hooks while the start-up modules loaded. Not covered: ESM named imports, DNS/UDP, workers, child processes, native code, HTTP(S)_PROXY environment variables, work after load. This is not proof that nothing leaves.";
 const HERE = path.basename(new URL(import.meta.url).pathname);
 
 function caller(): string {
@@ -194,41 +197,150 @@ export function hasLocalModel(root = path.join(os.homedir(), ".8gent", "models")
 }
 
 /** The default scripted session: load the start-up paths that could call home. */
-async function defaultSession(): Promise<void> {
+async function defaultSession(): Promise<unknown> {
 	await import("../providers/index.ts");
 	await import("../local-model-server/index.ts");
+	return undefined;
+}
+
+const MARK = "__CHECK_OFFLINE_RESULT__";
+const SANDBOX_PROFILE = [
+	"(version 1)",
+	"(allow default)",
+	"(deny network*)",
+	'(allow network* (remote ip "localhost:*"))',
+	'(allow network* (local ip "localhost:*"))',
+	"(allow network* (remote unix-socket))",
+	"(allow network* (local unix-socket))",
+].join("\n");
+
+export interface Enforcer {
+	mechanism: string;
+	wrap: (argv: string[]) => string[];
+}
+
+/** Find an OS mechanism that really works here, by running `true` under it. */
+export function findEnforcer(platform = process.platform): Enforcer | null {
+	const candidates: Enforcer[] = [];
+	if (platform === "darwin") {
+		candidates.push({
+			mechanism: "sandbox-exec",
+			wrap: (argv) => ["/usr/bin/sandbox-exec", "-p", SANDBOX_PROFILE, ...argv],
+		});
+	} else if (platform === "linux") {
+		candidates.push({
+			mechanism: "unshare -rn",
+			wrap: (argv) => [
+				"unshare",
+				"-rn",
+				"sh",
+				"-c",
+				'ip link set lo up 2>/dev/null; exec "$@"',
+				"sh",
+				...argv,
+			],
+		});
+	}
+	for (const c of candidates) {
+		const [cmd, ...args] = c.wrap(["true"]);
+		const r = spawnSync(cmd, args, { stdio: "ignore", timeout: 10000 });
+		if (r.status === 0) return c;
+	}
+	return null;
+}
+
+/** Hooks only list. Run a session with them armed and return what they saw. */
+export async function runListing(
+	session: () => Promise<unknown>,
+	hooks = true,
+): Promise<{ attempts: Attempt[]; result: unknown }> {
+	const guard = hooks ? armGuard() : { attempts: [] as Attempt[], restore() {} };
+	let result: unknown;
+	try {
+		result = await session();
+	} catch (e) {
+		if (!/check-offline: outbound/.test(String((e as Error)?.message))) {
+			result = { error: String((e as Error)?.message ?? e) };
+		}
+	} finally {
+		guard.restore();
+	}
+	return { attempts: guard.attempts, result };
+}
+
+/** The lines printed after an enforced run. Pinned by a test. */
+export function verdictLines(mechanism: string, attempts: Attempt[]): string[] {
+	const head = `check-offline: ran with outbound network blocked by the operating system (${mechanism}). ${attempts.length} attempt(s) were refused and listed below. Loopback and local sockets were allowed.`;
+	return [head, ...attempts.map((a) => `  ${a.via}  ${a.host}:${a.port}  from ${a.caller}`)];
 }
 
 export interface CheckOptions {
-	session?: () => Promise<void>;
+	/** Module (absolute path) whose default export is the scripted session. */
+	sessionFile?: string;
+	hooks?: boolean;
 	modelRoot?: string;
+	enforcer?: Enforcer | null;
 	out?: (line: string) => void;
+	/** Test seam: return the child's raw stdout for an argv instead of spawning it. */
+	spawn?: (argv: string[]) => { status: number | null; stdout: string };
 }
 
 /** Run the check and return the exit code. */
 export async function runCheckOffline(opts: CheckOptions = {}): Promise<number> {
 	const out = opts.out ?? ((l: string) => console.log(l));
-	if (!opts.session && !hasLocalModel(opts.modelRoot)) {
+	if (!opts.sessionFile && !hasLocalModel(opts.modelRoot)) {
 		out("check-offline: no local model is present, so the scripted session cannot run.");
 		out("Nothing was downloaded or contacted. Install a local model yourself, then run it again.");
 		return 2;
 	}
-	const guard = armGuard();
-	try {
-		await (opts.session ?? defaultSession)();
-	} catch (e) {
-		// A refused attempt is already recorded; any other failure is not a leak.
-		if (!/check-offline: outbound/.test(String((e as Error)?.message))) {
-			out(`check-offline: session error: ${(e as Error)?.message ?? e}`);
-		}
-	} finally {
-		guard.restore();
+	const enforcer = opts.enforcer === undefined ? findEnforcer() : opts.enforcer;
+	if (!enforcer) {
+		out(
+			"check-offline: this machine has no working way to block the network for a child process (sandbox-exec on macOS, unshare -rn on Linux).",
+		);
+		out("Nothing was run and no result is given. A clean result needs enforcement.");
+		return 3;
 	}
-	if (guard.attempts.length === 0) {
-		out(CLEAN_LINE);
-		return 0;
+	const self = fileURLToPath(import.meta.url);
+	if (!fs.existsSync(self)) {
+		out("check-offline: cannot start the isolated child from this build. Nothing was run.");
+		return 3;
 	}
-	out(`check-offline: ${guard.attempts.length} connection attempt(s) caught and refused:`);
-	for (const a of guard.attempts) out(`  ${a.via}  ${a.host}:${a.port}  from ${a.caller}`);
-	return 1;
+	const argv = enforcer.wrap([process.execPath, self, "--child"]);
+	const env = {
+		...process.env,
+		CHECK_OFFLINE_SESSION: opts.sessionFile ?? "",
+		CHECK_OFFLINE_HOOKS: opts.hooks === false ? "0" : "1",
+	};
+	const run =
+		opts.spawn ??
+		((a: string[]) => {
+			const r = spawnSync(a[0], a.slice(1), { env, encoding: "utf8", timeout: 120000 });
+			return { status: r.status, stdout: r.stdout ?? "" };
+		});
+	const r = run(argv);
+	const line = r.stdout.split("\n").find((l) => l.startsWith(MARK));
+	if (!line) {
+		out("check-offline: the isolated child did not report. Nothing is claimed.");
+		return 3;
+	}
+	const { attempts } = JSON.parse(line.slice(MARK.length)) as {
+		attempts: Attempt[];
+		result: unknown;
+	};
+	for (const l of verdictLines(enforcer.mechanism, attempts)) out(l);
+	return attempts.length === 0 ? 0 : 1;
+}
+
+/** Child entry: runs inside the OS sandbox, prints the marker line, exits. */
+async function childMain(): Promise<void> {
+	const file = process.env.CHECK_OFFLINE_SESSION;
+	const session = file ? async () => (await import(file)).default() : defaultSession;
+	const { attempts, result } = await runListing(session, process.env.CHECK_OFFLINE_HOOKS !== "0");
+	console.log(MARK + JSON.stringify({ attempts, result }));
+	process.exit(0);
+}
+
+if ((import.meta as { main?: boolean }).main && process.argv.includes("--child")) {
+	await childMain();
 }
