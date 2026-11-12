@@ -4,7 +4,7 @@
  * them. Local file only, nothing leaves the device. Text is redacted before it
  * is written. Undo is not in this slice.
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { closeSync, constants as fsc, existsSync, fchmodSync, fstatSync, mkdirSync, openSync, readFileSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { resolveHome } from "../core/home";
 import { redact } from "../memory/redact";
@@ -23,19 +23,36 @@ export interface LearnedEntry {
 export const learnedPath = (env: Record<string, string | undefined> = process.env): string =>
 	join(resolveHome(env), ".8gent", "learned.jsonl");
 
+/** Redact, then turn every C0/C1 control character (ESC, BEL, newline, ...) into a space and tidy spaces. */
+const clean = (v: string): string =>
+	redact(v)
+		.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+		.replace(/ +/g, " ")
+		.trim();
+
 /** Append one lesson. Returns false (and writes nothing) if the text is empty or the write fails. */
 export function recordLearned(
 	e: { source: string; text: string; where?: string },
 	file: string = learnedPath(),
 	now: () => Date = () => new Date(),
 ): boolean {
-	const text = redact(e.text).replace(/\s+/g, " ").trim();
-	if (!text || !e.source) return false;
-	const entry: LearnedEntry = { at: now().toISOString(), source: e.source, text };
-	if (e.where) entry.where = e.where;
+	const text = clean(e.text);
+	const source = clean(e.source);
+	if (!text || !source) return false;
+	const entry: LearnedEntry = { at: now().toISOString(), source, text };
+	const where = e.where ? clean(e.where) : "";
+	if (where) entry.where = where;
 	try {
-		mkdirSync(dirname(file), { recursive: true });
-		appendFileSync(file, `${JSON.stringify(entry)}\n`);
+		mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+		// Never through a symlink, regular file only, mode 0600 (same as openPrivate in local-runtime.ts).
+		const fd = openSync(file, fsc.O_WRONLY | fsc.O_APPEND | fsc.O_CREAT | (fsc.O_NOFOLLOW ?? 0), 0o600);
+		try {
+			if (!fstatSync(fd).isFile()) return false;
+			fchmodSync(fd, 0o600);
+			writeSync(fd, `${JSON.stringify(entry)}\n`);
+		} finally {
+			closeSync(fd);
+		}
 		return true;
 	} catch {
 		return false;
@@ -49,7 +66,7 @@ export function readLearned(file: string = learnedPath()): LearnedEntry[] {
 	for (const line of readFileSync(file, "utf8").split("\n")) {
 		try {
 			const e = JSON.parse(line);
-			if (typeof e?.text === "string" && typeof e?.source === "string") out.push(e);
+			if (typeof e?.at === "string" && typeof e?.text === "string" && typeof e?.source === "string") out.push(e);
 		} catch {}
 	}
 	return out;
@@ -61,6 +78,9 @@ export function printLearned(file: string = learnedPath()): string[] {
 	if (all.length === 0) return [`Nothing learned yet. Lessons are written to ${file}.`];
 	return [
 		`${all.length} thing${all.length === 1 ? "" : "s"} learned (${file}):`,
-		...all.map((e) => `${e.at.slice(0, 10)}  ${e.source}: ${e.text}${e.where ? ` (from ${e.where})` : ""}`),
+		...all.map(
+			(e) =>
+				`${clean(e.at).slice(0, 10)}  ${clean(e.source)}: ${clean(e.text)}${typeof e.where === "string" && clean(e.where) ? ` (from ${clean(e.where)})` : ""}`,
+		),
 	];
 }

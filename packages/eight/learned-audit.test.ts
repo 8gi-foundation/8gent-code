@@ -54,4 +54,57 @@ describe("learned audit file (#232 slice 1)", () => {
 	it("lives under the 8gent home, so EIGHT_HOME moves it", () => {
 		expect(learnedPath({ EIGHT_HOME: "/h" })).toBe("/h/.8gent/learned.jsonl");
 	});
+
+	it("strips control characters from every field at write time", () => {
+		const f = tmpFile();
+		recordLearned({ source: "mem\x1b[31mory", text: "a\x07b\x1b]0;title\x07c\u009bd", where: "s\x1b1" }, f, at);
+		const raw = fs.readFileSync(f, "utf8");
+		expect(raw.trim().split("\n")).toHaveLength(1);
+		expect(readLearned(f)[0]).toMatchObject({ source: "mem [31mory", text: "a b ]0;title c d", where: "s 1" });
+		expect(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/.test(JSON.stringify(readLearned(f)))).toBe(false);
+	});
+
+	it("strips control characters at print time, even from a hand-edited file", () => {
+		const f = tmpFile();
+		fs.mkdirSync(path.dirname(f), { recursive: true });
+		fs.writeFileSync(f, `${JSON.stringify({ at: "2026-11-12T10:00:00Z", source: "x\x1b[2J", text: "hi\x07", where: "w\x1b]0;t\x07" })}\n`);
+		const out = printLearned(f).join("\n");
+		expect(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/.test(out)).toBe(false);
+		expect(out).toContain("hi");
+	});
+
+	it("redacts source and where, not only text", () => {
+		const f = tmpFile();
+		const key = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789";
+		recordLearned({ source: key, text: "t", where: key }, f, at);
+		expect(fs.readFileSync(f, "utf8")).not.toContain("abcdefghijklmnopqrstuvwxyz0123456789");
+	});
+
+	it("a line with a non-string time is skipped, not fatal", () => {
+		const f = tmpFile();
+		recordLearned({ source: "memory", text: "ok" }, f, at);
+		fs.appendFileSync(f, `${JSON.stringify({ at: 5, source: "m", text: "bad" })}\n`);
+		expect(readLearned(f).map((e) => e.text)).toEqual(["ok"]);
+		expect(() => printLearned(f)).not.toThrow();
+	});
+
+	it("creates the file 0600 and the directory 0700, and tightens a wider file", () => {
+		const f = tmpFile();
+		recordLearned({ source: "m", text: "t" }, f, at);
+		expect(fs.statSync(f).mode & 0o777).toBe(0o600);
+		expect(fs.statSync(path.dirname(f)).mode & 0o777).toBe(0o700);
+		fs.chmodSync(f, 0o644);
+		recordLearned({ source: "m", text: "u" }, f, at);
+		expect(fs.statSync(f).mode & 0o777).toBe(0o600);
+	});
+
+	it("refuses to write through a symlink", () => {
+		const f = tmpFile();
+		fs.mkdirSync(path.dirname(f), { recursive: true });
+		const target = path.join(path.dirname(f), "elsewhere");
+		fs.writeFileSync(target, "");
+		fs.symlinkSync(target, f);
+		expect(recordLearned({ source: "m", text: "t" }, f, at)).toBe(false);
+		expect(fs.readFileSync(target, "utf8")).toBe("");
+	});
 });
