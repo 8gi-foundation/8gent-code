@@ -104,6 +104,18 @@ describe("redact: bounded time", () => {
 		for (const s of inputs) redact(s);
 		expect(performance.now() - t0).toBeLessThan(500);
 	});
+	test("a long digit run does not stall the bot-token rule (#248)", () => {
+		for (const s of [
+			"1".repeat(400_000),
+			`${"1".repeat(400_000)}:`,
+			`${"1".repeat(400_000)}:${"a".repeat(29)}`,
+			"12345678:".repeat(44_000),
+		]) {
+			const t0 = performance.now();
+			redact(s);
+			expect(performance.now() - t0).toBeLessThan(100);
+		}
+	});
 });
 
 describe("bot tokens and env-style secrets", () => {
@@ -111,6 +123,16 @@ describe("bot tokens and env-style secrets", () => {
 		const t = "123456789:AAEhBOweik6ad9r_QXv45nQSzIuPDwF9wQy";
 		expect(redact(`x ${t} y`)).not.toContain(t);
 		expect(redact(`https://api.telegram.org/bot${t}/getMe`)).not.toContain("AAEhBOwe");
+		expect(redact(`https://api.telegram.org/bot${t}/getMe`)).toBe(
+			"https://api.telegram.org/bot[REDACTED_BOT_TOKEN]/getMe",
+		);
+	});
+	test("bot ids of 5 to 16 digits are caught (ids are up to 52 bits)", () => {
+		const tail = "AAEhBOweik6ad9r_QXv45nQSzIuPDwF9wQy";
+		for (const id of ["12345", "123456", "1234567890", "123456789012", "9".repeat(13), "4503599627370495"]) {
+			expect(redact(`token ${id}:${tail} end`)).toBe("token [REDACTED_BOT_TOKEN] end");
+		}
+		expect(redact(`at 12:${tail}`)).toBe(`at 12:${tail}`);
 	});
 	test("redacts the value of a secret-named env line, keeps the name", () => {
 		const out = redact("DB_PASSWORD=p4ss\nMY_API_KEY: abc123");
