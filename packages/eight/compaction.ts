@@ -44,8 +44,9 @@ type Message = { role: string; content: string };
 /**
  * Quote text inside a summariser prompt (#226).
  *
- * The only column-0 lines in a summariser prompt are the ones this file
- * writes: block tags and `[role]:` turn headers. Quoted text gets every line
+ * Inside the conversation and previous-summary blocks, the only column-0
+ * lines are the ones this file writes: the block tags and the `[role]:`
+ * turn headers. Quoted text gets every line
  * prefixed with `| `, so whatever Unicode it holds (invisible characters,
  * fillers, combining marks, look-alike brackets) it cannot open a line like a
  * turn header or a tag. This is a structural guarantee, not a list of
