@@ -89,3 +89,42 @@ setInterval(() => {}, 1000);
 		}, 20000);
 	}
 });
+
+describe("spawnCLIAgent signal handler", () => {
+	test.skipIf(!posix)("does not re-raise when another listener exists", async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "spawner-pg-"));
+		const script = path.join(dir, "parent.ts");
+		fs.writeFileSync(
+			script,
+			`import { spawnCLIAgent } from ${JSON.stringify(path.join(import.meta.dir, "universal-spawner.ts"))};
+process.on("SIGTERM", () => {
+	console.log("handled");
+	setTimeout(() => process.exit(0), 400);
+});
+console.log(spawnCLIAgent("shell", "sleep 40", { timeout: 60000 }).process?.pid);
+setInterval(() => {}, 1000);
+`,
+		);
+		const parent = spawn(process.execPath, [script], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
+		let out = "";
+		parent.stdout?.on("data", (d) => {
+			out += d.toString();
+		});
+		const exited = new Promise<void>((r) => parent.on("close", () => r()));
+		try {
+			const end = Date.now() + 8000;
+			while (!out.includes("\n") && Date.now() < end) await new Promise((r) => setTimeout(r, 25));
+			const childPid = Number.parseInt(out.trim(), 10);
+			expect(childPid).toBeGreaterThan(0);
+			process.kill(parent.pid as number, "SIGTERM");
+			await exited;
+			expect(out.split("\n").filter((l) => l === "handled").length).toBe(1);
+			expect(await waitDead(childPid, 4000)).toBe(true);
+		} finally {
+			try {
+				process.kill(-(parent.pid as number), "SIGKILL");
+			} catch {}
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	}, 20000);
+});

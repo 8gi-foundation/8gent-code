@@ -8,9 +8,6 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import { killProcessTree, shellInvocation } from "../core/shell";
 
 // ============================================
@@ -74,8 +71,12 @@ function installExitCleanup(): void {
 		const handler = () => {
 			killAllLiveChildren();
 			process.removeListener(sig, handler);
-			// Re-raise so the default exit (or any other listener) still happens.
-			process.kill(process.pid, sig);
+			// Re-raise only when nobody else listens, so the default exit still
+			// happens. If another listener exists it already ran for this signal
+			// and owns shutdown; re-raising would run it twice. The handler is
+			// not reinstalled after one absorbed signal; the exit handler above
+			// still covers any child spawned later.
+			if (process.listenerCount(sig) === 0) process.kill(process.pid, sig);
 		};
 		process.on(sig, handler);
 	}
@@ -106,9 +107,6 @@ export function spawnCLIAgent(
 	const id = generateCLIId();
 	const workingDirectory = options.workingDirectory || process.cwd();
 	const timeout = options.timeout || 5 * 60 * 1000; // 5 minutes
-
-	// Create a temp working directory for isolation
-	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `8gent-cli-${runtime}-`));
 
 	// Determine the actual cwd: use the project's working directory, not tmp
 	// (tmp is available for scratch if needed, but commands run in project context)
@@ -178,11 +176,6 @@ export function spawnCLIAgent(
 				agent.result = result;
 			}
 
-			// Clean up temp dir
-			try {
-				fs.rmSync(tmpDir, { recursive: true, force: true });
-			} catch {}
-
 			resolve(result);
 		}, timeout);
 
@@ -217,11 +210,6 @@ export function spawnCLIAgent(
 				agent.result = result;
 			}
 
-			// Clean up temp dir
-			try {
-				fs.rmSync(tmpDir, { recursive: true, force: true });
-			} catch {}
-
 			resolve(result);
 		});
 
@@ -246,11 +234,6 @@ export function spawnCLIAgent(
 				agent.completedAt = new Date();
 				agent.result = result;
 			}
-
-			// Clean up temp dir
-			try {
-				fs.rmSync(tmpDir, { recursive: true, force: true });
-			} catch {}
 
 			resolve(result);
 		});
