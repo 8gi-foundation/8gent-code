@@ -7,6 +7,7 @@
  */
 import { generateText } from "ai";
 import type { LanguageModel } from "ai";
+import { type Facts, emptyFacts, extractFacts, renderKept } from "./compaction-facts";
 import { harnessNote } from "./context-note";
 import { chatMessages } from "./session-messages";
 import type { SessionStore } from "./session-store";
@@ -142,7 +143,7 @@ const WRITE_RE = [
 	/edit_file[^"]*"(?:file_?path|path)":\s*"([^"]+)"/gi,
 ];
 
-function extractFiles(messages: Message[]): FileTracker {
+export function extractFiles(messages: Message[]): FileTracker {
 	const tracker = new FileTracker();
 	for (const m of messages) {
 		for (const pat of READ_RE) {
@@ -169,6 +170,16 @@ export class CompactionEngine {
 	private config: CompactionConfig;
 	private fileTracker = new FileTracker();
 	protected previousSummary: string | null = null;
+	private kept: Facts = emptyFacts();
+
+	/** Pull exact facts out of history about to be summarised (#241). Returns the block to append. */
+	protected keepFacts(old: Message[]): string {
+		this.fileTracker.merge(extractFiles(old));
+		const files = [...this.fileTracker.read, ...this.fileTracker.modified];
+		this.kept = extractFacts(old, files, this.kept);
+		const block = renderKept(this.kept);
+		return block ? `\n\n${block}` : "";
+	}
 
 	constructor(config: Partial<CompactionConfig> = {}) {
 		this.config = { ...DEFAULT_COMPACTION_CONFIG, ...config };
@@ -231,8 +242,8 @@ export class CompactionEngine {
 		const toSummarize = messages.slice(1, cutPoint);
 		const toKeep = messages.slice(cutPoint);
 
-		// Track files from messages about to be discarded
-		this.fileTracker.merge(extractFiles(toSummarize));
+		// Track files and exact facts from messages about to be discarded
+		const keptBlock = this.keepFacts(toSummarize);
 
 		const conversation = serializeForSummary(toSummarize, 2000);
 		const action = this.previousSummary ? "Update" : "Create";
@@ -247,8 +258,10 @@ export class CompactionEngine {
 			maxOutputTokens: 1500,
 		});
 
-		const fullSummary = `${summary}\n\n${this.fileTracker.getSummary()}`;
-		this.previousSummary = fullSummary;
+		const baseSummary = `${summary}\n\n${this.fileTracker.getSummary()}`;
+		const fullSummary = baseSummary + keptBlock;
+		// The kept block is rebuilt each pass, so the next prompt does not carry it twice.
+		this.previousSummary = baseSummary;
 
 		// A harness note, not a system message: request builders send only the
 		// first system message, so a second one never reached the model (#3263).
@@ -477,6 +490,7 @@ export class ProactiveCompression extends CompactionEngine {
 			};
 		}
 
+		const keptBlock = this.keepFacts(old);
 		const conversation = serializeForSummary(old, 1500);
 		// An earlier summary is the base to update, not text to re-read from a
 		// truncated copy: decisions from before this window must survive.
@@ -505,7 +519,8 @@ export class ProactiveCompression extends CompactionEngine {
 			maxOutputTokens: 400,
 		});
 
-		const fullSummary = `${historySummary}\n\n## Key Questions\n${questions}\n\n## Synthesized Answers\n${answers}`;
+		const baseSummary = `${historySummary}\n\n## Key Questions\n${questions}\n\n## Synthesized Answers\n${answers}`;
+		const fullSummary = baseSummary + keptBlock;
 		const tracker = this.getFileTracker();
 
 		// A harness note, not a system message (#3263): see compact().
@@ -516,7 +531,7 @@ export class ProactiveCompression extends CompactionEngine {
 			),
 		};
 
-		this.previousSummary = fullSummary;
+		this.previousSummary = baseSummary;
 		const compacted = [systemMsg, summaryMsg, ...recent];
 		const tokensAfter = estimateMessageTokens(compacted);
 
