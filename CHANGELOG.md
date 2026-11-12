@@ -9,6 +9,26 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.48] - 2026-11-12
+
+### Added
+- eight: log first-reply wait for local runs (#229 step 1) ([#238](https://github.com/8gi-foundation/8gent-code/pull/238))
+- harness: harness protocol spec, conformance rubric and spawner adapter (flag off) ([#234](https://github.com/8gi-foundation/8gent-code/pull/234))
+- eight: opt-in KV cache type for the local server (EIGHT_KV_CACHE) ([#233](https://github.com/8gi-foundation/8gent-code/pull/233))
+
+### Changed
+- release PR commits are authored by the maintainer ([#237](https://github.com/8gi-foundation/8gent-code/pull/237))
+- Per-session usage records, a stdin reader and a sorted list (slice 1 of #222) ([#223](https://github.com/8gi-foundation/8gent-code/pull/223))
+- rows 1, 5, 6, 7 of 177 stop depending on the machine (layout, symlinks, pid length) ([#207](https://github.com/8gi-foundation/8gent-code/pull/207))
+
+### Fixed
+- compaction: one escaping serializer so a tool result cannot forge a turn (#226) ([#236](https://github.com/8gi-foundation/8gent-code/pull/236))
+- orchestration: spawnCLIAgent children lead their own process group ([#235](https://github.com/8gi-foundation/8gent-code/pull/235))
+- permissions: the workspace boundary expands variables from the command shell's own environment ([#209](https://github.com/8gi-foundation/8gent-code/pull/209))
+
+### Security
+- security: redact more token shapes and protect learned.jsonl (#243) ([#244](https://github.com/8gi-foundation/8gent-code/pull/244))
+
 ## [0.20.47] - 2026-11-11
 
 ### Fixed
