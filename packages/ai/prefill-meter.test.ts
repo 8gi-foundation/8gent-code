@@ -10,7 +10,7 @@ import * as path from "node:path";
 import type { ModelRoundEntry } from "../specifications/session/index";
 import { SessionWriter } from "../specifications/session/writer";
 import { parseRounds, totals } from "./prefill-report";
-import { _resetQwenVariantCache, buildTextToolCall, prefixMeterSink } from "./text-tool-endpoint";
+import { _resetQwenVariantCache, buildTextToolCall, firstReplyLog, prefixMeterSink } from "./text-tool-endpoint";
 
 const realFetch = globalThis.fetch;
 const dirs: string[] = [];
@@ -152,5 +152,28 @@ describe("prefill report totals", () => {
 			genMs: 3500,
 			estimated: 1,
 		});
+	});
+});
+
+describe("first reply log (#229 step 1)", () => {
+	it("writes one line for the first request only, with no prompt text", async () => {
+		stubChat();
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "first-reply-"));
+		dirs.push(dir);
+		const file = path.join(dir, "logs", "prefill-times.jsonl");
+		const call = buildTextToolCall({ provider: "ollama", model: "m", onRound: firstReplyLog("m", file) });
+		await call(MESSAGES);
+		await call(MESSAGES);
+		const lines = fs.readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toMatchObject({ model: "m", promptTokens: 1200 });
+		expect(lines[0].firstReplyMs).toBeGreaterThanOrEqual(0);
+		expect(JSON.stringify(lines[0])).not.toContain("fix the tests");
+	});
+
+	it("an unwritable path never breaks the reply", async () => {
+		stubChat();
+		const call = buildTextToolCall({ provider: "ollama", model: "m", onRound: firstReplyLog("m", "/dev/null/x/y.jsonl") });
+		expect(await call(MESSAGES)).toBe("done");
 	});
 });

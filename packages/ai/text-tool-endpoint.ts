@@ -24,6 +24,8 @@ import {
 	resolveStreamIdleMs,
 	resolveTurnTimeoutMs,
 } from "../eight/turn-timeout";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { isKnownVisionModel } from "../eight/vision-router";
 import {
 	DEFAULT_OLLAMA_BASE_URL,
@@ -209,6 +211,25 @@ export function prefixMeterSink(
 	env: Record<string, string | undefined> = process.env,
 ): ((r: ModelRound) => void) | undefined {
 	return env.EIGHT_PREFIX_METER === "1" ? (r) => writer.writeModelRound(r) : undefined;
+}
+
+/**
+ * #229 step 1: how long the first reply of a turn takes to arrive on a local
+ * run. Appends one line (time, model, prompt tokens, firstReplyMs) to the given
+ * file for the turn's first request only. Local file, no prompt text, never
+ * throws. Call it for on-box runs.
+ */
+export function firstReplyLog(model: string, file: string): (r: ModelRound) => void {
+	let done = false;
+	return (r) => {
+		if (done) return;
+		done = true;
+		try {
+			mkdirSync(dirname(file), { recursive: true });
+			const line = { at: new Date().toISOString(), model, promptTokens: r.promptTokens, firstReplyMs: r.headersMs };
+			appendFileSync(file, `${JSON.stringify(line)}\n`);
+		} catch {}
+	};
 }
 
 /**
