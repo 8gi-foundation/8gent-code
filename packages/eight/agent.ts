@@ -2174,6 +2174,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			startedAt: chatStartTime,
 			nudgeFraction: this.harnessProfileFor(providerModel, true).nudgeFraction,
 		});
+		const firstReplyOnce = { done: false }; // one first-reply line per turn, even across a reroute
 		const runTurn = (provider: string, model: string) => {
 			// #3487: the built prompt was judged on-box for the session's runtime. If
 			// this turn goes to a provider whose endpoint is off this machine (a
@@ -2210,7 +2211,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				onRound: (() => {
 					const meter = prefixMeterSink(this.sessionWriter);
 					if (!runsOnBox(provider, this.config.baseUrl || resolveTextToolEndpoint(provider))) return meter;
-					const first = firstReplyLog(model, path.join(resolveHome(), ".8gent", "logs", "prefill-times.jsonl"));
+					const first = firstReplyLog(model, path.join(resolveHome(), ".8gent", "logs", "prefill-times.jsonl"), firstReplyOnce);
 					return (r) => {
 						meter?.(r);
 						first(r);
