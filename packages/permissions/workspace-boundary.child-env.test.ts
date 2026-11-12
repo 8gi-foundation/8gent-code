@@ -385,7 +385,9 @@ describe("a new spawner cannot skip the shared environment", () => {
 
 	test("the shell runtime's caller binds and passes the judged environment", () => {
 		const text = read("packages/orchestration/delegation-tools.ts");
-		expect(text).toContain("withShellEnv({ ...process.env, ...depthEnv }");
-		expect(text).toContain('env: effectiveRuntime === "shell" ? (judgedShellEnv() as Record<string, string>)');
+		expect(text).toContain("withShellEnv({ ...process.env, ...childAgentEnv() }");
+		expect(text).toContain("env: judgedShellEnv() as Record<string, string>");
+		// spawn_agent starts the child with the planned environment, not one of its own.
+		expect(text).toContain("env: plan.env");
 	});
 });

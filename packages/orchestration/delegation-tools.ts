@@ -7,6 +7,7 @@
  * (#3112), which a native-path Orchestrator never saw.
  */
 
+import { judgedShellEnv, withShellEnv } from "../eight/harness/child-env";
 import {
 	type PermissionMode,
 	type PermissionModeHolder,
@@ -23,7 +24,6 @@ import {
 	runWithPermissionHolder,
 	systemOneEnvFor,
 } from "../permissions/permission-mode";
-import { judgedShellEnv, withShellEnv } from "../eight/harness/child-env";
 import { hostedAllowed } from "../providers/failover";
 import { currentProviderPin } from "./provider-pin";
 
@@ -92,7 +92,8 @@ async function gateShellChild(
 			if (check === "denied")
 				return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
 			const { systemOneGate } = await import("../permissions/system-one-gate");
-			const systemOne = await systemOneGate(command, systemOneEnvFor(mode), cwd);
+			// The env the child is started with, so a `$VAR` is judged as the shell will see it.
+			const systemOne = await systemOneGate(command, systemOneEnvFor(mode, judgedShellEnv()), cwd);
 			if (!systemOne.run) return systemOne.message as string;
 			const dangerous = isCommandDangerous(command);
 			if (
@@ -136,6 +137,115 @@ export function checkAgentWaitMs(): number {
 	return Number.isFinite(ms) && ms >= 0 ? ms : 90_000;
 }
 
+/**
+ * The child's permission holder (#3170): it inherits the caller's mode and is
+ * never more permissive; a requested mode is clamped to the caller's. A caller
+ * in plan mode may not start a child at all. No mode bound and none requested:
+ * no holder, exactly the behaviour before modes.
+ */
+async function childPermission(
+	permissionMode: unknown,
+): Promise<{ refusal: string } | { child: PermissionModeHolder | undefined }> {
+	const requested = isPermissionMode(permissionMode) ? permissionMode : undefined;
+	const parent = currentPermissionHolder();
+	if (parent) {
+		if (effectivePermissionMode(parent) === "plan")
+			return { refusal: (await planModeRefusal("spawn_agent", {})) as string };
+		return { child: createChildHolder(parent, requested) };
+	}
+	if (requested)
+		return { child: createPermissionHolder(clampChildMode(await legacyParentMode(), requested)) };
+	return { child: undefined };
+}
+
+/** The hosted CLI runtime's id. */
+export const HOSTED_CLI_RUNTIME = "claude";
+
+/** A process runtime: the hosted CLI or sh -c. */
+export type ProcessChildRuntime = typeof HOSTED_CLI_RUNTIME | "shell";
+
+/** What to start once every check passed, or why nothing may start. */
+export type ProcessChildPlan =
+	| { run: false; refusal: string }
+	| { run: true; runtime: ProcessChildRuntime; task: string; env: Record<string, string> };
+
+/**
+ * Every check a process child passes before it is started, and what to start.
+ * spawn_agent and the harness protocol's SpawnerHarness both call this, so
+ * neither can start a process the other would refuse.
+ *
+ * There is no caller-supplied environment: the child gets this process's
+ * environment plus its depth, and a shell child is judged with exactly that
+ * (judgedShellEnv). Any name a caller could set changes what an allowed
+ * command does (git config, HOME, PATH, shell options), so none is taken.
+ */
+export async function planProcessChild(opts: {
+	runtime: ProcessChildRuntime;
+	task: string;
+	cwd: string;
+	permissionMode?: unknown;
+}): Promise<ProcessChildPlan> {
+	const { runtime, task, cwd } = opts;
+	if (runtime !== "shell" && runtime !== HOSTED_CLI_RUNTIME)
+		return { run: false, refusal: `Not started: "${String(runtime)}" is not a process runtime.` };
+	// Recursion cap (#3331): refused before anything is resolved or started.
+	const { agentDepthRefusal, childAgentEnv } = await import("./index");
+	const depthRefusal = agentDepthRefusal();
+	if (depthRefusal) return { run: false, refusal: depthRefusal };
+
+	const perm = await childPermission(opts.permissionMode);
+	if ("refusal" in perm) return { run: false, refusal: perm.refusal };
+	const { child } = perm;
+
+	// The hosted CLI runtime sends the task to a hosted model: opt-in first, whatever the mode (#3710).
+	if (runtime === HOSTED_CLI_RUNTIME) {
+		const hosted = claudeHostedRefusal();
+		if (hosted) return { run: false, refusal: hosted };
+		if (child) {
+			const refusal = claudeRuntimeRefusal(effectivePermissionMode(child));
+			if (refusal) return { run: false, refusal };
+		}
+		// A pinned session never starts a CLI child on another provider (#3762).
+		// "shell" is not a model provider; only the hosted CLI runtime can differ from the pin.
+		const pin = currentProviderPin();
+		if (pin && pin.runtime !== HOSTED_CLI_RUNTIME) {
+			return {
+				run: false,
+				refusal: `Not started: this session is pinned to ${pin.runtime}, so it will not start a claude CLI agent. Use the 8gent runtime to stay on ${pin.runtime}.`,
+			};
+		}
+		// A process child starts at this depth, so an 8gent it runs is capped too.
+		return { run: true, runtime, task, env: childAgentEnv() };
+	}
+
+	// The shell child keeps this process's environment plus its depth. Its checks and its
+	// spawn both read that one environment (judgedShellEnv), so `$VAR` agrees.
+	return withShellEnv({ ...process.env, ...childAgentEnv() }, async () => {
+		// runtime "shell" runs the task through sh -c, so it is a shell command.
+		if (child) {
+			const blocked = await gateShellChild(task, cwd, child);
+			if (blocked) return { run: false, refusal: blocked } as const;
+		} else {
+			const { sanitizeShellCommand } = await import("../permissions/shell-sanitizer");
+			const validation = sanitizeShellCommand(task);
+			if (!validation.safe)
+				return { run: false, refusal: `[BLOCKED] ${validation.reason}. Command: ${task}` } as const;
+			const { systemOneGate } = await import("../permissions/system-one-gate");
+			// Judged where it runs, so the read boundary resolves its paths there (#4880).
+			const systemOne = await systemOneGate(task, judgedShellEnv(), cwd);
+			if (!systemOne.run) return { run: false, refusal: systemOne.message as string } as const;
+		}
+		// A read-only inline python the allowlist admits runs isolated (-I): no cwd imports.
+		const { isolatedInlinePython } = await import("../permissions/s1-inline-python");
+		return {
+			run: true,
+			runtime,
+			task: isolatedInlinePython(task),
+			env: judgedShellEnv() as Record<string, string>,
+		} as const;
+	});
+}
+
 export async function spawnAgentTool(
 	workingDirectory: string,
 	task: string,
@@ -147,85 +257,44 @@ export async function spawnAgentTool(
 ): Promise<string> {
 	try {
 		// Recursion cap (#3331): refused before anything is resolved or started.
-		const { agentDepthRefusal, currentAgentDepth, AGENT_DEPTH_ENV } = await import("./index");
+		const { agentDepthRefusal } = await import("./index");
 		const depthRefusal = agentDepthRefusal();
 		if (depthRefusal) return depthRefusal;
 
 		const effectiveRuntime = runtime || "8gent";
 
-		// Permission modes (#3170). The child inherits the caller's mode and is
-		// never more permissive: a requested mode is clamped to the caller's.
-		// No mode bound and none requested: exactly today's behaviour.
-		const requested = isPermissionMode(permissionMode) ? permissionMode : undefined;
-		const parent = currentPermissionHolder();
-		let child: PermissionModeHolder | undefined;
-		if (parent) {
-			const parentMode = effectivePermissionMode(parent);
-			if (parentMode === "plan") return (await planModeRefusal("spawn_agent", {})) as string;
-			child = createChildHolder(parent, requested);
-		} else if (requested) {
-			child = createPermissionHolder(clampChildMode(await legacyParentMode(), requested));
-		}
-		// The claude runtime is a hosted model: opt-in first, whatever the mode (#3710).
-		if (effectiveRuntime === "claude") {
-			const hosted = claudeHostedRefusal();
-			if (hosted) return hosted;
-		}
-		if (child && effectiveRuntime === "claude") {
-			const refusal = claudeRuntimeRefusal(effectivePermissionMode(child));
-			if (refusal) return refusal;
-		}
-
-		// A pinned session never starts a CLI child on another provider (#3762).
-		// "shell" is not a model provider; only "claude" can differ from the pin.
-		const pin = currentProviderPin();
-		if (pin && effectiveRuntime === "claude" && pin.runtime !== "claude") {
-			return `Not started: this session is pinned to ${pin.runtime}, so it will not start a claude CLI agent. Use the 8gent runtime to stay on ${pin.runtime}.`;
-		}
-
-		// CLI runtimes: claude and shell
-		// A process child starts at this depth, so an 8gent it runs is capped too.
-		const depthEnv = { [AGENT_DEPTH_ENV]: String(currentAgentDepth() + 1) };
-		// The shell child keeps this process's environment plus its depth. Its checks below and
-		// its spawn both read that one environment (judgedShellEnv), so `$VAR` agrees.
-		if (effectiveRuntime === "shell")
-			return withShellEnv({ ...process.env, ...depthEnv }, () => startCliChild("shell"));
-		if (effectiveRuntime === "claude") return startCliChild("claude");
-		async function startCliChild(effectiveRuntime: "claude" | "shell"): Promise<string> {
-			// runtime "shell" runs the task through sh -c, so it is a shell command.
-			if (effectiveRuntime === "shell" && child) {
-				const blocked = await gateShellChild(task, workingDirectory, child);
-				if (blocked) return blocked;
-			} else if (effectiveRuntime === "shell") {
-				const { sanitizeShellCommand } = await import("../permissions/shell-sanitizer");
-				const validation = sanitizeShellCommand(task);
-				if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${task}`;
-				const { systemOneGate } = await import("../permissions/system-one-gate");
-				// Judged where it runs, so the read boundary resolves its paths there (#4880).
-				const systemOne = await systemOneGate(task, process.env, workingDirectory);
-				if (!systemOne.run) return systemOne.message as string;
-			}
+		// Every runtime but 8gent goes through the one shared gate, which refuses a string that
+		// is not a process runtime: an unknown runtime fails closed.
+		if (effectiveRuntime !== "8gent") {
+			const plan = await planProcessChild({
+				runtime: effectiveRuntime,
+				task,
+				cwd: workingDirectory,
+				permissionMode,
+			});
+			if (!plan.run) return plan.refusal;
 			const { spawnCLIAgent } = await import("./index");
-			// A read-only inline python the allowlist admits runs isolated (-I): no cwd imports.
-			const { isolatedInlinePython } = await import("../permissions/s1-inline-python");
-			const runTask = effectiveRuntime === "shell" ? isolatedInlinePython(task) : task;
-			const agent = spawnCLIAgent(effectiveRuntime, runTask, {
+			const agent = spawnCLIAgent(plan.runtime, plan.task, {
 				workingDirectory: workingDirectory,
 				timeout: timeout || undefined,
-				env: effectiveRuntime === "shell" ? (judgedShellEnv() as Record<string, string>) : depthEnv,
+				env: plan.env,
 			});
 			return JSON.stringify(
 				{
 					agentId: agent.id,
-					runtime: effectiveRuntime,
+					runtime: plan.runtime,
 					status: "running",
 					task: task.slice(0, 100),
-					message: `CLI agent ${agent.id} (${effectiveRuntime}) spawned and running. Use check_agent("${agent.id}") to check status.`,
+					message: `CLI agent ${agent.id} (${plan.runtime}) spawned and running. Use check_agent("${agent.id}") to check status.`,
 				},
 				null,
 				2,
 			);
 		}
+
+		const perm = await childPermission(permissionMode);
+		if ("refusal" in perm) return perm.refusal;
+		const { child } = perm;
 
 		// Default: 8gent runtime, on the parent session's provider (#3710). A
 		// hosted model is resolved and used only with EIGHT_ALLOW_HOSTED=1.
