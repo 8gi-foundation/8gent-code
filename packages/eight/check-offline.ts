@@ -28,7 +28,15 @@ export interface Attempt {
 	caller: string;
 }
 
-const LOOPBACK = /^(localhost|127(\.\d{1,3}){3}|::1|\[::1\])$/i;
+const OCTET = "(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)";
+const LOOPBACK = new RegExp(
+	`^(localhost|127\\.${OCTET}\\.${OCTET}\\.${OCTET}|::1|\\[::1\\])$`,
+	"i",
+);
+
+/** Stated in the clean-run line and pinned by a test: the scope, and what is not covered. */
+export const CLEAN_LINE =
+	"check-offline: 0 attempts seen by the fetch/net/tls/http(s)/WebSocket/Bun.connect hooks while the start-up modules loaded. Not covered: ESM named imports, DNS/UDP, workers, child processes, native code, HTTP(S)_PROXY environment variables, work after load. This is not proof that nothing leaves.";
 const HERE = path.basename(new URL(import.meta.url).pathname);
 
 function caller(): string {
@@ -56,13 +64,27 @@ export function armGuard(): { attempts: Attempt[]; restore: () => void } {
 		throw new Error(`check-offline: outbound ${via} to ${host}:${port} refused`);
 	};
 	const local = (host: string) => LOOPBACK.test(host);
+	const hasLookup = (o: any) => !!o && typeof o === "object" && o.lookup !== undefined;
+	/** Decide a host/port connect call; returns true when it may proceed. */
+	const allow = (via: string, args: any[]): boolean => {
+		const o = args[0];
+		if (typeof o === "string" && !/^\d+$/.test(o)) return true;
+		if (o && typeof o === "object" && o.path) return true;
+		const host = String((o && typeof o === "object" ? o.host : args[1]) ?? "localhost");
+		const port = String(o && typeof o === "object" ? o.port : o);
+		if (args.some(hasLookup)) refuse(via, host, port);
+		if (!local(host)) refuse(via, host, port);
+		return true;
+	};
 
 	const origFetch = globalThis.fetch;
 	globalThis.fetch = ((input: unknown, init?: unknown) => {
 		const { host, port } = parseUrl(input);
-		if (local(host)) return (origFetch as any)(input, init);
+		const i = init as any;
+		if (local(host) && !i?.proxy && !i?.unix && !hasLookup(i))
+			return (origFetch as any)(input, init);
 		try {
-			refuse("fetch", host, port);
+			refuse("fetch", i?.proxy ? `${host} via proxy` : i?.unix ? `${host} via unix` : host, port);
 		} catch (e) {
 			return Promise.reject(e);
 		}
@@ -70,13 +92,8 @@ export function armGuard(): { attempts: Attempt[]; restore: () => void } {
 
 	const origConnect = net.Socket.prototype.connect;
 	(net.Socket.prototype as any).connect = function (...args: any[]) {
-		const o = args[0];
-		if (typeof o === "string" && !/^\d+$/.test(o)) return origConnect.apply(this, args as any);
-		if (o && typeof o === "object" && o.path) return origConnect.apply(this, args as any);
-		const host = (o && typeof o === "object" ? o.host : args[1]) ?? "localhost";
-		const port = String(o && typeof o === "object" ? o.port : o);
-		if (local(String(host))) return origConnect.apply(this, args as any);
-		return refuse("net", String(host), port);
+		allow("net", args);
+		return origConnect.apply(this, args as any);
 	};
 
 	const origNetConnect = net.connect;
@@ -84,24 +101,16 @@ export function armGuard(): { attempts: Attempt[]; restore: () => void } {
 	const guardedConnect =
 		(orig: (...a: any[]) => net.Socket) =>
 		(...args: any[]) => {
-			const o = args[0];
-			if (typeof o === "string" && !/^\d+$/.test(o)) return orig(...args);
-			if (o && typeof o === "object" && o.path) return orig(...args);
-			const host = (o && typeof o === "object" ? o.host : args[1]) ?? "localhost";
-			const port = String(o && typeof o === "object" ? o.port : o);
-			if (local(String(host))) return orig(...args);
-			return refuse("net", String(host), port);
+			allow("net", args);
+			return orig(...args);
 		};
 	(net as any).connect = guardedConnect(origNetConnect as any);
 	(net as any).createConnection = guardedConnect(origCreate as any);
 
 	const origTls = tls.connect;
 	(tls as any).connect = (...args: any[]) => {
-		const o = args[0];
-		const host = (o && typeof o === "object" ? o.host : args[1]) ?? "localhost";
-		const port = String(o && typeof o === "object" ? o.port : o);
-		if (local(String(host))) return (origTls as any)(...args);
-		return refuse("tls", String(host), port);
+		allow("tls", args);
+		return (origTls as any)(...args);
 	};
 
 	const origReq = [http.request, https.request];
@@ -112,6 +121,7 @@ export function armGuard(): { attempts: Attempt[]; restore: () => void } {
 			const u = typeof a === "string" || a instanceof URL ? new URL(String(a)) : null;
 			const host = u ? u.hostname : (a?.hostname ?? a?.host ?? "localhost");
 			const port = u ? u.port : String(a?.port ?? (name === "http" ? 80 : 443));
+			if (args.some(hasLookup)) return refuse(name, String(host), port);
 			if (a?.socketPath || local(String(host))) return (orig as any)(...args);
 			return refuse(name, String(host), port);
 		};
@@ -125,9 +135,33 @@ export function armGuard(): { attempts: Attempt[]; restore: () => void } {
 	wrap(http, "http");
 	wrap(https, "https");
 
+	const origWS = (globalThis as any).WebSocket;
+	if (origWS) {
+		(globalThis as any).WebSocket = new Proxy(origWS, {
+			construct(target, args) {
+				const { host, port } = parseUrl(args[0]);
+				if (!local(host) || hasLookup(args[1])) refuse("websocket", host, port);
+				return Reflect.construct(target, args);
+			},
+		});
+	}
+	const bun = (globalThis as any).Bun;
+	const origBunConnect = bun?.connect;
+	if (origBunConnect) {
+		bun.connect = (o: any, ...rest: any[]) => {
+			if (!o?.unix) {
+				const host = String(o?.hostname ?? "localhost");
+				if (!local(host) || hasLookup(o)) refuse("bun.connect", host, String(o?.port ?? ""));
+			}
+			return origBunConnect.call(bun, o, ...rest);
+		};
+	}
+
 	return {
 		attempts,
 		restore() {
+			if (origWS) (globalThis as any).WebSocket = origWS;
+			if (origBunConnect) bun.connect = origBunConnect;
 			globalThis.fetch = origFetch;
 			net.Socket.prototype.connect = origConnect;
 			(net as any).connect = origNetConnect;
@@ -191,7 +225,7 @@ export async function runCheckOffline(opts: CheckOptions = {}): Promise<number> 
 		guard.restore();
 	}
 	if (guard.attempts.length === 0) {
-		out("check-offline: 0 connection attempts. Nothing left this device.");
+		out(CLEAN_LINE);
 		return 0;
 	}
 	out(`check-offline: ${guard.attempts.length} connection attempt(s) caught and refused:`);
