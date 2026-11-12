@@ -59,8 +59,15 @@ const PATTERNS: Array<[RegExp, string]> = [
 	// so "passwordless: true" and prose like "the password field" are left alone.
 	// A quoted JSON key ("password":) is matched too, and a quoted value is redacted
 	// up to its closing quote, so "correct horse battery" does not leak its tail.
+	// Escaped JSON inside a string (\"password\":\"x\") is matched too: the value runs
+	// up to the escaped closing quote and that quote is kept (#247).
+	// Escapes are read as whole units before the closing quote is looked for, so an
+	// escaped quote inside the value never ends it early. Plain JSON: \" and \\ are units.
+	// Escaped JSON: \\ plus the next unit (\\\" is the value's own quote, \\\\ its own
+	// backslash) and \x are units, and \" is the close. Each step has one choice, so the
+	// rule stays linear.
 	[
-		/\b([A-Za-z0-9_]*pass(?:word|wd))(["']?\s*[=:]\s*)(["']?)(?!\[REDACTED)(?:(?<=")[^"\n]+|(?<=')[^'\n]+|[^\s'"]+)/gi,
+		/\b([A-Za-z0-9_]*pass(?:word|wd))((?:\\"|["'])?\s*[=:]\s*)(\\"|["']|)(?!\[REDACTED)(?:(?<=\\")(?=[^\\\n]|\\\\(?:\\[^\n]|[^\\\n])|\\[^"\\\n])[^\\\n]*(?:(?:\\\\(?:\\[^\n]|[^\\\n])|\\[^"\\\n])[^\\\n]*)*|(?<=(?<!\\)")(?=[^"\n])[^"\\\n]*(?:\\[^\n][^"\\\n]*)*|(?<=')[^'\n]+|(?!\\["'])[^\s'"]+)/gi,
 		"$1$2$3[REDACTED_SECRET]",
 	],
 	// Credentials inside a URL: scheme://user:pass@host keeps scheme and host

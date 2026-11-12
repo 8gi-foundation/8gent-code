@@ -402,21 +402,44 @@ export function validatePath(
 /**
  * True when a shell command names an agent audit file or directory. A speed
  * bump, not a parser: the file-tool checks above are the boundary. Quoting,
- * escapes and string concatenation are stripped before matching (#3735).
+ * escapes and string concatenation are stripped before matching (#3735), and
+ * `/./` and `dir/../` are collapsed, so `~/.8gent/x/../audit.jsonl` reads as the file (#247).
  */
 export function commandTouchesAuditFiles(command: string): boolean {
 	const dataDir = process.env.EIGHT_DATA_DIR;
-	const flat = command
+	let flat = command
 		.replace(/["'`\\]/g, "")
 		.replace(/\s*\+\s*/g, "")
 		.toLowerCase();
+	flat = flat.replace(/[^\s=;&|()<>]+/g, (t) => (t.includes("/.") ? collapseDotSegments(t) : t));
 	if (/(?:^|[^a-z0-9_-])(?:permissions-)?audit\.jsonl\b/.test(flat)) return true;
 	if (/\.8gent\/+audit\b/.test(flat)) return true;
 	if (dataDir) {
 		const d = dataDir.toLowerCase().replace(/\/+$/, "");
 		if (flat.includes(`${d}/audit`) || flat.includes(`${d}/permissions-audit`)) return true;
 	}
+	// The record of what the harness learned (#247), under ~/.8gent (which also covers
+	// $EIGHT_HOME/.8gent) or a relocated data dir. A learned.jsonl in the workspace is not it.
+	if (/\.8gent\/+learned\.jsonl\b/.test(flat)) return true;
+	if (dataDir) {
+		const d = dataDir.replace(/["'`\\]/g, "").toLowerCase().replace(/\/+$/, "");
+		if (new RegExp(`${escapeRe(d)}/+learned\\.jsonl\\b`).test(flat)) return true;
+	}
 	return false;
+}
+
+/** `a/./b` -> `a/b` and `a/x/../b` -> `a/b`, one pass. A leading `..` has nothing to drop and stays. */
+function collapseDotSegments(token: string): string {
+	const out: string[] = [];
+	for (const seg of token.split("/")) {
+		if (seg === "." && out.length > 0) continue;
+		if (seg === ".." && out.length > 0 && out[out.length - 1] !== ".." && out[out.length - 1] !== "") {
+			out.pop();
+			continue;
+		}
+		out.push(seg);
+	}
+	return out.join("/");
 }
 
 const MUTATING_VERB =

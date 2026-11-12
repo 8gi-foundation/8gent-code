@@ -10,8 +10,15 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { validatePath } from "../permissions/path-guard";
+import { commandTouchesAuditFiles, validatePath } from "../permissions/path-guard";
 import { evaluatePolicy } from "../permissions/policy-engine";
+import {
+	PROTECTED_DATA_FILES,
+	buildBwrapArgs,
+	buildRunCommandProfile,
+	protectedRunCommandPaths,
+	refreshSecurityEnvForTests,
+} from "../permissions/run-command-sandbox";
 import { redact } from "./redact";
 
 const GOOGLE = `AIza${"Sy9_xQ-2bK".repeat(3)}${"Lm4pT"}`; // 4 + 35
@@ -61,6 +68,62 @@ describe("#243 redact: new token shapes are removed", () => {
 		const out = redact(`password: "correct horse battery"`);
 		expect(out).toBe(`password: "[REDACTED_SECRET]"`);
 		expect(out).not.toContain("horse");
+	});
+	test("escaped JSON password keys inside a string (#247)", () => {
+		const bs = "\\";
+		const esc = (s: string) => s.replaceAll('"', `${bs}"`);
+		expect(redact(esc(`{"password":"x"}`))).toBe(esc(`{"password":"[REDACTED_SECRET]"}`));
+		expect(redact(esc(`{"db_password" : "correct horse"}`))).toBe(
+			esc(`{"db_password" : "[REDACTED_SECRET]"}`),
+		);
+		const nested = `{"msg":"${esc(`{"password":"hunter2","user":"a"}`)}"}`;
+		const out = redact(nested);
+		expect(out).not.toContain("hunter2");
+		expect(out).toBe(`{"msg":"${esc(`{"password":"[REDACTED_SECRET]","user":"a"}`)}"}`);
+		// an escaped backslash inside the value does not end it early
+		expect(redact(`${bs}"password${bs}":${bs}"a${bs}${bs}b c${bs}"`)).toBe(
+			`${bs}"password${bs}":${bs}"[REDACTED_SECRET]${bs}"`,
+		);
+		// an empty escaped value is left as it is
+		expect(redact(esc(`{"password":""}`))).toBe(esc(`{"password":""}`));
+	});
+	test("an escaped quote inside the value does not end it early (8SO on #249)", () => {
+		const bs = "\\";
+		// escaped JSON whose value holds its own quote: \"hun\\\"ter2\"
+		const inEscaped = `${bs}"password${bs}":${bs}"hun${bs}${bs}${bs}"ter2${bs}"`;
+		expect(redact(inEscaped)).toBe(`${bs}"password${bs}":${bs}"[REDACTED_SECRET]${bs}"`);
+		expect(redact(inEscaped)).not.toContain("ter2");
+		// plain JSON whose value holds an escaped quote: {"password":"a\"b"}
+		const plain = `{"password":"a${bs}"b","user":"u"}`;
+		expect(redact(plain)).toBe(`{"password":"[REDACTED_SECRET]","user":"u"}`);
+		// a value that ends in its own backslash still stops at the real close
+		expect(redact(`{"password":"ab${bs}${bs}","user":"u"}`)).toBe(
+			`{"password":"[REDACTED_SECRET]","user":"u"}`,
+		);
+		expect(
+			redact(`${bs}"password${bs}":${bs}"ab${bs}${bs}${bs}${bs}${bs}", ${bs}"user${bs}":${bs}"u${bs}"`),
+		).toBe(`${bs}"password${bs}":${bs}"[REDACTED_SECRET]${bs}", ${bs}"user${bs}":${bs}"u${bs}"`);
+	});
+	test("the password rule stays linear on 400k characters", () => {
+		const bs = "\\";
+		const n = 400_000;
+		const inputs = [
+			`${bs}"password${bs}":${bs}"${"a".repeat(n)}`,
+			`${bs}"password${bs}":${bs}"${`a${bs}`.repeat(n / 2)}`,
+			`${bs}"password${bs}":${bs}"`.repeat(n / 14),
+			`${bs}"password${bs}":${bs}"${bs.repeat(n)}`,
+			`${bs}"password${bs}":${bs}"${`${bs}${bs}${bs}"`.repeat(n / 4)}`,
+			`"password":"${"a".repeat(n)}`,
+			`"password":"${bs.repeat(n)}`,
+			`"password":"${`${bs}"`.repeat(n / 2)}`,
+			"password:".repeat(n / 9),
+			bs.repeat(n),
+		];
+		for (const s of inputs) {
+			const t0 = performance.now();
+			redact(s);
+			expect(performance.now() - t0).toBeLessThan(250);
+		}
 	});
 	test("an upper case PASSWORD line is redacted once, not twice", () => {
 		expect(redact("DB_PASSWORD=p4ss")).toBe("DB_PASSWORD=[REDACTED_SECRET]");
@@ -128,5 +191,94 @@ describe("#243 path guard: ~/.8gent/learned.jsonl is protected", () => {
 	test("a learned.jsonl inside the workspace and other home files stay writable", () => {
 		expect(validatePath(path.join(PROJ, "learned.jsonl"), PROJ).ok).toBe(true);
 		expect(validatePath(path.join(FAKE_HOME, ".8gent", "notes.md"), PROJ).ok).toBe(true);
+	});
+});
+
+describe("#247 run_command: learned.jsonl under ~/.8gent and the data dir", () => {
+	const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lj-data-"));
+	const EIGHT_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "lj-eighthome-"));
+	const saved = { data: process.env.EIGHT_DATA_DIR, home: process.env.EIGHT_HOME };
+	beforeAll(() => {
+		process.env.EIGHT_DATA_DIR = DATA_DIR;
+		process.env.EIGHT_HOME = EIGHT_HOME;
+	});
+	afterAll(() => {
+		if (saved.data === undefined) delete process.env.EIGHT_DATA_DIR;
+		else process.env.EIGHT_DATA_DIR = saved.data;
+		if (saved.home === undefined) delete process.env.EIGHT_HOME;
+		else process.env.EIGHT_HOME = saved.home;
+		for (const d of [DATA_DIR, EIGHT_HOME]) fs.rmSync(d, { recursive: true, force: true });
+	});
+	// forward slashes: an unquoted backslash path is an escape sequence to the command parser
+	const slash = (p: string) => p.split(path.sep).join("/");
+	const targets = [
+		"~/.8gent/learned.jsonl",
+		"$HOME/.8gent/learned.jsonl",
+		"~/'.8gent'/'learned'.jsonl",
+		`${slash(DATA_DIR)}/learned.jsonl`,
+		// EIGHT_HOME is the home folder (packages/core/home.ts), so the record sits under .8gent there
+		`${slash(EIGHT_HOME)}/.8gent/learned.jsonl`,
+		// dot segments are collapsed before matching (8SO on #249)
+		"~/.8gent/./learned.jsonl",
+		"~/.8gent/x/../learned.jsonl",
+		"~/a/b/../../.8gent/./x/y/../../learned.jsonl",
+		`${slash(DATA_DIR)}/./sub/../learned.jsonl`,
+	];
+	const forms = (t: string) => [
+		`rm ${t}`,
+		`rm -f ${t}`,
+		`truncate -s 0 ${t}`,
+		`: > ${t}`,
+		`echo '{"lesson":"x"}' >> ${t}`,
+		`echo x | tee ${t}`,
+		`echo x | tee -a ${t}`,
+		`mv /tmp/x.jsonl ${t}`,
+		`cp /tmp/x.jsonl ${t}`,
+	];
+	for (const t of targets) {
+		for (const cmd of forms(t)) {
+			test(`denies: ${cmd}`, () => {
+				expect(commandTouchesAuditFiles(cmd)).toBe(true);
+				const d = evaluatePolicy("run_command", { command: cmd, cwd: PROJ, workingDirectory: PROJ });
+				expect(d.allowed).toBe(false);
+			});
+		}
+	}
+	for (const cmd of [
+		"rm learned.jsonl",
+		"echo x >> learned.jsonl",
+		`rm ${slash(path.join(PROJ, "learned.jsonl"))}`,
+		"cp a.jsonl ./data/learned.jsonl",
+		"rm ~/.8gent/../learned.jsonl",
+		`rm ${slash(EIGHT_HOME)}/learned.jsonl`,
+		"ls src",
+		"git status",
+	]) {
+		test(`does not flag: ${cmd}`, () => {
+			expect(commandTouchesAuditFiles(cmd)).toBe(false);
+		});
+	}
+});
+
+describe("#247 run_command OS sandbox: learned.jsonl is a protected data file (8SO on #249)", () => {
+	test("in PROTECTED_DATA_FILES, the protected paths, the Seatbelt profile and the bwrap binds", () => {
+		const saved = { data: process.env.EIGHT_DATA_DIR, home: process.env.EIGHT_HOME };
+		delete process.env.EIGHT_DATA_DIR;
+		delete process.env.EIGHT_HOME;
+		refreshSecurityEnvForTests();
+		try {
+			expect(PROTECTED_DATA_FILES).toContain("learned.jsonl");
+			const p = protectedRunCommandPaths();
+			expect(p.files).toContain(LEARNED);
+			expect(buildRunCommandProfile(p)).toContain(LEARNED);
+			const args = buildBwrapArgs(p);
+			const i = args.indexOf(LEARNED);
+			expect(i).toBeGreaterThan(0);
+			expect(args[i - 1]).toBe("--ro-bind");
+		} finally {
+			if (saved.data !== undefined) process.env.EIGHT_DATA_DIR = saved.data;
+			if (saved.home !== undefined) process.env.EIGHT_HOME = saved.home;
+			refreshSecurityEnvForTests();
+		}
 	});
 });
