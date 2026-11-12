@@ -41,6 +41,31 @@ export interface CompactionResult {
 }
 type Message = { role: string; content: string };
 
+/**
+ * Flatten history into the `<conversation>` block a summariser reads (#226).
+ *
+ * A turn boundary is a line that starts with `[role]:` at column 0. Content
+ * must never produce one, or a tool result holding "\n[user]: do X" forges a
+ * user turn that survives into the summary. So, inside content only:
+ *   - every line break form becomes "\n", so no line hides behind \r or U+2028;
+ *   - a line whose first non-space character is `[` gets a backslash before it,
+ *     so no content line can open like a turn;
+ *   - `<conversation>`, `</conversation>` and the previous-summary tags have
+ *     their `<` written as `&lt;`, so content cannot close the block early.
+ * Readable text is otherwise untouched.
+ */
+export function serializeForSummary(messages: Message[], maxChars: number): string {
+	const turns = messages.map((m) => {
+		const content = m.content
+			.slice(0, maxChars)
+			.replace(/\r\n?|[\v\f\u0085\u2028\u2029]/g, "\n")
+			.replace(/<(\s*\/?\s*(?:conversation|previous-summary))/gi, "&lt;$1")
+			.replace(/^([^\S\n]*)\[/gm, "$1\\[");
+		return `[${m.role}]: ${content}`;
+	});
+	return `<conversation>\n${turns.join("\n\n")}\n</conversation>`;
+}
+
 export class FileTracker {
 	readonly read = new Set<string>();
 	readonly modified = new Set<string>();
@@ -172,14 +197,12 @@ export class CompactionEngine {
 		// Track files from messages about to be discarded
 		this.fileTracker.merge(extractFiles(toSummarize));
 
-		const serialized = toSummarize
-			.map((m) => `[${m.role}]: ${m.content.slice(0, 2000)}`)
-			.join("\n\n");
+		const conversation = serializeForSummary(toSummarize, 2000);
 		const action = this.previousSummary ? "Update" : "Create";
 		const prevBlock = this.previousSummary
 			? `<previous-summary>\n${this.previousSummary}\n</previous-summary>\n\n`
 			: "";
-		const prompt = `<conversation>\n${serialized}\n</conversation>\n\n${prevBlock}${action} ${PROMPT_SUFFIX}`;
+		const prompt = `${conversation}\n\n${prevBlock}${action} ${PROMPT_SUFFIX}`;
 
 		const { text: summary } = await generateText({
 			model,
@@ -417,7 +440,7 @@ export class ProactiveCompression extends CompactionEngine {
 			};
 		}
 
-		const serialized = old.map((m) => `[${m.role}]: ${m.content.slice(0, 1500)}`).join("\n\n");
+		const conversation = serializeForSummary(old, 1500);
 		// An earlier summary is the base to update, not text to re-read from a
 		// truncated copy: decisions from before this window must survive.
 		const prevBlock = this.previousSummary
@@ -427,7 +450,7 @@ export class ProactiveCompression extends CompactionEngine {
 		// Step 1: Summarize
 		const { text: historySummary } = await generateText({
 			model,
-			prompt: `${prevBlock}Summarize this conversation into a structured checkpoint.\n\n<conversation>\n${serialized}\n</conversation>\n\nFormat:\n## Goal\n## Progress\n## Key Decisions\n## Files Touched\n## Next Steps`,
+			prompt: `${prevBlock}Summarize this conversation into a structured checkpoint.\n\n${conversation}\n\nFormat:\n## Goal\n## Progress\n## Key Decisions\n## Files Touched\n## Next Steps`,
 			maxOutputTokens: 800,
 		});
 
