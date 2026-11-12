@@ -23,6 +23,7 @@ import {
 	type StartDeps,
 	isLocalDefaultHost,
 	isOurs,
+	kvCacheArgs,
 	keyPath,
 	llamaServerArgs,
 	logPath,
@@ -533,4 +534,26 @@ describe("real spawn, real files: production call shape", () => {
 
 test("LLAMA_URL is loopback on the fixed port", () => {
 	expect(LLAMA_URL).toBe("http://127.0.0.1:8091");
+});
+
+describe("EIGHT_KV_CACHE", () => {
+	const base = llamaServerArgs("/m/j.gguf", "/s/k", {});
+	test("unset adds no flags", () => {
+		expect(llamaServerArgs("/m/j.gguf", "/s/k", { EIGHT_KV_CACHE: "" })).toEqual(base);
+		expect(base).not.toContain("--cache-type-k");
+	});
+	test("q8_0 and q4_0 add the stock flags", () => {
+		for (const v of ["q8_0", "q4_0"]) {
+			const a = llamaServerArgs("/m/j.gguf", "/s/k", { EIGHT_KV_CACHE: v });
+			expect(a).toEqual([...base, "--cache-type-k", v, "--cache-type-v", v]);
+		}
+	});
+	test("an invalid value adds no flags and warns once", () => {
+		const msgs: string[] = [];
+		const w = (m: string) => msgs.push(m);
+		expect(kvCacheArgs("q2_k", w)).toEqual([]);
+		expect(kvCacheArgs("q2_k", w)).toEqual([]);
+		expect(msgs).toHaveLength(1);
+		expect(msgs[0]).toContain("q2_k");
+	});
 });
