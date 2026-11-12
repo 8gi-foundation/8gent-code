@@ -114,6 +114,11 @@ export function spawnCLIAgent(
 		env: { ...process.env, ...(options.env || {}) },
 		windowsHide: true,
 		windowsVerbatimArguments,
+		// POSIX: make the child its own process-group leader so a timeout or cancel
+		// can signal the whole group (killProcessTree uses the negative pid, and
+		// falls back to the direct child). Windows has no groups; taskkill /T walks
+		// the tree there, so the current behaviour stays.
+		detached: process.platform !== "win32",
 	});
 
 	const promise = new Promise<CLIAgentResult>((resolve) => {
@@ -293,9 +298,7 @@ export function resetCLIAgents(): void {
 	// Kill any still-running processes
 	for (const agent of cliAgents.values()) {
 		if (!agent.completedAt && agent.process) {
-			try {
-				agent.process.kill("SIGTERM");
-			} catch {}
+			killProcessTree(agent.process.pid, "SIGTERM");
 		}
 	}
 	cliAgents.clear();
