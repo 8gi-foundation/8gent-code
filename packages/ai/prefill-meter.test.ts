@@ -10,7 +10,7 @@ import * as path from "node:path";
 import type { ModelRoundEntry } from "../specifications/session/index";
 import { SessionWriter } from "../specifications/session/writer";
 import { parseRounds, totals } from "./prefill-report";
-import { _resetQwenVariantCache, buildTextToolCall, prefixMeterSink } from "./text-tool-endpoint";
+import { _resetQwenVariantCache, buildTextToolCall, FIRST_REPLY_LOG_MAX_BYTES, firstReplyLog, prefixMeterSink } from "./text-tool-endpoint";
 
 const realFetch = globalThis.fetch;
 const dirs: string[] = [];
@@ -152,5 +152,78 @@ describe("prefill report totals", () => {
 			genMs: 3500,
 			estimated: 1,
 		});
+	});
+});
+
+describe("first reply log (#229 step 1)", () => {
+	it("writes one line for the first request only, with no prompt text", async () => {
+		stubChat();
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "first-reply-"));
+		dirs.push(dir);
+		const file = path.join(dir, "logs", "prefill-times.jsonl");
+		const call = buildTextToolCall({ provider: "ollama", model: "m", onRound: firstReplyLog("m", file) });
+		await call(MESSAGES);
+		await call(MESSAGES);
+		const lines = fs.readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toMatchObject({ model: "m", promptTokens: 1200 });
+		expect(lines[0].firstReplyMs).toBeGreaterThanOrEqual(0);
+		expect(JSON.stringify(lines[0])).not.toContain("fix the tests");
+	});
+
+	it("an unwritable path never breaks the reply", async () => {
+		stubChat();
+		const call = buildTextToolCall({ provider: "ollama", model: "m", onRound: firstReplyLog("m", "/dev/null/x/y.jsonl") });
+		expect(await call(MESSAGES)).toBe("done");
+	});
+});
+
+describe("first reply log hardening", () => {
+	const round = { path: "chat" as const, promptChars: 1, promptTokens: 5, completionTokens: 1, headersMs: 7, wallMs: 9 };
+	function logFile() {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "first-reply-"));
+		dirs.push(dir);
+		return path.join(dir, "logs", "prefill-times.jsonl");
+	}
+
+	it("creates the file 0600 and the directory 0700", () => {
+		const f = logFile();
+		firstReplyLog("m", f)(round);
+		expect(fs.statSync(f).mode & 0o777).toBe(0o600);
+		expect(fs.statSync(path.dirname(f)).mode & 0o777).toBe(0o700);
+	});
+
+	it("tightens a file that already existed with wider rights", () => {
+		const f = logFile();
+		fs.mkdirSync(path.dirname(f), { recursive: true });
+		fs.writeFileSync(f, "", { mode: 0o644 });
+		firstReplyLog("m", f)(round);
+		expect(fs.statSync(f).mode & 0o777).toBe(0o600);
+	});
+
+	it("does not write through a symlink", () => {
+		const f = logFile();
+		fs.mkdirSync(path.dirname(f), { recursive: true });
+		const target = path.join(path.dirname(f), "elsewhere");
+		fs.writeFileSync(target, "");
+		fs.symlinkSync(target, f);
+		firstReplyLog("m", f)(round);
+		expect(fs.readFileSync(target, "utf8")).toBe("");
+	});
+
+	it("stops writing once the file is over 1 MB", () => {
+		const f = logFile();
+		fs.mkdirSync(path.dirname(f), { recursive: true });
+		fs.writeFileSync(f, "x".repeat(FIRST_REPLY_LOG_MAX_BYTES + 1), { mode: 0o600 });
+		firstReplyLog("m", f)(round);
+		expect(fs.statSync(f).size).toBe(FIRST_REPLY_LOG_MAX_BYTES + 1);
+	});
+
+	it("a shared once writes one line for a turn even across a reroute", () => {
+		const f = logFile();
+		const once = { done: false };
+		firstReplyLog("a", f, once)(round);
+		firstReplyLog("b", f, once)(round);
+		expect(fs.readFileSync(f, "utf8").trim().split("\n")).toHaveLength(1);
 	});
 });
