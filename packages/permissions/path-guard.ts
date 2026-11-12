@@ -62,6 +62,8 @@ const PROTECTED_HOME_FILES = [
 	// Agent audit files: the record of what agent tools did is not for agent tools to change (#3735).
 	[".8gent", "audit.jsonl"],
 	[".8gent", "permissions-audit.jsonl"],
+	// The record of what the harness learned (#239): tools may not rewrite it (#243).
+	[".8gent", "learned.jsonl"],
 	// The saved yolo answer: a tool that could write it would turn off the cards for itself (8SO).
 	[".8gent", "yolo.json"],
 ];
