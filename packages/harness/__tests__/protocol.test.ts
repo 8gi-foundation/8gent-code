@@ -4,25 +4,28 @@
  * Covers:
  *   - the conformance rubric passes on an in-memory adapter
  *   - each planted defect fails the check written for it, so the rubric bites
- *   - the spawner adapter passes the rubric on the local shell runtime
- *   - the flag ships off; gates refuse before anything is spawned
+ *   - the spawner adapter passes the rubric on the local shell runtime, through the real gate
+ *   - parity: spawn_agent and the spawner adapter refuse the same children with the same words
+ *   - the flag ships off
  *
- * Local only: the shell turns are printf, sleep and exit. No network, no model.
+ * Local only: the shell turns are printf, sleep, exit and two tiny scripts. No network, no
+ * model: the one hosted case runs with an empty PATH, so even a broken gate finds no binary.
  */
 
-import { describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { HOSTED_CLI_RUNTIME, spawnAgentTool } from "../../orchestration/delegation-tools";
+import { runWithProviderPin } from "../../orchestration/provider-pin";
+import { createPermissionHolder, runWithPermissionHolder } from "../../permissions/permission-mode";
 import {
 	type CheckResult,
 	type ConformanceFixture,
 	failures,
 	runConformance,
 } from "../protocol/conformance";
-import {
-	type ProcessRuntime,
-	SpawnerHarness,
-	defaultTurnGate,
-	spawnerHarness,
-} from "../protocol/spawner-adapter";
+import { type ProcessRuntime, spawnerHarness } from "../protocol/spawner-adapter";
 import {
 	HARNESS_PROTOCOL_FLAG,
 	HARNESS_PROTOCOL_VERSION,
@@ -182,67 +185,147 @@ describe("conformance rubric", () => {
 
 // ── The spawner adapter, on the local shell ───────────────────────
 
-const allow = async () => null;
+const ON = { [HARNESS_PROTOCOL_FLAG]: "1" };
+const shellHarness = () => spawnerHarness("shell", { env: ON }) as HarnessAdapter;
+
+// The sanitiser refuses chaining, so the two multi-step turns are scripts in the session's
+// folder. long.sh execs sleep, so sleep is the spawned pid: the spawner does not start a
+// process group, so a cancel cannot reach a grandchild (see the spec's known gaps).
+const work = fs.mkdtempSync(path.join(os.tmpdir(), "harness-protocol-"));
+fs.writeFileSync(path.join(work, "long.sh"), "printf tick\nexec sleep 30\n");
+fs.writeFileSync(path.join(work, "fail.sh"), "echo boom >&2\nexit 3\n");
+afterAll(() => fs.rmSync(work, { recursive: true, force: true }));
 
 const shellFixture: ConformanceFixture = {
 	echo: { input: { text: "printf 'hello harness \\342\\234\\223'" }, expect: "hello harness ✓" },
-	// exec, so sleep is the spawned pid: the spawner does not start a process
-	// group, so a cancel cannot reach a grandchild (see the spec's known gaps).
-	long: { text: "printf tick; exec sleep 30" },
-	fail: { text: "echo boom >&2; exit 3" },
+	long: { text: "sh long.sh" },
+	fail: { text: "sh fail.sh" },
+	start: { cwd: work },
 	deadlineMs: 8000,
 };
 
-describe("SpawnerHarness on the shell runtime", () => {
-	it("passes every conformance check", async () => {
-		const results = await runConformance(
-			new SpawnerHarness({ runtime: "shell", gate: allow }),
-			shellFixture,
-		);
+describe("spawner adapter on the shell runtime", () => {
+	it("passes every conformance check through the real gate", async () => {
+		const results = await runConformance(shellHarness(), shellFixture);
 		expect(failures(results)).toEqual([]);
 		expect(results.every((r) => r.outcome === "pass")).toBe(true);
 	}, 60_000);
 
-	it("reports the shell as local and a hosted runtime as not", () => {
-		expect(new SpawnerHarness({ runtime: "shell" }).capabilities().local).toBe(true);
-		const hosted = new SpawnerHarness({ runtime: "hosted-cli" as ProcessRuntime });
+	it("reports the shell as local and the hosted runtime as not", () => {
+		expect(shellHarness().capabilities().local).toBe(true);
+		const hosted = spawnerHarness(HOSTED_CLI_RUNTIME, { env: ON }) as HarnessAdapter;
 		expect(hosted.capabilities().local).toBe(false);
 	});
 
 	it("puts the stderr tail in a failed turn's error", async () => {
-		const h = new SpawnerHarness({ runtime: "shell", gate: allow });
-		const s = await h.start();
-		const end = await h.send(s.id, { text: "echo boom >&2; exit 3" }).done;
-		expect(end.status).toBe("failed");
-		expect(end.error).toBe("boom");
+		const h = shellHarness();
+		const s = await h.start({ cwd: work });
+		const end = await h.send(s.id, { text: "sh fail.sh" }).done;
+		expect(end).toMatchObject({ status: "failed", error: "boom" });
 	});
 
 	it("ends a turn that hits the session time limit as incomplete", async () => {
-		const h = new SpawnerHarness({ runtime: "shell", gate: allow });
-		const s = await h.start({ turnTimeoutMs: 300 });
+		const h = shellHarness();
+		const s = await h.start({ cwd: work, turnTimeoutMs: 300 });
 		const end = await h.send(s.id, { text: "sleep 10" }).done;
-		expect(end.status).toBe("incomplete");
-		expect(end.reason).toBe("timeout");
+		expect(end).toMatchObject({ status: "incomplete", reason: "timeout" });
 	}, 10_000);
+});
 
-	it("never spawns a turn the gate refuses", async () => {
-		let spawned = 0;
-		const h = new SpawnerHarness({
-			runtime: "shell",
-			gate: async () => "[BLOCKED] not today",
-			spawn: () => {
-				spawned++;
-				throw new Error("must not spawn");
-			},
+// ── Parity with spawn_agent ──────────────────────────────────────
+
+/** spawn_agent's answer: a refusal string, or JSON naming the started child. */
+async function viaSpawnAgent(runtime: ProcessRuntime, task: string): Promise<string> {
+	return spawnAgentTool(work, task, runtime);
+}
+
+/** The harness's answer for the same child, in the same context. */
+async function viaHarness(
+	runtime: ProcessRuntime,
+	task: string,
+	env?: Record<string, string>,
+): Promise<{ status: string; error?: string }> {
+	const h = spawnerHarness(runtime, { env: ON }) as HarnessAdapter;
+	const s = await h.start({ cwd: work, env });
+	return h.send(s.id, { text: task }).done;
+}
+
+async function withEnv<T>(vars: Record<string, string | undefined>, fn: () => Promise<T>) {
+	const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+	const apply = (v: Record<string, string | undefined>) => {
+		for (const [k, val] of Object.entries(v)) {
+			// process.env needs a real unset, not the string "undefined".
+			if (val === undefined) delete process.env[k];
+			else process.env[k] = val;
+		}
+	};
+	apply(vars);
+	try {
+		return await fn();
+	} finally {
+		apply(saved);
+	}
+}
+
+describe("parity: the harness refuses what spawn_agent refuses, in the same words", () => {
+	it("a caller in plan mode starts nothing", async () => {
+		const plan = createPermissionHolder("plan");
+		const tool = await runWithPermissionHolder(plan, () => viaSpawnAgent("shell", "touch marker"));
+		const turn = await runWithPermissionHolder(plan, () => viaHarness("shell", "touch marker"));
+		expect(tool).not.toContain("agentId");
+		expect(turn).toMatchObject({ status: "failed", error: tool });
+		expect(fs.existsSync(path.join(work, "marker"))).toBe(false);
+	});
+
+	it("a command the sanitiser denies", async () => {
+		const tool = await viaSpawnAgent("shell", "echo $(id)");
+		const turn = await viaHarness("shell", "echo $(id)");
+		expect(tool).toStartWith("[BLOCKED]");
+		expect(turn).toMatchObject({ status: "failed", error: tool });
+	});
+
+	it("a hosted runtime without the opt-in", async () => {
+		await withEnv({ EIGHT_ALLOW_HOSTED: undefined, PATH: "" }, async () => {
+			const tool = await viaSpawnAgent(HOSTED_CLI_RUNTIME, "do the thing");
+			const turn = await viaHarness(HOSTED_CLI_RUNTIME, "do the thing");
+			expect(tool).toContain("EIGHT_ALLOW_HOSTED=1");
+			expect(turn).toMatchObject({ status: "failed", error: tool });
 		});
-		const s = await h.start();
-		const end = await h.send(s.id, { text: "printf hi" }).done;
-		expect(end).toMatchObject({ status: "failed", error: "[BLOCKED] not today" });
-		expect(spawned).toBe(0);
+	});
+
+	it("a session pinned to another provider", async () => {
+		await withEnv({ EIGHT_ALLOW_HOSTED: "1", PATH: "" }, async () => {
+			const pin = { runtime: "ollama" };
+			const tool = await runWithProviderPin(pin, () =>
+				viaSpawnAgent(HOSTED_CLI_RUNTIME, "do the thing"),
+			);
+			const turn = await runWithProviderPin(pin, () =>
+				viaHarness(HOSTED_CLI_RUNTIME, "do the thing"),
+			);
+			expect(tool).toContain("pinned to ollama");
+			expect(turn).toMatchObject({ status: "failed", error: tool });
+		});
+	});
+
+	it("a $VAR that only the session env sets is judged with the value the shell gets", async () => {
+		// The boundary only judges paths that exist, so plant a key in the suite's temp HOME
+		// (tests/preload-temp-home.ts), never the real one.
+		const home = process.env.HOME as string;
+		expect(home).not.toBe(os.homedir());
+		const keys = path.join(home, ".ssh");
+		fs.mkdirSync(keys, { recursive: true });
+		fs.writeFileSync(path.join(keys, "id_rsa"), "not a key\n");
+		const task = "cat $KEYS/id_rsa";
+		const tool = await withEnv({ KEYS: keys }, () => viaSpawnAgent("shell", task));
+		const turn = await withEnv({ KEYS: undefined }, () =>
+			viaHarness("shell", task, { KEYS: keys }),
+		);
+		expect(tool).toContain("never reads credential files");
+		expect(turn).toMatchObject({ status: "failed", error: tool });
 	});
 });
 
-describe("defaults ship off and closed", () => {
+describe("defaults ship off", () => {
 	it("the flag is off unless set to 1", () => {
 		expect(harnessProtocolEnabled({})).toBe(false);
 		expect(harnessProtocolEnabled({ [HARNESS_PROTOCOL_FLAG]: "0" })).toBe(false);
@@ -251,28 +334,7 @@ describe("defaults ship off and closed", () => {
 	});
 
 	it("spawnerHarness gives nothing while the flag is off", () => {
-		expect(spawnerHarness("shell", {})).toBeNull();
-		expect(spawnerHarness("shell", { [HARNESS_PROTOCOL_FLAG]: "1" })).toBeInstanceOf(
-			SpawnerHarness,
-		);
-	});
-
-	it("the default gate refuses a hosted runtime without the opt-in", async () => {
-		const saved = process.env.EIGHT_ALLOW_HOSTED;
-		// biome-ignore lint/performance/noDelete: process.env needs a real unset, not "undefined"
-		delete process.env.EIGHT_ALLOW_HOSTED;
-		try {
-			const why = await defaultTurnGate("do the thing", {
-				runtime: "hosted-cli" as ProcessRuntime,
-				cwd: process.cwd(),
-			});
-			expect(why).toContain("EIGHT_ALLOW_HOSTED=1");
-		} finally {
-			if (saved !== undefined) process.env.EIGHT_ALLOW_HOSTED = saved;
-		}
-	});
-
-	it("the default gate passes a plain local shell turn", async () => {
-		expect(await defaultTurnGate("printf ok", { runtime: "shell", cwd: process.cwd() })).toBeNull();
+		expect(spawnerHarness("shell", { env: {} })).toBeNull();
+		expect(spawnerHarness("shell", { env: ON })).not.toBeNull();
 	});
 });

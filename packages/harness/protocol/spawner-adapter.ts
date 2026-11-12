@@ -4,14 +4,16 @@
  * process: stdout streams as text.delta, stderr as log, the exit code
  * decides the status. Nothing carries between turns, so `sessions` is false.
  *
- * Every turn passes a gate before anything is spawned. The default gate is
- * the one spawn_agent uses for a process child: the depth cap, the shell
- * sanitiser and System One for a shell turn; the hosted opt-in
- * (EIGHT_ALLOW_HOSTED=1) for any runtime that is not the shell.
+ * Every turn goes through planProcessChild (packages/orchestration/
+ * delegation-tools.ts), the same function spawn_agent calls, so a turn is
+ * refused exactly when spawn_agent would refuse the same child. There is no
+ * way to pass a different gate. The plan decides the task and the whole
+ * environment the child is spawned with; session env is judged with it.
  */
 
 import { killProcessTree } from "../../core/shell";
-import type { AgentRuntime, RunningCLIAgent } from "../../orchestration/universal-spawner";
+import type { ProcessChildRuntime } from "../../orchestration/delegation-tools";
+import type { RunningCLIAgent } from "../../orchestration/universal-spawner";
 import {
 	HARNESS_PROTOCOL_VERSION,
 	type HarnessAdapter,
@@ -26,49 +28,10 @@ import {
 } from "./types";
 
 /** Runtimes the process path runs. The in-process runtime belongs to AgentPool. */
-export type ProcessRuntime = Exclude<AgentRuntime, "8gent">;
+export type ProcessRuntime = ProcessChildRuntime;
 
-/** Null to run the turn, otherwise the reason it was refused. */
-export type TurnGate = (
-	text: string,
-	ctx: { runtime: ProcessRuntime; cwd: string },
-) => Promise<string | null>;
-
-type Spawn = (
-	runtime: ProcessRuntime,
-	task: string,
-	options: { workingDirectory?: string; timeout?: number; env?: Record<string, string> },
-) => RunningCLIAgent;
-
-export interface SpawnerHarnessOptions {
-	runtime: ProcessRuntime;
-	/** Defaults to defaultTurnGate. */
-	gate?: TurnGate;
-	/** Defaults to spawnCLIAgent. A seam for tests and for later runtimes. */
-	spawn?: Spawn;
-	/** How long to wait for pipes to drain once the process has exited. Default 250ms. */
-	drainMs?: number;
-}
-
-/** The checks spawn_agent applies to a process child, in the same order. */
-export const defaultTurnGate: TurnGate = async (text, { runtime, cwd }) => {
-	const { agentDepthRefusal } = await import("../../orchestration/index");
-	const depth = agentDepthRefusal();
-	if (depth) return depth;
-	if (runtime !== "shell") {
-		const { hostedAllowed } = await import("../../providers/failover");
-		if (!hostedAllowed()) {
-			return `Not started: runtime "${runtime}" sends the turn to a hosted model, and hosted providers are off unless EIGHT_ALLOW_HOSTED=1.`;
-		}
-		return null;
-	}
-	const { sanitizeShellCommand } = await import("../../permissions/shell-sanitizer");
-	const validation = sanitizeShellCommand(text);
-	if (!validation.safe) return `[BLOCKED] ${validation.reason}`;
-	const { systemOneGate } = await import("../../permissions/system-one-gate");
-	const verdict = await systemOneGate(text, process.env, cwd);
-	return verdict.run ? null : (verdict.message as string);
-};
+/** How long to wait for pipes to drain once the process has exited. */
+const DRAIN_MS = 250;
 
 interface Turn {
 	log: TurnLog;
@@ -85,19 +48,16 @@ interface Session extends HarnessSession {
 let counter = 0;
 const nextId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${++counter}`;
 
-export class SpawnerHarness implements HarnessAdapter {
+class SpawnerHarness implements HarnessAdapter {
 	readonly id: string;
 	private readonly sessions = new Map<string, Session>();
 	private readonly turns = new Map<string, Turn>();
-	private readonly gate: TurnGate;
-	private readonly drainMs: number;
-	private spawnFn?: Spawn;
 
-	constructor(private readonly options: SpawnerHarnessOptions) {
-		this.id = `spawner:${options.runtime}`;
-		this.gate = options.gate ?? defaultTurnGate;
-		this.spawnFn = options.spawn;
-		this.drainMs = options.drainMs ?? 250;
+	constructor(
+		private readonly runtime: ProcessRuntime,
+		private readonly permissionMode?: unknown,
+	) {
+		this.id = `spawner:${runtime}`;
 	}
 
 	capabilities(): HarnessCapabilities {
@@ -108,7 +68,7 @@ export class SpawnerHarness implements HarnessAdapter {
 			sessions: false,
 			cancel: true,
 			maxConcurrentTurns: 1,
-			local: this.options.runtime === "shell",
+			local: this.runtime === "shell",
 		};
 	}
 
@@ -124,6 +84,10 @@ export class SpawnerHarness implements HarnessAdapter {
 		return { id: session.id, harness: session.harness, cwd: session.cwd };
 	}
 
+	/**
+	 * The turn is judged in the caller's context: the permission mode and
+	 * provider pin bound where send() is called are the ones that apply.
+	 */
 	send(sessionId: string, input: TurnInput): HarnessTurn {
 		const session = this.sessions.get(sessionId);
 		if (!session) throw new HarnessError("session_not_found", `no session ${sessionId}`);
@@ -185,26 +149,23 @@ export class SpawnerHarness implements HarnessAdapter {
 			this.turns.delete(turn.log.turnId);
 		};
 
-		let refusal: string | null;
-		try {
-			refusal = await this.gate(text, { runtime: this.options.runtime, cwd: session.cwd });
-		} catch (err) {
-			refusal = `the gate could not decide: ${err instanceof Error ? err.message : String(err)}`;
-		}
-		if (turn.cancelRequested) return end("cancelled");
-		if (refusal) return end("failed", { error: refusal });
-
 		let child: RunningCLIAgent;
 		try {
-			const spawn =
-				this.spawnFn ?? (await import("../../orchestration/universal-spawner")).spawnCLIAgent;
-			this.spawnFn = spawn;
-			// The child's depth goes last, so session env can never lower it (#3341).
-			const { childAgentEnv } = await import("../../orchestration/index");
-			child = spawn(this.options.runtime, text, {
+			const { planProcessChild } = await import("../../orchestration/delegation-tools");
+			const plan = await planProcessChild({
+				runtime: this.runtime,
+				task: text,
+				cwd: session.cwd,
+				permissionMode: this.permissionMode,
+				env: session.env,
+			});
+			if (turn.cancelRequested) return end("cancelled");
+			if (!plan.run) return end("failed", { error: plan.refusal });
+			const { spawnCLIAgent } = await import("../../orchestration/universal-spawner");
+			child = spawnCLIAgent(plan.runtime, plan.task, {
 				workingDirectory: session.cwd,
 				timeout: session.turnTimeoutMs,
-				env: { ...session.env, ...childAgentEnv() },
+				env: plan.env,
 			});
 		} catch (err) {
 			return end("failed", { error: err instanceof Error ? err.message : String(err) });
@@ -228,9 +189,7 @@ export class SpawnerHarness implements HarnessAdapter {
 		// The spawner resolves on "close", which a grandchild holding a pipe can delay
 		// forever. "exit" plus a short drain bounds the wait.
 		const exited = new Promise<{ code: number | null; timedOut: boolean }>((resolve) => {
-			proc?.once("exit", (code) =>
-				setTimeout(() => resolve({ code, timedOut: false }), this.drainMs),
-			);
+			proc?.once("exit", (code) => setTimeout(() => resolve({ code, timedOut: false }), DRAIN_MS));
 		});
 		const closed = child.promise.then((r) => ({
 			code: r.exitCode,
@@ -250,12 +209,15 @@ export class SpawnerHarness implements HarnessAdapter {
 }
 
 /**
- * The entry point the product calls. Null unless EIGHT_HARNESS_PROTOCOL=1:
- * with the flag off, nothing about spawning changes.
+ * The only way to build a process harness. Null unless EIGHT_HARNESS_PROTOCOL=1:
+ * with the flag off, nothing about spawning changes. `permissionMode` is the
+ * mode requested for every child, clamped to the caller's as spawn_agent does.
  */
 export function spawnerHarness(
 	runtime: ProcessRuntime,
-	env: Record<string, string | undefined> = process.env,
-): SpawnerHarness | null {
-	return harnessProtocolEnabled(env) ? new SpawnerHarness({ runtime }) : null;
+	options: { env?: Record<string, string | undefined>; permissionMode?: unknown } = {},
+): HarnessAdapter | null {
+	return harnessProtocolEnabled(options.env ?? process.env)
+		? new SpawnerHarness(runtime, options.permissionMode)
+		: null;
 }

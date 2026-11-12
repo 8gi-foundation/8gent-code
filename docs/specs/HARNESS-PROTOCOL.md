@@ -108,17 +108,33 @@ ordering right the same way instead of each rewriting it.
 
 | Runtime | Adapter | Status |
 | --- | --- | --- |
-| Shell (`sh -c`) through `spawnCLIAgent` | `SpawnerHarness({ runtime: "shell" })`, id `spawner:shell` | **Built in this slice.** stdout to `text.delta`, stderr to `log`, exit 0 to `completed`, other exit to `failed` with the stderr tail, spawner timeout to `incomplete`/`timeout`, cancel kills the process. `local: true`, `sessions: false`. |
-| Hosted CLI through `spawnCLIAgent` | `SpawnerHarness` with that runtime | Works through the same class, but `local: false`, and the default gate refuses it unless `EIGHT_ALLOW_HOSTED=1`. Not exercised in tests (no network, no model calls). |
+| Shell (`sh -c`) through `spawnCLIAgent` | `spawnerHarness("shell")`, id `spawner:shell` | **Built in this slice.** stdout to `text.delta`, stderr to `log`, exit 0 to `completed`, other exit to `failed` with the stderr tail, spawner timeout to `incomplete`/`timeout`, cancel kills the process. `local: true`, `sessions: false`. |
+| Hosted CLI through `spawnCLIAgent` | `spawnerHarness(HOSTED_CLI_RUNTIME)` | Same class, `local: false`, and the same gate as `spawn_agent`: refused without `EIGHT_ALLOW_HOSTED=1`, by the permission mode, or by a provider pin. Only its refusals are tested, with an empty `PATH` (no network, no model calls). |
 | In-process loop (`AgentPool`) | Next slice | `chat()` maps to a turn; `onToolStart`/`onToolEnd` to `tool.*`; stream chunks to `text.delta`; `session:abort` to cancel. `sessions: true`. |
 | Meta-harness `Harness.run` and `CliHarness` | Next slice: a bridge | A `HarnessAdapter` can be served as a `Harness` (`turn.started` to `queued`, deltas to `working`, `completed` to `done`, the rest to `error`), so the registry and `/harness/*` HTTP routes serve both without a second HTTP surface. |
 
-Every turn on `SpawnerHarness` passes a gate before anything is spawned. The default gate applies
-the same checks `spawn_agent` applies to a process child: the depth cap, then for the shell the
-sanitiser and System One, and for any other runtime the hosted opt-in. The child gets
-`childAgentEnv()` last, so session environment can never lower its depth. A refused turn ends
-`failed` with the refusal as its `error`, and nothing runs. The child gets no stdin, so nothing it
-runs can wait on an answer: prompts default No, unattended means no.
+There is one gate, not two copies. `planProcessChild` in `packages/orchestration/delegation-tools.ts`
+holds every check a process child passes, and both `spawn_agent` and the spawner adapter call it:
+
+- the depth cap;
+- the permission mode: a caller in plan mode starts nothing, and the child's mode is clamped to
+  the caller's;
+- for the hosted runtime: the `EIGHT_ALLOW_HOSTED=1` opt-in, the mode's refusal of a hosted
+  child, and the provider pin;
+- for the shell: in a mode, the run_command gate (plan refusal, the permission check, System One
+  in the mode's environment, the approval card for ask); without a mode, the sanitiser and System
+  One; then the isolated inline python rewrite.
+
+It returns the task and the whole environment to spawn with. A shell child is judged with exactly
+the environment it is started with, session `env` included, so a `$VAR` cannot mean one thing to
+the check and another to the shell. `childAgentEnv()` goes last, so session env can never lower
+the depth. The permission mode and provider pin that apply are the ones bound where `send()` is
+called. `spawnerHarness()` is the only way to build the adapter, and it takes no gate: no caller
+can swap the checks out. A refused turn ends `failed` with the refusal, word for word what
+`spawn_agent` returns, and nothing runs. A parity test runs both paths on the same cases (plan
+mode, a denied command, no hosted opt-in, a pinned provider, a `$VAR` set only in session env).
+The child gets no stdin, so nothing it runs can wait on an answer: prompts default No,
+unattended means no.
 
 ## 4. Out of scope
 
@@ -168,7 +184,8 @@ turns allowed). The test file proves the rubric bites: five planted defects in a
 (unstable capabilities, a dropped event, a replay that loses deltas, no busy refusal, cancel
 reported as failure) each fail the check written for them.
 
-Results on this slice: in-memory adapter 17/17 pass; `SpawnerHarness` on the shell 17/17 pass.
+Results on this slice: in-memory adapter 17/17 pass; the spawner adapter on the shell, through
+the real gate, 17/17 pass.
 
 ## 6. Where we agree and differ with UHP
 
@@ -193,8 +210,8 @@ Concept comparison with the Unified Harness Protocol published by HarnessRouter 
 **Differ**
 
 - **Transport.** UHP is an HTTP standard whose task surface is a subset of a hosted vendor's
-  Responses-style API, streamed as server-sent events. Ours is an in-process TypeScript interface. A local harness should cost no
-  socket, no server and no key. An HTTP face can be added over it later.
+  Responses-style API, streamed as server-sent events. Ours is an in-process TypeScript
+  interface. A local harness should cost no socket, no server and no key. An HTTP face can be added over it later.
 - **Local is a capability.** UHP has no notion of whether work leaves the device. Ours does, so a
   caller can refuse every non-local harness by default.
 - **Gates live in the adapter path.** UHP leaves authorisation to bearer keys on a server. Ours
@@ -217,6 +234,7 @@ Concept comparison with the Unified Harness Protocol published by HarnessRouter 
 
 ## 7. Known gaps
 
+- Wiring the adapter into any product path is blocked until #235 (process-group children) merges.
 - `spawnCLIAgent` does not start its child as a process-group leader, so `killProcessTree` can
   reach only the child itself. A grandchild (`sh -c "a; b"` where `b` is not exec'd) survives a
   cancel or timeout and can hold the output pipes open. The adapter bounds its own wait (it ends
@@ -233,6 +251,6 @@ Concept comparison with the Unified Harness Protocol published by HarnessRouter 
 2. **In-process loop adapter**: wrap `AgentPool` sessions (`chat`, tool callbacks, abort) as a
    `HarnessAdapter` with `sessions: true`, and pass the rubric with a scripted local engine.
 3. **Spawner process groups, then `spawn_agent` behind the flag**: start spawner children as group
-   leaders so cancel reaches the whole tree, then route `spawn_agent` process runtimes through
-   `SpawnerHarness` when `EIGHT_HARNESS_PROTOCOL=1`, so `check_agent` reads the event log instead
+   leaders so cancel reaches the whole tree (#235), then route `spawn_agent` process runtimes
+   through the spawner adapter when `EIGHT_HARNESS_PROTOCOL=1`, so `check_agent` reads the event log instead
    of polling buffered output.
