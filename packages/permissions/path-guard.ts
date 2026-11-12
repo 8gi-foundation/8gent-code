@@ -416,6 +416,14 @@ export function commandTouchesAuditFiles(command: string): boolean {
 		const d = dataDir.toLowerCase().replace(/\/+$/, "");
 		if (flat.includes(`${d}/audit`) || flat.includes(`${d}/permissions-audit`)) return true;
 	}
+	// The record of what the harness learned (#247), under ~/.8gent or a relocated data dir.
+	// A learned.jsonl anywhere else (the workspace) is not this file.
+	if (/\.8gent\/+learned\.jsonl\b/.test(flat)) return true;
+	for (const dir of [dataDir, process.env.EIGHT_HOME]) {
+		if (!dir) continue;
+		const d = dir.replace(/["'`\\]/g, "").toLowerCase().replace(/\/+$/, "");
+		if (new RegExp(`${escapeRe(d)}/+learned\\.jsonl\\b`).test(flat)) return true;
+	}
 	return false;
 }
 

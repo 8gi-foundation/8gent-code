@@ -59,8 +59,10 @@ const PATTERNS: Array<[RegExp, string]> = [
 	// so "passwordless: true" and prose like "the password field" are left alone.
 	// A quoted JSON key ("password":) is matched too, and a quoted value is redacted
 	// up to its closing quote, so "correct horse battery" does not leak its tail.
+	// Escaped JSON inside a string (\"password\":\"x\") is matched too: the value runs
+	// up to the escaped closing quote and that quote is kept (#247).
 	[
-		/\b([A-Za-z0-9_]*pass(?:word|wd))(["']?\s*[=:]\s*)(["']?)(?!\[REDACTED)(?:(?<=")[^"\n]+|(?<=')[^'\n]+|[^\s'"]+)/gi,
+		/\b([A-Za-z0-9_]*pass(?:word|wd))((?:\\"|["'])?\s*[=:]\s*)(\\"|["']|)(?!\[REDACTED)(?:(?<=\\")(?=[^\\\n]|\\(?!"))[^\\\n]*(?:\\(?!")[^\\\n]*)*|(?<=(?<!\\)")[^"\n]+|(?<=')[^'\n]+|(?!\\["'])[^\s'"]+)/gi,
 		"$1$2$3[REDACTED_SECRET]",
 	],
 	// Credentials inside a URL: scheme://user:pass@host keeps scheme and host
