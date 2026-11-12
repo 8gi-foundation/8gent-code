@@ -127,13 +127,12 @@ describe("bot tokens and env-style secrets", () => {
 			"https://api.telegram.org/bot[REDACTED_BOT_TOKEN]/getMe",
 		);
 	});
-	test("bot ids of 6 to 12 digits are caught; a longer digit run is not a bot id", () => {
+	test("bot ids of 5 to 16 digits are caught (ids are up to 52 bits)", () => {
 		const tail = "AAEhBOweik6ad9r_QXv45nQSzIuPDwF9wQy";
-		for (const id of ["123456", "1234567890", "123456789012"]) {
+		for (const id of ["12345", "123456", "1234567890", "123456789012", "9".repeat(13), "4503599627370495"]) {
 			expect(redact(`token ${id}:${tail} end`)).toBe("token [REDACTED_BOT_TOKEN] end");
 		}
 		expect(redact(`at 12:${tail}`)).toBe(`at 12:${tail}`);
-		expect(redact(`id ${"9".repeat(13)}:${tail}`)).toBe(`id ${"9".repeat(13)}:${tail}`);
 	});
 	test("redacts the value of a secret-named env line, keeps the name", () => {
 		const out = redact("DB_PASSWORD=p4ss\nMY_API_KEY: abc123");

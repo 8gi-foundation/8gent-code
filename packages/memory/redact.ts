@@ -48,9 +48,9 @@ const PATTERNS: Array<[RegExp, string]> = [
 	// Bearer tokens (an HTTP Authorization header pasted into text)
 	[/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{16,}/gi, "$1[REDACTED_BEARER_TOKEN]"],
 	// Telegram bot tokens: <bot id>:<35-ish url-safe chars>, also inside a /bot<token>/ URL.
-	// The id run is anchored and capped (6 to 12 digits) so a long digit run with no colon
-	// is scanned once, not once per start position (#248).
-	[/(?<!\d)\d{6,12}:[A-Za-z0-9_-]{30,}/g, "[REDACTED_BOT_TOKEN]"],
+	// The id run is anchored and capped (5 to 16 digits: ids are up to 52 bits) so a long
+	// digit run with no colon is scanned once, not once per start position (#248).
+	[/(?<!\d)\d{5,16}:[A-Za-z0-9_-]{30,}/g, "[REDACTED_BOT_TOKEN]"],
 	// .env style lines: a secret-like name (KEY, TOKEN, SECRET, PASSWORD...) with a value
 	[
 		/\b([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)[A-Za-z0-9_]*)(\s*[=:]\s*)(?!\[REDACTED)[^\s'"]+/g,
