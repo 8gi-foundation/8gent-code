@@ -72,6 +72,7 @@ export const PROTECTED_DATA_FILES = [
 	"browser-control.token",
 	"audit.jsonl",
 	"permissions-audit.jsonl",
+	"learned.jsonl", // the record of what the harness learned (#243, #247, 8SO)
 	"daemon.log",
 	"approvals-audit.jsonl",
 	"policies.yaml",
