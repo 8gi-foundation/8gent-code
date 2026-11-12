@@ -92,7 +92,8 @@ async function gateShellChild(
 			if (check === "denied")
 				return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
 			const { systemOneGate } = await import("../permissions/system-one-gate");
-			const systemOne = await systemOneGate(command, systemOneEnvFor(mode), cwd);
+			// The env the child is started with, so a `$VAR` is judged as the shell will see it.
+			const systemOne = await systemOneGate(command, systemOneEnvFor(mode, judgedShellEnv()), cwd);
 			if (!systemOne.run) return systemOne.message as string;
 			const dangerous = isCommandDangerous(command);
 			if (
@@ -176,7 +177,9 @@ export type ProcessChildPlan =
  * `env` is extra environment for the child. A shell child is judged with the
  * exact environment it is started with (judgedShellEnv), extras included, so
  * a `$VAR` cannot mean one thing to the check and another to the shell. The
- * child's depth goes last, so `env` can never lower it.
+ * child's depth goes last, so `env` can never lower it. `env` may not set any
+ * EIGHT_* name: those configure the checks themselves (EIGHT_SYSTEM_ONE,
+ * EIGHT_ALLOW_HOSTED, ...), so such a child is refused, never quietly trimmed.
  */
 export async function planProcessChild(opts: {
 	runtime: ProcessChildRuntime;
@@ -186,6 +189,14 @@ export async function planProcessChild(opts: {
 	env?: Record<string, string>;
 }): Promise<ProcessChildPlan> {
 	const { runtime, task, cwd } = opts;
+	if (runtime !== "shell" && runtime !== HOSTED_CLI_RUNTIME)
+		return { run: false, refusal: `Not started: "${String(runtime)}" is not a process runtime.` };
+	const own = Object.keys(opts.env ?? {}).filter((k) => k.toUpperCase().startsWith("EIGHT_"));
+	if (own.length > 0)
+		return {
+			run: false,
+			refusal: `Not started: the child's environment sets ${own.join(", ")}. EIGHT_* settings configure 8gent's own checks, so a child may not set them.`,
+		};
 	// Recursion cap (#3331): refused before anything is resolved or started.
 	const { agentDepthRefusal, childAgentEnv } = await import("./index");
 	const depthRefusal = agentDepthRefusal();
@@ -261,8 +272,9 @@ export async function spawnAgentTool(
 
 		const effectiveRuntime = runtime || "8gent";
 
-		// Process runtimes go through the one shared gate.
-		if (effectiveRuntime !== "8gent") {
+		// Process runtimes go through the one shared gate. Any other runtime string runs on the
+		// 8gent path below, as it always has.
+		if (effectiveRuntime === "shell" || effectiveRuntime === HOSTED_CLI_RUNTIME) {
 			const plan = await planProcessChild({
 				runtime: effectiveRuntime,
 				task,

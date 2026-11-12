@@ -125,14 +125,20 @@ holds every check a process child passes, and both `spawn_agent` and the spawner
   in the mode's environment, the approval card for ask); without a mode, the sanitiser and System
   One; then the isolated inline python rewrite.
 
+Before any of those, it refuses a runtime that is not a process runtime, and a session `env` that
+sets any `EIGHT_*` name, in any case. Those names configure the checks themselves
+(`EIGHT_SYSTEM_ONE`, `EIGHT_ALLOW_HOSTED`, ...), so otherwise a session could switch its own gate
+off. The refusal lists the names; they are never quietly dropped.
+
 It returns the task and the whole environment to spawn with. A shell child is judged with exactly
-the environment it is started with, session `env` included, so a `$VAR` cannot mean one thing to
-the check and another to the shell. `childAgentEnv()` goes last, so session env can never lower
+the environment it is started with, session `env` included, under a bound permission mode too, so
+a `$VAR` or `~` cannot mean one thing to the check and another to the shell. `childAgentEnv()` goes last, so session env can never lower
 the depth. The permission mode and provider pin that apply are the ones bound where `send()` is
 called. `spawnerHarness()` is the only way to build the adapter, and it takes no gate: no caller
 can swap the checks out. A refused turn ends `failed` with the refusal, word for word what
 `spawn_agent` returns, and nothing runs. A parity test runs both paths on the same cases (plan
-mode, a denied command, no hosted opt-in, a pinned provider, a `$VAR` set only in session env).
+mode, a denied command, no hosted opt-in, a pinned provider, and a `$VAR` or `HOME` set only in session env, each with no mode and under
+`ask`).
 The child gets no stdin, so nothing it runs can wait on an answer: prompts default No,
 unattended means no.
 

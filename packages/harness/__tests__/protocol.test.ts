@@ -16,7 +16,11 @@ import { afterAll, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { HOSTED_CLI_RUNTIME, spawnAgentTool } from "../../orchestration/delegation-tools";
+import {
+	HOSTED_CLI_RUNTIME,
+	planProcessChild,
+	spawnAgentTool,
+} from "../../orchestration/delegation-tools";
 import { runWithProviderPin } from "../../orchestration/provider-pin";
 import { createPermissionHolder, runWithPermissionHolder } from "../../permissions/permission-mode";
 import {
@@ -307,21 +311,71 @@ describe("parity: the harness refuses what spawn_agent refuses, in the same word
 		});
 	});
 
-	it("a $VAR that only the session env sets is judged with the value the shell gets", async () => {
-		// The boundary only judges paths that exist, so plant a key in the suite's temp HOME
-		// (tests/preload-temp-home.ts), never the real one.
+	// The boundary only judges paths that exist, so plant a key in the suite's temp HOME
+	// (tests/preload-temp-home.ts), never the real one.
+	function plantKey(): string {
 		const home = process.env.HOME as string;
 		expect(home).not.toBe(os.homedir());
 		const keys = path.join(home, ".ssh");
 		fs.mkdirSync(keys, { recursive: true });
 		fs.writeFileSync(path.join(keys, "id_rsa"), "not a key\n");
-		const task = "cat $KEYS/id_rsa";
-		const tool = await withEnv({ KEYS: keys }, () => viaSpawnAgent("shell", task));
-		const turn = await withEnv({ KEYS: undefined }, () =>
-			viaHarness("shell", task, { KEYS: keys }),
-		);
-		expect(tool).toContain("never reads credential files");
-		expect(turn).toMatchObject({ status: "failed", error: tool });
+		return keys;
+	}
+
+	for (const mode of [undefined, "ask"] as const) {
+		it(`a $VAR that only the session env sets is judged as the shell gets it (mode: ${mode ?? "none"})`, async () => {
+			const keys = plantKey();
+			const holder = mode ? createPermissionHolder(mode) : undefined;
+			const task = "cat $KEYS/id_rsa";
+			const tool = await withEnv({ KEYS: keys }, () =>
+				runWithPermissionHolder(holder, () => viaSpawnAgent("shell", task)),
+			);
+			const turn = await withEnv({ KEYS: undefined }, () =>
+				runWithPermissionHolder(holder, () => viaHarness("shell", task, { KEYS: keys })),
+			);
+			expect(tool).toContain("never reads credential files");
+			expect(turn).toMatchObject({ status: "failed", error: tool });
+		});
+
+		// System One reads HOME from the env it is handed. Before the fix, a bound mode handed
+		// it process.env, so a session HOME aimed at ~/.ssh let `cat ~/id_rsa` through.
+		it(`a session HOME is judged as the shell gets it (mode: ${mode ?? "none"})`, async () => {
+			const keys = plantKey();
+			const holder = mode ? createPermissionHolder(mode) : undefined;
+			const task = "cat ~/id_rsa";
+			const tool = await withEnv({ HOME: keys }, () =>
+				runWithPermissionHolder(holder, () => viaSpawnAgent("shell", task)),
+			);
+			const turn = await runWithPermissionHolder(holder, () =>
+				viaHarness("shell", task, { HOME: keys }),
+			);
+			expect(tool).toStartWith("[BLOCKED]");
+			expect(turn).toMatchObject({ status: "failed", error: tool });
+		});
+	}
+});
+
+describe("a session cannot reconfigure the checks", () => {
+	it("refuses a session env that sets EIGHT_SYSTEM_ONE, and runs nothing", async () => {
+		const turn = await viaHarness("shell", "touch marker", { EIGHT_SYSTEM_ONE: "0" });
+		expect(turn.status).toBe("failed");
+		expect(turn.error).toContain("EIGHT_SYSTEM_ONE");
+		expect(fs.existsSync(path.join(work, "marker"))).toBe(false);
+	});
+
+	it("refuses any EIGHT_* name, whatever its case", async () => {
+		const turn = await viaHarness("shell", "printf ok", { eight_allow_hosted: "1" });
+		expect(turn).toMatchObject({ status: "failed" });
+		expect(turn.error).toContain("eight_allow_hosted");
+	});
+
+	it("refuses a runtime that is not a process runtime", async () => {
+		const plan = await planProcessChild({
+			runtime: "bogus" as ProcessRuntime,
+			task: "printf ok",
+			cwd: work,
+		});
+		expect(plan).toEqual({ run: false, refusal: 'Not started: "bogus" is not a process runtime.' });
 	});
 });
 
