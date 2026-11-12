@@ -50,7 +50,8 @@ interface HarnessTurn {
 
 Six verbs, matching the brief: start, send a turn, stream events, cancel, capabilities, stop.
 
-- **start** opens a session: a working directory, extra environment, a per-turn time limit.
+- **start** opens a session: a working directory and a per-turn time limit. There is no option
+  for extra environment; see section 3.
 - **send** begins one turn and returns at once. It throws `HarnessError` only when the turn
   cannot begin: `session_not_found`, `session_busy`, `empty_input`. Anything that goes wrong
   after the turn began ends the turn `failed` instead. Two error channels, never mixed.
@@ -125,20 +126,25 @@ holds every check a process child passes, and both `spawn_agent` and the spawner
   in the mode's environment, the approval card for ask); without a mode, the sanitiser and System
   One; then the isolated inline python rewrite.
 
-Before any of those, it refuses a runtime that is not a process runtime, and a session `env` that
-sets any `EIGHT_*` name, in any case. Those names configure the checks themselves
-(`EIGHT_SYSTEM_ONE`, `EIGHT_ALLOW_HOSTED`, ...), so otherwise a session could switch its own gate
-off. The refusal lists the names; they are never quietly dropped.
+Before any of those, it refuses a runtime that is not a process runtime, for `spawn_agent` too:
+an unknown runtime fails closed.
 
-It returns the task and the whole environment to spawn with. A shell child is judged with exactly
-the environment it is started with, session `env` included, under a bound permission mode too, so
-a `$VAR` or `~` cannot mean one thing to the check and another to the shell. `childAgentEnv()` goes last, so session env can never lower
-the depth. The permission mode and provider pin that apply are the ones bound where `send()` is
-called. `spawnerHarness()` is the only way to build the adapter, and it takes no gate: no caller
-can swap the checks out. A refused turn ends `failed` with the refusal, word for word what
-`spawn_agent` returns, and nothing runs. A parity test runs both paths on the same cases (plan
-mode, a denied command, no hosted opt-in, a pinned provider, and a `$VAR` or `HOME` set only in session env, each with no mode and under
-`ask`).
+**No extra environment.** A session cannot pass environment to the child, and neither can any
+other caller of `planProcessChild`. The child gets this process's environment plus its depth
+(`childAgentEnv()`, last), and a shell child is judged with exactly that environment, under a
+bound permission mode too, so a `$VAR` or `~` cannot mean one thing to the check and another to
+the shell. A caller-supplied environment was tried and removed: no denylist can be complete,
+because ordinary names change what a command the checks allow actually does (git config through
+`GIT_CONFIG_*`, a `HOME` with a crafted `.gitconfig`, a `PATH` with a fake `ls`, `SHELLOPTS` with
+`PS4`). A future slice may add an explicit allowlist of names, each one admitted only with a probe
+that shows it cannot turn an allowed command into a different one.
+
+The permission mode and provider pin that apply are the ones bound where `send()` is called.
+`spawnerHarness()` is the only way to build the adapter, and it takes no gate: no caller can swap
+the checks out. A refused turn ends `failed` with the refusal, word for word what `spawn_agent`
+returns, and nothing runs. A parity test runs both paths on the same cases: plan mode, a denied
+command, no hosted opt-in, a pinned provider, an unknown runtime, and a `$VAR` naming
+`~/.ssh`, the last with no mode and under `ask`.
 The child gets no stdin, so nothing it runs can wait on an answer: prompts default No,
 unattended means no.
 

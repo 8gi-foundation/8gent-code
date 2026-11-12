@@ -37,11 +37,14 @@ export interface HarnessCapabilities {
 	local: boolean;
 }
 
+/**
+ * There is deliberately no environment option: any name a session could set
+ * (git config, HOME, PATH, shell options) changes what an allowed command
+ * does. See the spec, section 3.
+ */
 export interface StartOptions {
 	/** Working directory for every turn in the session. Defaults to process.cwd(). */
 	cwd?: string;
-	/** Extra environment for the harness process, merged over the parent's. */
-	env?: Record<string, string>;
 	/** Per-turn time limit in ms. A turn that hits it ends `incomplete`, reason "timeout". */
 	turnTimeoutMs?: number;
 }

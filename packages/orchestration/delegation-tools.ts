@@ -174,29 +174,20 @@ export type ProcessChildPlan =
  * spawn_agent and the harness protocol's SpawnerHarness both call this, so
  * neither can start a process the other would refuse.
  *
- * `env` is extra environment for the child. A shell child is judged with the
- * exact environment it is started with (judgedShellEnv), extras included, so
- * a `$VAR` cannot mean one thing to the check and another to the shell. The
- * child's depth goes last, so `env` can never lower it. `env` may not set any
- * EIGHT_* name: those configure the checks themselves (EIGHT_SYSTEM_ONE,
- * EIGHT_ALLOW_HOSTED, ...), so such a child is refused, never quietly trimmed.
+ * There is no caller-supplied environment: the child gets this process's
+ * environment plus its depth, and a shell child is judged with exactly that
+ * (judgedShellEnv). Any name a caller could set changes what an allowed
+ * command does (git config, HOME, PATH, shell options), so none is taken.
  */
 export async function planProcessChild(opts: {
 	runtime: ProcessChildRuntime;
 	task: string;
 	cwd: string;
 	permissionMode?: unknown;
-	env?: Record<string, string>;
 }): Promise<ProcessChildPlan> {
 	const { runtime, task, cwd } = opts;
 	if (runtime !== "shell" && runtime !== HOSTED_CLI_RUNTIME)
 		return { run: false, refusal: `Not started: "${String(runtime)}" is not a process runtime.` };
-	const own = Object.keys(opts.env ?? {}).filter((k) => k.toUpperCase().startsWith("EIGHT_"));
-	if (own.length > 0)
-		return {
-			run: false,
-			refusal: `Not started: the child's environment sets ${own.join(", ")}. EIGHT_* settings configure 8gent's own checks, so a child may not set them.`,
-		};
 	// Recursion cap (#3331): refused before anything is resolved or started.
 	const { agentDepthRefusal, childAgentEnv } = await import("./index");
 	const depthRefusal = agentDepthRefusal();
@@ -224,12 +215,12 @@ export async function planProcessChild(opts: {
 			};
 		}
 		// A process child starts at this depth, so an 8gent it runs is capped too.
-		return { run: true, runtime, task, env: { ...opts.env, ...childAgentEnv() } };
+		return { run: true, runtime, task, env: childAgentEnv() };
 	}
 
-	// The shell child keeps this process's environment, the extras and its depth. Its checks
-	// and its spawn both read that one environment (judgedShellEnv), so `$VAR` agrees.
-	return withShellEnv({ ...process.env, ...opts.env, ...childAgentEnv() }, async () => {
+	// The shell child keeps this process's environment plus its depth. Its checks and its
+	// spawn both read that one environment (judgedShellEnv), so `$VAR` agrees.
+	return withShellEnv({ ...process.env, ...childAgentEnv() }, async () => {
 		// runtime "shell" runs the task through sh -c, so it is a shell command.
 		if (child) {
 			const blocked = await gateShellChild(task, cwd, child);
@@ -272,9 +263,9 @@ export async function spawnAgentTool(
 
 		const effectiveRuntime = runtime || "8gent";
 
-		// Process runtimes go through the one shared gate. Any other runtime string runs on the
-		// 8gent path below, as it always has.
-		if (effectiveRuntime === "shell" || effectiveRuntime === HOSTED_CLI_RUNTIME) {
+		// Every runtime but 8gent goes through the one shared gate, which refuses a string that
+		// is not a process runtime: an unknown runtime fails closed.
+		if (effectiveRuntime !== "8gent") {
 			const plan = await planProcessChild({
 				runtime: effectiveRuntime,
 				task,

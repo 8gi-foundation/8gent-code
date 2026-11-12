@@ -16,11 +16,7 @@ import { afterAll, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import {
-	HOSTED_CLI_RUNTIME,
-	planProcessChild,
-	spawnAgentTool,
-} from "../../orchestration/delegation-tools";
+import { HOSTED_CLI_RUNTIME, spawnAgentTool } from "../../orchestration/delegation-tools";
 import { runWithProviderPin } from "../../orchestration/provider-pin";
 import { createPermissionHolder, runWithPermissionHolder } from "../../permissions/permission-mode";
 import {
@@ -190,7 +186,7 @@ describe("conformance rubric", () => {
 // ── The spawner adapter, on the local shell ───────────────────────
 
 const ON = { [HARNESS_PROTOCOL_FLAG]: "1" };
-const shellHarness = () => spawnerHarness("shell", { env: ON }) as HarnessAdapter;
+const shellHarness = () => spawnerHarness("shell", { flagEnv: ON }) as HarnessAdapter;
 
 // The sanitiser refuses chaining, so the two multi-step turns are scripts in the session's
 // folder. long.sh execs sleep, so sleep is the spawned pid: the spawner does not start a
@@ -217,7 +213,7 @@ describe("spawner adapter on the shell runtime", () => {
 
 	it("reports the shell as local and the hosted runtime as not", () => {
 		expect(shellHarness().capabilities().local).toBe(true);
-		const hosted = spawnerHarness(HOSTED_CLI_RUNTIME, { env: ON }) as HarnessAdapter;
+		const hosted = spawnerHarness(HOSTED_CLI_RUNTIME, { flagEnv: ON }) as HarnessAdapter;
 		expect(hosted.capabilities().local).toBe(false);
 	});
 
@@ -247,10 +243,9 @@ async function viaSpawnAgent(runtime: ProcessRuntime, task: string): Promise<str
 async function viaHarness(
 	runtime: ProcessRuntime,
 	task: string,
-	env?: Record<string, string>,
 ): Promise<{ status: string; error?: string }> {
-	const h = spawnerHarness(runtime, { env: ON }) as HarnessAdapter;
-	const s = await h.start({ cwd: work, env });
+	const h = spawnerHarness(runtime, { flagEnv: ON }) as HarnessAdapter;
+	const s = await h.start({ cwd: work });
 	return h.send(s.id, { text: task }).done;
 }
 
@@ -323,59 +318,25 @@ describe("parity: the harness refuses what spawn_agent refuses, in the same word
 	}
 
 	for (const mode of [undefined, "ask"] as const) {
-		it(`a $VAR that only the session env sets is judged as the shell gets it (mode: ${mode ?? "none"})`, async () => {
+		it(`a $VAR is judged as the shell gets it (mode: ${mode ?? "none"})`, async () => {
 			const keys = plantKey();
 			const holder = mode ? createPermissionHolder(mode) : undefined;
 			const task = "cat $KEYS/id_rsa";
-			const tool = await withEnv({ KEYS: keys }, () =>
-				runWithPermissionHolder(holder, () => viaSpawnAgent("shell", task)),
-			);
-			const turn = await withEnv({ KEYS: undefined }, () =>
-				runWithPermissionHolder(holder, () => viaHarness("shell", task, { KEYS: keys })),
-			);
-			expect(tool).toContain("never reads credential files");
-			expect(turn).toMatchObject({ status: "failed", error: tool });
-		});
-
-		// System One reads HOME from the env it is handed. Before the fix, a bound mode handed
-		// it process.env, so a session HOME aimed at ~/.ssh let `cat ~/id_rsa` through.
-		it(`a session HOME is judged as the shell gets it (mode: ${mode ?? "none"})`, async () => {
-			const keys = plantKey();
-			const holder = mode ? createPermissionHolder(mode) : undefined;
-			const task = "cat ~/id_rsa";
-			const tool = await withEnv({ HOME: keys }, () =>
-				runWithPermissionHolder(holder, () => viaSpawnAgent("shell", task)),
-			);
-			const turn = await runWithPermissionHolder(holder, () =>
-				viaHarness("shell", task, { HOME: keys }),
-			);
-			expect(tool).toStartWith("[BLOCKED]");
-			expect(turn).toMatchObject({ status: "failed", error: tool });
+			await withEnv({ KEYS: keys }, async () => {
+				const tool = await runWithPermissionHolder(holder, () => viaSpawnAgent("shell", task));
+				const turn = await runWithPermissionHolder(holder, () => viaHarness("shell", task));
+				expect(tool).toContain("never reads credential files");
+				expect(turn).toMatchObject({ status: "failed", error: tool });
+			});
 		});
 	}
-});
 
-describe("a session cannot reconfigure the checks", () => {
-	it("refuses a session env that sets EIGHT_SYSTEM_ONE, and runs nothing", async () => {
-		const turn = await viaHarness("shell", "touch marker", { EIGHT_SYSTEM_ONE: "0" });
-		expect(turn.status).toBe("failed");
-		expect(turn.error).toContain("EIGHT_SYSTEM_ONE");
-		expect(fs.existsSync(path.join(work, "marker"))).toBe(false);
-	});
-
-	it("refuses any EIGHT_* name, whatever its case", async () => {
-		const turn = await viaHarness("shell", "printf ok", { eight_allow_hosted: "1" });
-		expect(turn).toMatchObject({ status: "failed" });
-		expect(turn.error).toContain("eight_allow_hosted");
-	});
-
-	it("refuses a runtime that is not a process runtime", async () => {
-		const plan = await planProcessChild({
-			runtime: "bogus" as ProcessRuntime,
-			task: "printf ok",
-			cwd: work,
-		});
-		expect(plan).toEqual({ run: false, refusal: 'Not started: "bogus" is not a process runtime.' });
+	it("a runtime that is not a process runtime", async () => {
+		const refusal = 'Not started: "bogus" is not a process runtime.';
+		const tool = await viaSpawnAgent("bogus" as ProcessRuntime, "printf ok");
+		const turn = await viaHarness("bogus" as ProcessRuntime, "printf ok");
+		expect(tool).toBe(refusal);
+		expect(turn).toMatchObject({ status: "failed", error: refusal });
 	});
 });
 
@@ -388,7 +349,7 @@ describe("defaults ship off", () => {
 	});
 
 	it("spawnerHarness gives nothing while the flag is off", () => {
-		expect(spawnerHarness("shell", { env: {} })).toBeNull();
-		expect(spawnerHarness("shell", { env: ON })).not.toBeNull();
+		expect(spawnerHarness("shell", { flagEnv: {} })).toBeNull();
+		expect(spawnerHarness("shell", { flagEnv: ON })).not.toBeNull();
 	});
 });

@@ -7,8 +7,8 @@
  * Every turn goes through planProcessChild (packages/orchestration/
  * delegation-tools.ts), the same function spawn_agent calls, so a turn is
  * refused exactly when spawn_agent would refuse the same child. There is no
- * way to pass a different gate. The plan decides the task and the whole
- * environment the child is spawned with; session env is judged with it.
+ * way to pass a different gate, and no way to pass environment: the plan
+ * decides the task and the whole environment the child is spawned with.
  */
 
 import { killProcessTree } from "../../core/shell";
@@ -40,7 +40,6 @@ interface Turn {
 }
 
 interface Session extends HarnessSession {
-	env?: Record<string, string>;
 	turnTimeoutMs?: number;
 	current?: Turn;
 }
@@ -77,7 +76,6 @@ class SpawnerHarness implements HarnessAdapter {
 			id: nextId("hs"),
 			harness: this.id,
 			cwd: options.cwd ?? process.cwd(),
-			env: options.env,
 			turnTimeoutMs: options.turnTimeoutMs,
 		};
 		this.sessions.set(session.id, session);
@@ -157,7 +155,6 @@ class SpawnerHarness implements HarnessAdapter {
 				task: text,
 				cwd: session.cwd,
 				permissionMode: this.permissionMode,
-				env: session.env,
 			});
 			if (turn.cancelRequested) return end("cancelled");
 			if (!plan.run) return end("failed", { error: plan.refusal });
@@ -215,9 +212,9 @@ class SpawnerHarness implements HarnessAdapter {
  */
 export function spawnerHarness(
 	runtime: ProcessRuntime,
-	options: { env?: Record<string, string | undefined>; permissionMode?: unknown } = {},
+	options: { flagEnv?: Record<string, string | undefined>; permissionMode?: unknown } = {},
 ): HarnessAdapter | null {
-	return harnessProtocolEnabled(options.env ?? process.env)
+	return harnessProtocolEnabled(options.flagEnv ?? process.env)
 		? new SpawnerHarness(runtime, options.permissionMode)
 		: null;
 }
