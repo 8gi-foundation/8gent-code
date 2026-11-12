@@ -53,6 +53,33 @@ export interface RunningCLIAgent {
 // ============================================
 
 const cliAgents = new Map<string, RunningCLIAgent>();
+
+// Detached children lead their own process group, so they no longer die with
+// our terminal's Ctrl+C / hangup. Track every live child and kill its group
+// when this process goes away, so none outlives the person who stopped us.
+const liveChildren = new Set<ChildProcess>();
+let exitCleanupInstalled = false;
+
+function killAllLiveChildren(): void {
+	for (const child of liveChildren) killProcessTree(child.pid, "SIGKILL");
+	liveChildren.clear();
+}
+
+function installExitCleanup(): void {
+	if (exitCleanupInstalled) return;
+	exitCleanupInstalled = true;
+	process.on("exit", killAllLiveChildren);
+	if (process.platform === "win32") return;
+	for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+		const handler = () => {
+			killAllLiveChildren();
+			process.removeListener(sig, handler);
+			// Re-raise so the default exit (or any other listener) still happens.
+			process.kill(process.pid, sig);
+		};
+		process.on(sig, handler);
+	}
+}
 let cliIdCounter = 0;
 
 function generateCLIId(): string {
@@ -120,9 +147,12 @@ export function spawnCLIAgent(
 		// the tree there, so the current behaviour stays.
 		detached: process.platform !== "win32",
 	});
+	liveChildren.add(proc);
+	installExitCleanup();
 
 	const promise = new Promise<CLIAgentResult>((resolve) => {
 		let settled = false;
+		let killTimer: ReturnType<typeof setTimeout> | undefined;
 
 		const timeoutHandle = setTimeout(() => {
 			if (settled) return;
@@ -130,7 +160,7 @@ export function spawnCLIAgent(
 			timedOut = true;
 			killProcessTree(proc.pid, "SIGTERM");
 			// Give it 5s to die gracefully, then SIGKILL
-			setTimeout(() => killProcessTree(proc.pid, "SIGKILL"), 5000);
+			killTimer = setTimeout(() => killProcessTree(proc.pid, "SIGKILL"), 5000);
 
 			const result: CLIAgentResult = {
 				runtime,
@@ -164,6 +194,9 @@ export function spawnCLIAgent(
 		});
 
 		proc.on("close", (code) => {
+			liveChildren.delete(proc);
+			// The child is reaped: its pid may be reused, so never SIGKILL it later.
+			if (killTimer) clearTimeout(killTimer);
 			if (settled) return;
 			settled = true;
 			clearTimeout(timeoutHandle);
@@ -193,6 +226,7 @@ export function spawnCLIAgent(
 		});
 
 		proc.on("error", (err) => {
+			liveChildren.delete(proc);
 			if (settled) return;
 			settled = true;
 			clearTimeout(timeoutHandle);

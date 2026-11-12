@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { resetCLIAgents, spawnCLIAgent } from "./universal-spawner";
 
 const posix = process.platform !== "win32";
@@ -45,4 +49,43 @@ describe("spawnCLIAgent process group", () => {
 		expect(result.exitCode).toBe(3);
 		expect(result.stdout.trim()).toBe("hi");
 	});
+});
+
+describe("spawnCLIAgent parent exit", () => {
+	for (const sig of ["SIGHUP", "SIGINT"] as const) {
+		test.skipIf(!posix)(`${sig} to the parent's group does not orphan the child`, async () => {
+			const dir = fs.mkdtempSync(path.join(os.tmpdir(), "spawner-pg-"));
+			const script = path.join(dir, "parent.ts");
+			fs.writeFileSync(
+				script,
+				`import { spawnCLIAgent } from ${JSON.stringify(path.join(import.meta.dir, "universal-spawner.ts"))};
+console.log(spawnCLIAgent("shell", "sleep 40", { timeout: 60000 }).process?.pid);
+setInterval(() => {}, 1000);
+`,
+			);
+			// The parent leads its own group, as a terminal's foreground job does.
+			const parent = spawn(process.execPath, [script], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
+			const exited = new Promise<void>((r) => parent.on("close", () => r()));
+			try {
+				const childPid = await new Promise<number>((resolve, reject) => {
+					let buf = "";
+					parent.stdout?.on("data", (d) => {
+						buf += d.toString();
+						if (buf.includes("\n")) resolve(Number.parseInt(buf.trim(), 10));
+					});
+					parent.on("error", reject);
+					setTimeout(() => reject(new Error("no child pid")), 8000);
+				});
+				expect(alive(childPid)).toBe(true);
+				process.kill(-(parent.pid as number), sig);
+				await exited;
+				expect(await waitDead(childPid, 4000)).toBe(true);
+			} finally {
+				try {
+					process.kill(-(parent.pid as number), "SIGKILL");
+				} catch {}
+				fs.rmSync(dir, { recursive: true, force: true });
+			}
+		}, 20000);
+	}
 });
