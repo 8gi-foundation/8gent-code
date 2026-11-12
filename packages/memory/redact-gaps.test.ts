@@ -52,6 +52,16 @@ describe("#243 redact: new token shapes are removed", () => {
 			"Password:[REDACTED_SECRET] and passwd=[REDACTED_SECRET]",
 		);
 	});
+	test("JSON password keys and quoted values with spaces", () => {
+		expect(redact(`{"password":"x"}`)).toBe(`{"password":"[REDACTED_SECRET]"}`);
+		expect(redact(`{"Password" : "a b c"}`)).toBe(`{"Password" : "[REDACTED_SECRET]"}`);
+		expect(redact(`{"db_password":"x"}`)).toBe(`{"db_password":"[REDACTED_SECRET]"}`);
+		expect(redact(`{"DB_PASSWORD":"x"}`)).toBe(`{"DB_PASSWORD":"[REDACTED_SECRET]"}`);
+		expect(redact("password='a b'")).toBe("password='[REDACTED_SECRET]'");
+		const out = redact(`password: "correct horse battery"`);
+		expect(out).toBe(`password: "[REDACTED_SECRET]"`);
+		expect(out).not.toContain("horse");
+	});
 	test("an upper case PASSWORD line is redacted once, not twice", () => {
 		expect(redact("DB_PASSWORD=p4ss")).toBe("DB_PASSWORD=[REDACTED_SECRET]");
 	});

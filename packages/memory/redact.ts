@@ -57,9 +57,11 @@ const PATTERNS: Array<[RegExp, string]> = [
 	// password= and password: in any case (the rule above is upper case only, so
 	// "monkey: x" or "author: y" are not touched). The name must end in pass(word|wd),
 	// so "passwordless: true" and prose like "the password field" are left alone.
+	// A quoted JSON key ("password":) is matched too, and a quoted value is redacted
+	// up to its closing quote, so "correct horse battery" does not leak its tail.
 	[
-		/\b([A-Za-z0-9_]*pass(?:word|wd))(\s*[=:]\s*['"]?)(?!\[REDACTED)[^\s'"]+/gi,
-		"$1$2[REDACTED_SECRET]",
+		/\b([A-Za-z0-9_]*pass(?:word|wd))(["']?\s*[=:]\s*)(["']?)(?!\[REDACTED)(?:(?<=")[^"\n]+|(?<=')[^'\n]+|[^\s'"]+)/gi,
+		"$1$2$3[REDACTED_SECRET]",
 	],
 	// Credentials inside a URL: scheme://user:pass@host keeps scheme and host
 	[/(?<=:\/\/)[^\s/:@]{1,256}:[^\s/@]{1,256}(?=@)/g, "[REDACTED_URL_CREDENTIALS]"],
