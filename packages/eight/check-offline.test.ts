@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { findEnforcer, runCheckOffline, runListing, verdictLines } from "./check-offline.ts";
+import {
+	childEnv,
+	findEnforcer,
+	runCheckOffline,
+	runListing,
+	verdictLines,
+} from "./check-offline.ts";
 
 const tmp = (name: string, body: string) => {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "co-"));
@@ -60,11 +66,103 @@ describe("listing hooks (they only list; the OS is the guarantee)", () => {
 describe("verdict", () => {
 	test("the line names the OS mechanism and claims nothing about the rest", () => {
 		const lines = verdictLines("sandbox-exec", []);
-		expect(lines).toEqual([
-			"check-offline: ran with outbound network blocked by the operating system (sandbox-exec). 0 attempt(s) were refused and listed below. Loopback and local sockets were allowed.",
-		]);
-		expect(lines.join(" ")).not.toMatch(/nothing left|not proof|hooks/i);
+		expect(lines[0]).toBe(
+			"check-offline: ran with outbound network blocked by the operating system (sandbox-exec). The in-process hooks listed 0 attempt(s) below; refusals the operating system made outside the hooks are not listed. Loopback and local sockets were allowed.",
+		);
+		expect(lines[1]).toContain("Not blocked: traffic that local services forward");
+		expect(lines[1]).toContain("LaunchAgent");
+		expect(lines.join(" ")).not.toMatch(/nothing left|not proof/i);
 	});
+});
+
+describe("fail closed and env", () => {
+	const enf = { mechanism: "fake", wrap: (a: string[]) => a };
+	const run = (r: { status: number | null; stdout: string }) => {
+		const lines: string[] = [];
+		return runCheckOffline({
+			sessionFile: "/x.ts",
+			enforcer: enf,
+			out: (l) => lines.push(l),
+			spawn: () => r,
+		}).then((code) => ({ code, text: lines.join("\n") }));
+	};
+	const M = "__CHECK_OFFLINE_RESULT__";
+	test("non-zero child status, session error and garbage marker all exit 3 with the cause", async () => {
+		const a = await run({ status: 1, stdout: `${M}{"attempts":[]}\n` });
+		expect(a.code).toBe(3);
+		expect(a.text).toContain("status 1");
+		const b = await run({ status: 0, stdout: `${M}{"attempts":[],"error":"boom"}\n` });
+		expect(b.code).toBe(3);
+		expect(b.text).toContain("the session failed: boom");
+		const c = await run({ status: 0, stdout: `${M}{not json\n` });
+		expect(c.code).toBe(3);
+		expect(c.text).toContain("could not be read");
+	});
+
+	test("the LAST marker wins, so an early fake clean line cannot win", async () => {
+		const r = await run({
+			status: 0,
+			stdout: `${M}{"attempts":[]}\n${M}{"attempts":[{"via":"fetch","host":"a.example","port":"443","caller":"x"}]}\n`,
+		});
+		expect(r.code).toBe(1);
+		expect(r.text).toContain("a.example:443");
+	});
+
+	test("proxy variables, upper and lower case, are removed from the child env", () => {
+		const base = {
+			HTTP_PROXY: "a",
+			http_proxy: "a",
+			HTTPS_PROXY: "a",
+			https_proxy: "a",
+			ALL_PROXY: "a",
+			all_proxy: "a",
+			NO_PROXY: "a",
+			no_proxy: "a",
+			KEEP: "1",
+		};
+		const env = childEnv(base, { X: "2" });
+		expect(Object.keys(env).sort()).toEqual(["KEEP", "X"]);
+	});
+
+	test("a real child never sees a proxy variable set in the parent", async () => {
+		const file = tmp(
+			"env.ts",
+			`export default function () { return Object.keys(process.env).filter((k) => /proxy/i.test(k)); }`,
+		);
+		process.env.HTTPS_PROXY = "http://203.0.113.1:3128";
+		process.env.http_proxy = "http://203.0.113.1:3128";
+		let seen: unknown = "unset";
+		try {
+			await runCheckOffline({
+				sessionFile: file,
+				enforcer: { mechanism: "plumbing-only", wrap: (a) => a },
+				out: () => {},
+				spawn: (argv) => {
+					const { spawnSync } = require("node:child_process");
+					const rep = tmp("report", "");
+					const r = spawnSync(argv[0], argv.slice(1), {
+						env: childEnv(process.env, {
+							CHECK_OFFLINE_SESSION: file,
+							CHECK_OFFLINE_HOOKS: "1",
+							CHECK_OFFLINE_REPORT: rep,
+						}),
+						encoding: "utf8",
+						stdio: "ignore",
+					});
+					const m = fs
+						.readFileSync(rep, "utf8")
+						.split("\n")
+						.find((l: string) => l.startsWith(M));
+					seen = JSON.parse((m as string).slice(M.length)).result;
+					return { status: r.status, stdout: fs.readFileSync(rep, "utf8") };
+				},
+			});
+		} finally {
+			delete process.env.HTTPS_PROXY;
+			delete process.env.http_proxy;
+		}
+		expect(seen).toEqual([]);
+	}, 60000);
 });
 
 describe("no enforcement", () => {
@@ -119,12 +217,12 @@ describe("child protocol (identity wrapper, no OS block: tests the plumbing only
 			out: (l) => lines.push(l),
 		});
 		expect(code).toBe(1);
-		expect(lines[0]).toContain("(plumbing-only). 1 attempt(s) were refused");
+		expect(lines[0]).toContain("(plumbing-only). The in-process hooks listed 1 attempt(s)");
 		expect(lines.join("\n")).toContain("telemetry.example.com:443");
 	}, 60000);
 });
 
-describe("OS enforcement (needs sandbox-exec on macOS or unshare -rn on Linux)", () => {
+describe("OS enforcement (needs sandbox-exec on macOS or unshare -rnm on Linux)", () => {
 	enforced(
 		"a child cannot reach a remote address by any route, but can reach loopback",
 		async () => {
@@ -141,6 +239,8 @@ export default async function () {
 	out.bunFetch = await within((Bun as any).fetch("http://" + REMOTE + "/"));
 	try { out.undici = await within(require("undici").fetch("http://" + REMOTE + "/")); } catch { out.undici = "failed"; }
 	out.wsProxy = await within(new Promise((res, rej) => { const w = new (WebSocket as any)("ws://localhost:1/", { proxy: "http://" + REMOTE + ":3128" }); w.onopen = res; w.onerror = rej; w.onclose = rej; }));
+	out.dns = await within(require("node:dns").promises.lookup("example.com"));
+	out.proxyEnv = Object.keys(process.env).filter((k) => /proxy/i.test(k)).join(",");
 	out.netConnect = await within(new Promise((res, rej) => { const s = net.connect({ host: REMOTE, port: 80 }); s.on("connect", res); s.on("error", rej); }));
 	return out;
 }`,
@@ -152,16 +252,19 @@ export default async function () {
 				out: () => {},
 				spawn: (argv) => {
 					const { spawnSync } = require("node:child_process");
+					const rep = tmp("report", "");
 					const r = spawnSync(argv[0], argv.slice(1), {
-						env: { ...process.env, CHECK_OFFLINE_SESSION: file, CHECK_OFFLINE_HOOKS: "0" },
-						encoding: "utf8",
+						env: childEnv(
+							{ ...process.env, HTTPS_PROXY: "http://203.0.113.1:3128" },
+							{ CHECK_OFFLINE_SESSION: file, CHECK_OFFLINE_HOOKS: "0", CHECK_OFFLINE_REPORT: rep },
+						),
+						stdio: "ignore",
 						timeout: 60000,
 					});
-					const m = (r.stdout as string)
-						.split("\n")
-						.find((l) => l.startsWith("__CHECK_OFFLINE_RESULT__"));
+					const text = fs.readFileSync(rep, "utf8");
+					const m = text.split("\n").find((l) => l.startsWith("__CHECK_OFFLINE_RESULT__"));
 					captured = m ? JSON.parse(m.slice("__CHECK_OFFLINE_RESULT__".length)).result : null;
-					return { status: r.status, stdout: r.stdout };
+					return { status: r.status, stdout: text };
 				},
 			});
 			server.stop(true);
@@ -171,6 +274,8 @@ export default async function () {
 			expect(captured.undici).toBe("failed");
 			expect(captured.wsProxy).toBe("failed");
 			expect(captured.netConnect).toBe("failed");
+			expect(captured.dns).toBe("failed");
+			expect(captured.proxyEnv).toBe("");
 			expect(code).toBe(0);
 		},
 		90000,

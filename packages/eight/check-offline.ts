@@ -4,7 +4,7 @@
  * tried. The verdict comes from that enforcement, never from observation.
  *
  * macOS: sandbox-exec with (deny network*), loopback and unix sockets allowed.
- * Linux: unshare -rn (a new empty network namespace, loopback brought up).
+ * Linux: unshare -rnm (a new empty network namespace, loopback brought up).
  * If neither works here it says so and exits 3. It never reports a clean run
  * without enforcement. In-process hooks (fetch, net, tls, http(s), WebSocket,
  * Bun.connect) only LIST attempts so the user can see who tried; they are not
@@ -212,7 +212,27 @@ const SANDBOX_PROFILE = [
 	'(allow network* (local ip "localhost:*"))',
 	"(allow network* (remote unix-socket))",
 	"(allow network* (local unix-socket))",
+	// Later rules win. Close the relays that send for the process: DNS, URL
+	// sessions, Launch Services (`open https://...`).
+	'(deny mach-lookup (global-name "com.apple.mDNSResponder") (global-name "com.apple.dnssd.service") (global-name "com.apple.nsurlsessiond") (global-name "com.apple.coreservices.launchservicesd"))',
+	'(deny network* (remote unix-socket (path-literal "/var/run/mDNSResponder")))',
+	'(deny network* (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))',
 ].join("\n");
+
+const PROXY_VARS = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"].flatMap((k) => [
+	k,
+	k.toLowerCase(),
+]);
+
+/** The child's environment: ours, without any proxy setting. */
+export function childEnv(
+	base: NodeJS.ProcessEnv,
+	extra: Record<string, string>,
+): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = { ...base, ...extra };
+	for (const k of PROXY_VARS) delete env[k];
+	return env;
+}
 
 export interface Enforcer {
 	mechanism: string;
@@ -229,13 +249,15 @@ export function findEnforcer(platform = process.platform): Enforcer | null {
 		});
 	} else if (platform === "linux") {
 		candidates.push({
-			mechanism: "unshare -rn",
+			mechanism: "unshare -rnm",
+			// -m: hide the resolver and nscd sockets (unix sockets cross network
+			// namespaces) behind an empty tmpfs where the mount is allowed.
 			wrap: (argv) => [
-				"unshare",
-				"-rn",
-				"sh",
+				"/usr/bin/unshare",
+				"-rnm",
+				"/bin/sh",
 				"-c",
-				'ip link set lo up 2>/dev/null; exec "$@"',
+				'ip link set lo up 2>/dev/null; for d in /run/systemd/resolve /run/nscd /var/run/nscd; do [ -d "$d" ] && mount -t tmpfs tmpfs "$d" 2>/dev/null; done; exec "$@"',
 				"sh",
 				...argv,
 			],
@@ -253,25 +275,29 @@ export function findEnforcer(platform = process.platform): Enforcer | null {
 export async function runListing(
 	session: () => Promise<unknown>,
 	hooks = true,
-): Promise<{ attempts: Attempt[]; result: unknown }> {
+): Promise<{ attempts: Attempt[]; result: unknown; error?: string }> {
 	const guard = hooks ? armGuard() : { attempts: [] as Attempt[], restore() {} };
 	let result: unknown;
+	let error: string | undefined;
 	try {
 		result = await session();
 	} catch (e) {
 		if (!/check-offline: outbound/.test(String((e as Error)?.message))) {
-			result = { error: String((e as Error)?.message ?? e) };
+			error = String((e as Error)?.message ?? e);
 		}
 	} finally {
 		guard.restore();
 	}
-	return { attempts: guard.attempts, result };
+	return { attempts: guard.attempts, result, error };
 }
 
 /** The lines printed after an enforced run. Pinned by a test. */
 export function verdictLines(mechanism: string, attempts: Attempt[]): string[] {
-	const head = `check-offline: ran with outbound network blocked by the operating system (${mechanism}). ${attempts.length} attempt(s) were refused and listed below. Loopback and local sockets were allowed.`;
-	return [head, ...attempts.map((a) => `  ${a.via}  ${a.host}:${a.port}  from ${a.caller}`)];
+	return [
+		`check-offline: ran with outbound network blocked by the operating system (${mechanism}). The in-process hooks listed ${attempts.length} attempt(s) below; refusals the operating system made outside the hooks are not listed. Loopback and local sockets were allowed.`,
+		"Not blocked: traffic that local services forward for the process (the DNS resolver, systemd-resolved, nscd, local proxies, a local model server, docker.sock), and file writes such as a LaunchAgent. Proxy environment variables were removed from the child.",
+		...attempts.map((a) => `  ${a.via}  ${a.host}:${a.port}  from ${a.caller}`),
+	];
 }
 
 export interface CheckOptions {
@@ -296,7 +322,7 @@ export async function runCheckOffline(opts: CheckOptions = {}): Promise<number> 
 	const enforcer = opts.enforcer === undefined ? findEnforcer() : opts.enforcer;
 	if (!enforcer) {
 		out(
-			"check-offline: this machine has no working way to block the network for a child process (sandbox-exec on macOS, unshare -rn on Linux).",
+			"check-offline: this machine has no working way to block the network for a child process (sandbox-exec on macOS, unshare -rnm on Linux).",
 		);
 		out("Nothing was run and no result is given. A clean result needs enforcement.");
 		return 3;
@@ -307,37 +333,61 @@ export async function runCheckOffline(opts: CheckOptions = {}): Promise<number> 
 		return 3;
 	}
 	const argv = enforcer.wrap([process.execPath, self, "--child"]);
-	const env = {
-		...process.env,
+	const reportFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "check-offline-")), "report");
+	const env = childEnv(process.env, {
+		CHECK_OFFLINE_REPORT: reportFile,
 		CHECK_OFFLINE_SESSION: opts.sessionFile ?? "",
 		CHECK_OFFLINE_HOOKS: opts.hooks === false ? "0" : "1",
-	};
+	});
 	const run =
 		opts.spawn ??
 		((a: string[]) => {
-			const r = spawnSync(a[0], a.slice(1), { env, encoding: "utf8", timeout: 120000 });
-			return { status: r.status, stdout: r.stdout ?? "" };
+			// The report comes back in a file the child appends to last, not on stdout.
+			const r = spawnSync(a[0], a.slice(1), {
+				env,
+				encoding: "utf8",
+				timeout: 120000,
+				stdio: "ignore",
+			});
+			let stdout = "";
+			try {
+				stdout = fs.readFileSync(reportFile, "utf8");
+			} catch {}
+			return { status: r.status, stdout };
 		});
 	const r = run(argv);
-	const line = r.stdout.split("\n").find((l) => l.startsWith(MARK));
-	if (!line) {
-		out("check-offline: the isolated child did not report. Nothing is claimed.");
+	const fail = (cause: string) => {
+		out(`check-offline: ${cause}. Nothing is claimed.`);
 		return 3;
-	}
-	const { attempts } = JSON.parse(line.slice(MARK.length)) as {
-		attempts: Attempt[];
-		result: unknown;
 	};
-	for (const l of verdictLines(enforcer.mechanism, attempts)) out(l);
-	return attempts.length === 0 ? 0 : 1;
+	if (r.status !== 0) return fail(`the isolated child exited with status ${r.status}`);
+	const lines = r.stdout.split("\n").filter((l) => l.startsWith(MARK));
+	const line = lines[lines.length - 1];
+	if (!line) return fail("the isolated child did not report");
+	let report: { attempts: Attempt[]; error?: string };
+	try {
+		report = JSON.parse(line.slice(MARK.length));
+		if (!Array.isArray(report.attempts)) throw new Error("no attempts array");
+	} catch {
+		return fail("the isolated child's report could not be read");
+	}
+	if (report.error) return fail(`the session failed: ${report.error}`);
+	for (const l of verdictLines(enforcer.mechanism, report.attempts)) out(l);
+	return report.attempts.length === 0 ? 0 : 1;
 }
 
 /** Child entry: runs inside the OS sandbox, prints the marker line, exits. */
 async function childMain(): Promise<void> {
 	const file = process.env.CHECK_OFFLINE_SESSION;
 	const session = file ? async () => (await import(file)).default() : defaultSession;
-	const { attempts, result } = await runListing(session, process.env.CHECK_OFFLINE_HOOKS !== "0");
-	console.log(MARK + JSON.stringify({ attempts, result }));
+	const { attempts, result, error } = await runListing(
+		session,
+		process.env.CHECK_OFFLINE_HOOKS !== "0",
+	);
+	fs.appendFileSync(
+		process.env.CHECK_OFFLINE_REPORT as string,
+		`${MARK}${JSON.stringify({ attempts, result, error })}\n`,
+	);
 	process.exit(0);
 }
 
