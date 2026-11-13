@@ -770,3 +770,48 @@ describe("step log redaction", () => {
 		adapter.close();
 	});
 });
+
+describe("an empty final reply is a failed run, never Done", () => {
+	const EMPTY_FINALS = [
+		"",
+		"  \n\t",
+		"<think>reasoning that never closes",
+		"[harness] No reply: the model ended the turn without an answer after 3 tool calls, so the task may be unfinished.",
+	];
+
+	it("outcomeSentence has no stock word for empty text", () => {
+		expect(outcomeSentence("")).toBe("");
+		expect(outcomeSentence("   ")).toBe("");
+	});
+
+	for (const chunk of EMPTY_FINALS) {
+		it(`status card closes as failed with one plain sentence: ${JSON.stringify(chunk.slice(0, 30))}`, async () => {
+			const { adapter, sock, runId } = await startRun();
+			emit(sock, "agent:stream", { sessionId: "sess_test", chunk, final: true });
+			await new Promise((r) => setTimeout(r, 20));
+			const last = edits().pop();
+			expect(last?.body.text).toBe("Stopped: No answer was produced. Send your request again.");
+			expect(last?.body.text).not.toMatch(/\bDone\b|finished/);
+			expect(btnTexts(last?.body.reply_markup)).toContain("↻ Retry");
+			expect((adapter as any).findRun(runId)?.state).toBe("failed");
+			// Nothing else is posted: no blank message, no harness note.
+			expect(fetchCalls.filter((c) => c.url.endsWith("/sendMessage")).length).toBe(1);
+			adapter.close();
+		});
+	}
+
+	it("the task runner records the run as failed, not succeeded", async () => {
+		const { adapter, sock } = await makeAdapter({ showTrace: () => true });
+		await adapter.handleUserMessage("do thing");
+		const task = (adapter as any).current.runner.task;
+		emit(sock, "agent:stream", { sessionId: "sess_test", chunk: "   ", final: true });
+		await new Promise((r) => setTimeout(r, 20));
+		expect(task.status).toBe("failed");
+		expect(task.error).toBe("No answer was produced. Send your request again.");
+		expect(task.finalText).toBeUndefined();
+		const last = fetchCalls.filter((c) => c.url.endsWith("/editMessageText")).pop();
+		expect(last?.body.text).toContain("Failed");
+		expect(last?.body.text).not.toContain("Done");
+		adapter.close();
+	});
+});
