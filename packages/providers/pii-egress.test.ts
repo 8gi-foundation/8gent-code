@@ -99,10 +99,10 @@ describe("cloud egress gate", () => {
 		let captured: any = null;
 		globalThis.fetch = (async (_url: string, init: any) => {
 			captured = JSON.parse(init.body);
-			return new Response(
-				JSON.stringify({ message: { content: "ok" } }),
-				{ status: 200, headers: { "Content-Type": "application/json" } },
-			);
+			return new Response(JSON.stringify({ message: { content: "ok" } }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			});
 		}) as unknown as typeof fetch;
 
 		await mgr.chat({ messages: [{ role: "user", content: PROMPT_PII }] });

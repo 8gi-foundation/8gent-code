@@ -116,7 +116,8 @@ describe("fail-closed when anonymization cannot run", () => {
 			const calledUrls: string[] = [];
 			globalThis.fetch = (async (url: string) => {
 				calledUrls.push(String(url));
-				if (/minimax\.io/.test(String(url))) throw new Error("LEAK: minimax contacted on fail-closed");
+				if (/minimax\.io/.test(String(url)))
+					throw new Error("LEAK: minimax contacted on fail-closed");
 				return new Response(JSON.stringify({ message: { content: "local ok" } }), {
 					status: 200,
 					headers: { "Content-Type": "application/json" },
