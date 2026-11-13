@@ -234,4 +234,31 @@ describe("cron.json has one row shape (#255)", () => {
 			chmodSync(dataDir, 0o700);
 		}
 	});
+
+	test("an old 0664 cron.json loads no jobs and the message says chmod 600", async () => {
+		writeFileSync(file, fiveJobs);
+		await daemon.loadJobs(); // a good read clears any earlier refusal
+		chmodSync(file, 0o664);
+		const logs: string[] = [];
+		const realLog = console.log;
+		console.log = (...a: unknown[]) => void logs.push(a.join(" "));
+		try {
+			expect(await daemon.loadJobs()).toEqual([]);
+			await daemon.loadJobs(); // a second read does not repeat the line
+		} finally {
+			console.log = realLog;
+		}
+		const refusals = logs.filter((l) => l.includes("not loading cron.json"));
+		expect(refusals).toHaveLength(1);
+		expect(refusals[0]).toContain(`${file} is writable by group or world`);
+		expect(refusals[0]).toContain(`chmod 600 ${file}`);
+		try {
+			new CronManager().add({ name: "n", schedule: "* * * * *", command: "chat y", enabled: true });
+			throw new Error("add should have thrown");
+		} catch (err) {
+			expect(String(err)).toContain(`chmod 600 ${file}`);
+		} finally {
+			chmodSync(file, 0o600);
+		}
+	});
 });

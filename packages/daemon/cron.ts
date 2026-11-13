@@ -44,6 +44,9 @@ let jobs: CronJob[] = [];
 let rejected: unknown[] = [];
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 
+/** Last refusal logged, so a tick every minute does not repeat it. */
+let lastReadRefusal = "";
+
 function readFromDisk(): { rows: CronJob[]; rejected: unknown[] } | null {
 	try {
 		if (existsSync(cronPath())) assertCronPathSafe(cronPath(), "read");
@@ -52,8 +55,12 @@ function readFromDisk(): { rows: CronJob[]; rejected: unknown[] } | null {
 			console.log("[cron] cron.json is not readable right now, keeping the jobs in memory");
 			return null;
 		}
+		lastReadRefusal = "";
 		return { rows: parsed.rows as unknown as CronJob[], rejected: parsed.rejected };
-	} catch {
+	} catch (err) {
+		const why = err instanceof Error ? err.message : String(err);
+		if (why !== lastReadRefusal) console.log(`[cron] not loading cron.json: ${why}`);
+		lastReadRefusal = why;
 		return null;
 	}
 }

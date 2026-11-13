@@ -79,7 +79,9 @@ export function assertCronPathSafe(file: string, use: "read" | "write" = "write"
 		if (uid !== undefined && st.uid !== uid) throw new Error(`cron: ${target} is not owned by this user`);
 		if (!(st.mode & 0o022)) continue;
 		if (use === "read" && target === file) {
-			throw new Error(`cron: ${target} is writable by group or world, not loading it`);
+			throw new Error(
+				`${target} is writable by group or world: check its contents, then chmod 600 ${target}`,
+			);
 		}
 		fs.chmodSync(target, st.mode & ~0o022 & 0o7777);
 	}
@@ -223,6 +225,7 @@ export class CronManager {
 	private rejected: unknown[] = [];
 	/** True when cron.json exists but could not be read; saving would destroy it. */
 	private unreadable = false;
+	private unreadableWhy = "";
 
 	constructor(dataPath?: string) {
 		this.filePath = dataPath || path.join(dataDirPath(), "cron.json");
@@ -236,20 +239,24 @@ export class CronManager {
 				const parsed = parseCronFile(fs.readFileSync(this.filePath, "utf-8"));
 				if (!parsed) {
 					this.unreadable = true;
+					this.unreadableWhy = `${this.filePath} is not a valid JSON list of jobs`;
 					return [];
 				}
 				this.rejected = parsed.rejected;
 				return parsed.rows;
 			}
-		} catch {
+		} catch (err) {
 			this.unreadable = true;
+			this.unreadableWhy = err instanceof Error ? err.message : String(err);
 		}
 		return [];
 	}
 
 	private save(): void {
 		if (this.unreadable) {
-			throw new Error(`cron: ${this.filePath} could not be read; not overwriting it. Fix or move it first.`);
+			throw new Error(
+				`cron: ${this.unreadableWhy || `${this.filePath} could not be read`}; not overwriting it.`,
+			);
 		}
 		writeCronFileAtomic(this.filePath, JSON.stringify([...this.jobs, ...this.rejected], null, 2));
 	}
