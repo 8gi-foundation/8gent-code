@@ -287,6 +287,7 @@ import {
 } from "./lib/compaction-view.js";
 import { runConsultCommand } from "./lib/consult-command.js";
 import { classifyContext, formatContextReport } from "./lib/context-view.js";
+import { SessionChanges } from "./lib/session-changes.js";
 import {
 	type ContextWindow,
 	UNKNOWN_WINDOW,
@@ -305,7 +306,7 @@ import { showStepsWhileWorking } from "./lib/folded-trace.js";
 import {
 	formatSessionTime,
 	formatTokens,
-	hudTokens,
+	hudContextTokens,
 	msUntilSessionTimeChanges,
 } from "./lib/format.js";
 import { openInHerdrPane } from "./lib/herdr-open.js";
@@ -1128,6 +1129,8 @@ export function App({
 	// Core state
 	// Per-tab message storage (tab-aware logic wired after workspaceTabs hook below)
 	const tabMessagesRef = useRef<Map<string, Message[]>>(new Map());
+	// Files each tab's turns changed, for the inline diff and /diff.
+	const sessionChangesRef = useRef<Map<string, SessionChanges>>(new Map());
 	// Stable goal-loop client (one per app instance). Uses the in-process
 	// transport so /goal works without a separately-running daemon. When
 	// a real WebSocket transport ships, swap the constructor here.
@@ -3724,6 +3727,14 @@ export function App({
 	const retriesByTabRef = useRef(new Map<string, number>());
 	const [, setRoutedTick] = useState(0);
 	const getTabAgent = perTabAgents.getAgent;
+	const changesFor = (tabId: string): SessionChanges => {
+		let c = sessionChangesRef.current.get(tabId);
+		if (!c) {
+			c = new SessionChanges(() => getTabAgent(tabId)?.getWorkingDirectory() ?? process.cwd());
+			sessionChangesRef.current.set(tabId, c);
+		}
+		return c;
+	};
 	const buildEventsForTab = useCallback(
 		(tabId: string, tabTitle: string): AgentEventCallbacks => ({
 			onRetry: (event) => {
@@ -3783,6 +3794,11 @@ export function App({
 			},
 			onToolStart: (event: AgentToolStartEvent) => {
 				const isActive = tabId === activeTabId;
+				changesFor(tabId).begin(
+					event.toolCallId,
+					event.toolName,
+					event.args as Record<string, unknown> | undefined,
+				);
 				// update_plan carries the agent's own step statuses: the only
 				// thing that may tick, fail or mark the current plan step.
 				// A step whose box in the project's plan file is still open is
@@ -3922,6 +3938,16 @@ export function App({
 					toolSuccess: !isRealFailure,
 					toolTrail: toTrailEntry(event),
 				});
+				// The change itself, right under the "Edited" row (break: no diff after an edit).
+				const inlineDiff = changesFor(tabId).finish(event.toolCallId, !isRealFailure);
+				if (inlineDiff) {
+					appendToTab(tabId, {
+						id: `tool-diff-${event.toolCallId}`,
+						role: "system" as const,
+						content: inlineDiff,
+						timestamp: new Date(),
+					});
+				}
 			},
 			onStall: ({ silentSeconds, model }) => {
 				// Say which model is quiet, once per quiet spell (break 12).
@@ -5733,6 +5759,11 @@ export function App({
 							},
 						),
 					);
+					break;
+
+				case "diff":
+					// The session's file changes against where each file started. Local, read-only.
+					addSystemMessage(changesFor(activeTabId).report());
 					break;
 
 				case "stack":
@@ -9187,7 +9218,7 @@ export function App({
 	// is held in useState (line 686) so the value is captured once at
 	// mount and never persisted across restarts.
 	const sessionTime = formatSessionTime(Date.now() - startTime.getTime());
-	const tokenStr = hudTokens(totalTokens);
+	const tokenStr = hudContextTokens(contextUsed);
 	const micOn =
 		Boolean(voice?.isAvailable) && (voice?.state === "recording" || voiceChat?.isActive);
 	const isApprovalPending = approvalPending !== null;
