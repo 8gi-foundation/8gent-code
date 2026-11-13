@@ -300,6 +300,17 @@ describe("ActivityRail", () => {
 		}
 	});
 
+	test("8GENTS with no sub-8gent running says so in words, and names no row as if one ran", () => {
+		const section = railColumn({ ...baseProps, agents: [] }).find(
+			(el) => flatten(el).some((n) => n.props.children === "8GENTS"),
+		) as AnyElement;
+		const texts = flatten(section)
+			.filter((n) => n.type === Text)
+			.map((n) => String(n.props.children));
+		expect(texts).toContain("none running");
+		expect(texts.some((s) => /\bmain\b/.test(s))).toBe(false);
+	});
+
 	test("snapshot of full rail is stable", () => {
 		const rendered = render(baseProps);
 		const top = rendered.props as {

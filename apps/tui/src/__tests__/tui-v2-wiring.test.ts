@@ -282,8 +282,8 @@ describe("activity-rail-derivation", () => {
 		expect(rows.map((r) => r.state)).toEqual(["primary"]);
 	});
 
-	test("deriveAgents collapses statuses and falls back to main", () => {
-		expect(deriveAgents([])).toEqual([{ name: "main", state: "idle" }]);
+	test("deriveAgents collapses statuses and returns no rows when none run", () => {
+		expect(deriveAgents([])).toEqual([]);
 		const rows = deriveAgents([
 			{ id: "1", name: "Core", status: "running" },
 			{ id: "2", name: "Tester", status: "blocked" },

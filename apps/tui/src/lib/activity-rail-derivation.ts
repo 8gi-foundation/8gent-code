@@ -172,8 +172,9 @@ export function deriveAgents(
 	agents: ReadonlyArray<OrchestrationAgentSnapshot>,
 ): ActivityRailAgentRow[] {
 	if (agents.length === 0) {
-		// No real agents wired - return a quiet idle row instead of stub names.
-		return [{ name: "main", state: "idle" }];
+		// No sub-8gent is running. An empty list, not a stand-in row: a row named
+		// "main" with a hollow glyph reads as an idle sub-8gent that is not there.
+		return [];
 	}
 	return agents.map((a) => {
 		const s = (a.status || "").toLowerCase();
