@@ -171,10 +171,9 @@ export interface OrchestrationAgentSnapshot {
 export function deriveAgents(
 	agents: ReadonlyArray<OrchestrationAgentSnapshot>,
 ): ActivityRailAgentRow[] {
-	if (agents.length === 0) {
-		// No real agents wired - return a quiet idle row instead of stub names.
-		return [{ name: "main", state: "idle" }];
-	}
+	// No sub-8gent running: no rows. The session itself is not a sub-8gent, so
+	// the rail shows an empty state rather than a "○ main" row (issue #277).
+	if (agents.length === 0) return [];
 	return agents.map((a) => {
 		const s = (a.status || "").toLowerCase();
 		let state: ActivityRailAgentRow["state"] = "idle";

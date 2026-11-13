@@ -465,13 +465,19 @@ export function ActivityRail({
 			) : null}
 
 			<RailSection title="8GENTS">
-				{agents.map((agent) => (
-					<NamedRow
-						key={agent.name}
-						name={`${AGENT_GLYPH[agent.state]} ${agent.name}`}
-						color={AGENT_COLOR[agent.state]}
-					/>
-				))}
+				{agents.length === 0 ? (
+					<Box flexShrink={0}>
+						<Text color={t.muted}>none running</Text>
+					</Box>
+				) : (
+					agents.map((agent) => (
+						<NamedRow
+							key={agent.name}
+							name={`${AGENT_GLYPH[agent.state]} ${agent.name}`}
+							color={AGENT_COLOR[agent.state]}
+						/>
+					))
+				)}
 			</RailSection>
 
 			{bodyParts ? (
