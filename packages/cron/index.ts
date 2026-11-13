@@ -9,17 +9,104 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { eightCliPath, safeBunFlags } from "../core/bun-flags";
+import { shellInvocation } from "../core/shell";
+import { dataDirPath } from "../daemon/data-dir";
 
-export interface CronJob {
+/**
+ * The one row shape in cron.json, shared with the daemon scheduler (packages/daemon/cron.ts, #255).
+ * `schedule` and `command` are read-only aliases of `expression` and `payload` for callers that
+ * predate the shared shape; they are never written to disk.
+ */
+export type CronJobType = "shell" | "agent-prompt" | "webhook";
+
+export interface CronRow {
 	id: string;
 	name: string;
-	schedule: string; // cron expression e.g. "0 */6 * * *"
-	command: string; // 8gent command to run e.g. "chat 'check deploy status'"
+	expression: string; // cron expression, or "once:ISO8601"
+	type: CronJobType;
+	payload: string; // shell command, prompt text, or webhook URL
 	enabled: boolean;
-	lastRun?: string;
-	nextRun?: string;
+	lastRun: string | null;
+	nextRun: string | null;
+	recurring: boolean;
 	/** Run once when a scheduled slot was missed (default true). Set false to opt out. */
 	catchUp?: boolean;
+	[extra: string]: unknown;
+}
+
+export interface CronJob extends CronRow {
+	schedule: string;
+	command: string;
+}
+
+const JOB_TYPES: CronJobType[] = ["shell", "agent-prompt", "webhook"];
+
+function validExpression(expr: unknown): expr is string {
+	if (typeof expr !== "string") return false;
+	if (expr.startsWith("once:")) return !Number.isNaN(new Date(expr.slice(5)).getTime());
+	return expr.trim().split(/\s+/).length === 5;
+}
+
+/** Shell line that runs an 8gent subcommand, for rows written in the old `command` shape. */
+function eightShellLine(command: string): string {
+	const cli = eightCliPath();
+	return cli ? `bun ${safeBunFlags().join(" ")} run "${cli}" ${command}`.replace(/\s+/g, " ") : `8gent ${command}`;
+}
+
+/**
+ * Read one cron.json row in either shape (daemon shape, or the old CLI shape with
+ * `schedule`/`command`) into the shared shape. Returns null for a row that cannot be run.
+ */
+export function normalizeCronRow(raw: unknown): CronRow | null {
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+	const r = raw as Record<string, unknown>;
+	if (typeof r.id !== "string" || !r.id) return null;
+	const legacy = r.expression === undefined && r.payload === undefined;
+	const expression = r.expression ?? r.schedule;
+	if (!validExpression(expression)) return null;
+	const body = r.payload ?? r.command;
+	if (typeof body !== "string" || !body.trim()) return null;
+	if (r.type !== undefined && !JOB_TYPES.includes(r.type as CronJobType)) return null;
+	const { schedule: _s, command: _c, ...rest } = r;
+	return {
+		...rest,
+		id: r.id,
+		name: typeof r.name === "string" && r.name ? r.name : r.id,
+		expression,
+		type: (r.type as CronJobType | undefined) ?? "shell",
+		payload: legacy ? eightShellLine(body) : body,
+		enabled: r.enabled !== false,
+		lastRun: typeof r.lastRun === "string" ? r.lastRun : null,
+		nextRun: typeof r.nextRun === "string" ? r.nextRun : null,
+		recurring: r.recurring !== false,
+	};
+}
+
+/** Parse cron.json text. `rows` are runnable; `rejected` are kept verbatim so a rewrite never drops them. */
+export function parseCronFile(text: string): { rows: CronRow[]; rejected: unknown[] } {
+	const rows: CronRow[] = [];
+	const rejected: unknown[] = [];
+	let data: unknown;
+	try {
+		data = JSON.parse(text);
+	} catch {
+		return { rows, rejected };
+	}
+	if (!Array.isArray(data)) return { rows, rejected };
+	for (const raw of data) {
+		const row = normalizeCronRow(raw);
+		if (row) rows.push(row);
+		else {
+			rejected.push(raw);
+			const id = raw && typeof raw === "object" ? (raw as { id?: unknown }).id : undefined;
+			console.log(`[cron] skipping unreadable row${typeof id === "string" ? ` ${id}` : ""}`);
+		}
+	}
+	return { rows, rejected };
+}
+
+function withAliases(row: CronRow): CronJob {
+	return { ...row, schedule: row.expression, command: row.payload };
 }
 
 function matchField(field: string, value: number, max: number): boolean {
@@ -79,21 +166,23 @@ export function dueSince(schedule: string, lastRun: Date | string | undefined, n
 
 export class CronManager {
 	private filePath: string;
-	private jobs: CronJob[];
+	private jobs: CronRow[];
+	private rejected: unknown[] = [];
 
 	constructor(dataPath?: string) {
-		const home = process.env.HOME || process.env.USERPROFILE || "~";
-		this.filePath = dataPath || path.join(home, ".8gent", "cron.json");
+		this.filePath = dataPath || path.join(dataDirPath(), "cron.json");
 		this.jobs = this.load();
 	}
 
-	private load(): CronJob[] {
+	private load(): CronRow[] {
 		try {
 			if (fs.existsSync(this.filePath)) {
-				return JSON.parse(fs.readFileSync(this.filePath, "utf-8"));
+				const { rows, rejected } = parseCronFile(fs.readFileSync(this.filePath, "utf-8"));
+				this.rejected = rejected;
+				return rows;
 			}
 		} catch {
-			// corrupted file - start fresh
+			// unreadable file - start fresh
 		}
 		return [];
 	}
@@ -101,14 +190,39 @@ export class CronManager {
 	private save(): void {
 		const dir = path.dirname(this.filePath);
 		if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-		fs.writeFileSync(this.filePath, JSON.stringify(this.jobs, null, 2));
+		fs.writeFileSync(this.filePath, JSON.stringify([...this.jobs, ...this.rejected], null, 2));
 	}
 
-	add(job: Omit<CronJob, "id">): CronJob {
-		const entry: CronJob = { ...job, id: crypto.randomUUID().slice(0, 8) };
+	/**
+	 * Add a job. `schedule`/`command` are the CLI names for `expression`/`payload`.
+	 * With the default type "shell" the command is an 8gent subcommand and is wrapped
+	 * into a shell line; other types store the command as given.
+	 */
+	add(job: {
+		name: string;
+		schedule: string;
+		command: string;
+		enabled: boolean;
+		type?: CronJobType;
+		lastRun?: string;
+		catchUp?: boolean;
+	}): CronJob {
+		const type = job.type ?? "shell";
+		const entry: CronRow = {
+			id: crypto.randomUUID().slice(0, 8),
+			name: job.name,
+			expression: job.schedule,
+			type,
+			payload: type === "shell" ? eightShellLine(job.command) : job.command,
+			enabled: job.enabled,
+			lastRun: job.lastRun ?? null,
+			nextRun: null,
+			recurring: !job.schedule.startsWith("once:"),
+		};
+		if (job.catchUp !== undefined) entry.catchUp = job.catchUp;
 		this.jobs.push(entry);
 		this.save();
-		return entry;
+		return withAliases(entry);
 	}
 
 	remove(id: string): boolean {
@@ -122,7 +236,7 @@ export class CronManager {
 	}
 
 	list(): CronJob[] {
-		return [...this.jobs];
+		return this.jobs.map(withAliases);
 	}
 
 	enable(id: string): void {
@@ -144,25 +258,18 @@ export class CronManager {
 	/** Check all enabled jobs and run any that are due. Call every minute. */
 	tick(now: Date = new Date()): void {
 		for (const job of this.jobs) {
-			if (!job.enabled) continue;
-			const lastRun = job.catchUp === false ? undefined : job.lastRun;
-			if (!dueSince(job.schedule, lastRun, now)) continue;
-			if (!cronMatches(job.schedule, now)) {
+			if (!job.enabled || job.type !== "shell") continue;
+			const lastRun = job.catchUp === false ? undefined : (job.lastRun ?? undefined);
+			if (!dueSince(job.expression, lastRun, now)) continue;
+			if (!cronMatches(job.expression, now)) {
 				console.log(
 					`[cron] catch-up: job ${job.id} "${job.name}" missed its slot since ${job.lastRun}, running once`,
 				);
 			}
 			job.lastRun = now.toISOString();
-			// Fire and forget - spawn 8gent with the job's command
-			const args = job.command.split(/\s+/);
-			// The daemon runs in $HOME: 8gent's own CLI by absolute path, no cwd bunfig.toml or .env (#4013).
-			const cli = eightCliPath();
-			if (!cli) continue;
 			try {
-				Bun.spawn(["bun", ...safeBunFlags(), "run", cli, ...args], {
-					stdout: "ignore",
-					stderr: "ignore",
-				});
+				const sh = shellInvocation(job.payload);
+				Bun.spawn([sh.file, ...sh.args], { stdout: "ignore", stderr: "ignore" });
 			} catch {
 				// spawn failure is non-fatal
 			}
