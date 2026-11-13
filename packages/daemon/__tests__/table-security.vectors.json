@@ -1,0 +1,23 @@
+{
+  "source": "Generated locally 2026-11-11 with node:crypto (generateKeyPairSync ec prime256v1, sign sha256 ieee-p1363); no web page, no third-party tool. Private keys were discarded. Regenerate by replacing every value and re-running the tests; the private key is deliberately not stored.",
+  "rules": "signature = raw 64-byte r||s base64; key = SPKI DER base64; SHA-256 applied once by the signing call; never key on signature bytes",
+  "row": {
+    "storeName": "8gi-forge",
+    "deviceId": "vector-device-1",
+    "channelId": "ch_vector",
+    "authorId": "human:james",
+    "content": "vector row\nwith a second line",
+    "replyTo": "",
+    "createdAt": 1762819200000
+  },
+  "bytesBase64": "dGFibGUtcm93L3YxCjhnaS1mb3JnZQp2ZWN0b3ItZGV2aWNlLTEKY2hfdmVjdG9yCmh1bWFuOmphbWVzCnZlY3RvciByb3cKd2l0aCBhIHNlY29uZCBsaW5lCgoxNzYyODE5MjAwMDAw",
+  "publicKeySpki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEcJhOjCI/8T9awVJGBAvaIoXJPHZMU8FhePUMdjuoJolJBE5O1XTXbOh5rp9x8YR5fYcQKYZKy6cdnWG4tsqKQg==",
+  "validSigRaw": "WifNq4LlZpIgjR+JUb4Rd2aK+G8QKAOAeJFZnICFyPQuEB/xslrBJY2QiweZt/JYVARyJnav2qVFjtXemJrNxQ==",
+  "highSTwinRaw": "WifNq4LlZpIgjR+JUb4Rd2aK+G8QKAOAeJFZnICFyPTR7+ANTaU+23JvdPhmSA2naOKIhzBnw9+uKvTkY8hXjA==",
+  "derSig": "MEQCIFonzauC5WaSII0fiVG+EXdmivhvECgDgHiRWZyAhcj0AiAuEB/xslrBJY2QiweZt/JYVARyJnav2qVFjtXemJrNxQ==",
+  "wrongCurve": {
+    "curve": "secp384r1",
+    "publicKeySpki": "MHYwEAYHKoZIzj0CAQYFK4EEACIDYgAEI6GdYWoWlnbtkbtwMRfQYI1dSw5r9mzhD1BmTUDG1ZHF1Y8B5gk65TSBrEAEFpKO3mtBkdrO6aVeynUwG7dIu2CF1JHx6wj9XEv0SmNl/rjleO13LOtAfYVB7lzEw/wX",
+    "note": "key is P-384; it must be refused even when paired with the valid 64-byte signature"
+  }
+}

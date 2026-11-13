@@ -18,7 +18,7 @@
  */
 
 import { Database } from "bun:sqlite";
-import { createHash } from "node:crypto";
+import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -61,6 +61,8 @@ export interface TableStoreOptions {
 	dbPath?: string;
 	/** injected; default opens the shared Table ledger under ~/.8gent/table/ledger */
 	ledger?: Ledger;
+	/** Slice 1a. Absent (the default) leaves every post path exactly as it was. */
+	personLock?: PersonLock;
 }
 
 /** Default DB path honoring EIGHT_DATA_DIR. */
@@ -105,6 +107,95 @@ export function canonicalMessage(input: {
 		replyTo: input.replyTo ?? null,
 		createdAt: input.createdAt,
 	});
+}
+
+// ── Slice 1a: the person lock (OFF unless TableStoreOptions.personLock is set) ──
+// Spec: ~/.8gent/officers/8TO/specs/2026-11-10-table-shared-on-hetzner.md section 2.
+// A store opened without personLock behaves exactly as before.
+
+export type DeviceClass = "enclave" | "tpm" | "browser" | "file";
+
+export interface DeviceRecord {
+	deviceId: string;
+	/** The one participant this key is bound to. */
+	participantId: string;
+	class: DeviceClass;
+	/** P-256 public key, SPKI DER, base64. */
+	publicKey: string;
+}
+
+export interface PersonLock {
+	/** Name of this store inside the signed bytes ("8gi-forge" on the box). */
+	storeName: string;
+	/** The approved device list. Read on every post so a revoke is live. */
+	devices: () => readonly DeviceRecord[];
+	/** Injected clock, ms. Default Date.now. */
+	now?: () => number;
+	/** Allowed distance between the signed createdAt and the store's clock. Default 60 s. */
+	skewMs?: number;
+}
+
+/** The only `human:` ids that may post, and only with a device signature. */
+export const PERSON_IDS: ReadonlySet<string> = new Set(["human:james", "human:artale", "human:desk"]);
+/** Accepted only when the caller is the gate's GAME actor (postMessage gateActor). */
+export const GATE_GAME_ID = "human:game";
+export const ROW_SIGNATURE_DOMAIN = "table-row/v1";
+const ROW_SKEW_MS = 60_000;
+
+/**
+ * The exact bytes a person's device signs: domain, store name, deviceId, channel,
+ * author, content, replyTo, createdAt, joined by newlines. Only `content` may hold
+ * a newline (the verifier reads the last two fields from the end), so every other
+ * field containing one is refused and two different rows can never share bytes.
+ * Signers hash these bytes ONCE with SHA-256 inside the platform call.
+ */
+export function rowSigningBytes(input: {
+	storeName: string;
+	deviceId: string;
+	channelId: string;
+	authorId: string;
+	content: string;
+	replyTo?: string;
+	createdAt: number;
+}): Buffer {
+	// A lone surrogate encodes to U+FFFD, so two different strings would share bytes and one signature.
+	for (const f of [input.storeName, input.deviceId, input.channelId, input.authorId, input.content, input.replyTo ?? ""]) {
+		if (/\p{Surrogate}/u.test(f)) throw new TableValidationError("signed text must be well-formed (no lone surrogates)");
+	}
+	for (const f of [input.storeName, input.deviceId, input.channelId, input.authorId, input.replyTo ?? ""]) {
+		if (f.includes("\n")) throw new TableValidationError("signed fields other than content must not contain a newline");
+	}
+	return Buffer.from(
+		[
+			ROW_SIGNATURE_DOMAIN,
+			input.storeName,
+			input.deviceId,
+			input.channelId,
+			input.authorId,
+			input.content,
+			input.replyTo ?? "",
+			String(input.createdAt),
+		].join("\n"),
+		"utf8",
+	);
+}
+
+/**
+ * Verify a raw 64-byte r||s (IEEE P1363) base64 signature over `bytes` with a
+ * P-256 SPKI key. One format only: DER, wrong length, non-canonical base64 and
+ * any key that is not P-256 return false. Never throws. NOTE: (r, n-s) also
+ * verifies, so callers must never key anything on the signature bytes.
+ */
+export function verifyP256Raw(spkiB64: string, bytes: Buffer, sigB64: string): boolean {
+	try {
+		const sig = Buffer.from(sigB64, "base64");
+		if (sig.length !== 64 || sig.toString("base64") !== sigB64) return false;
+		const key = createPublicKey({ key: Buffer.from(spkiB64, "base64"), format: "der", type: "spki" });
+		if (key.asymmetricKeyType !== "ec" || key.asymmetricKeyDetails?.namedCurve !== "prime256v1") return false;
+		return cryptoVerify("sha256", bytes, { key, dsaEncoding: "ieee-p1363" }, sig);
+	} catch {
+		return false;
+	}
 }
 
 interface ChannelRow {
@@ -181,6 +272,7 @@ export class TableStore {
 	readonly db: Database;
 	private readonly ledger: Ledger;
 	private readonly ownsLedger: boolean;
+	private readonly personLock?: PersonLock;
 
 	constructor(opts: TableStoreOptions = {}) {
 		const dbPath = opts.dbPath ?? defaultTableDbPath();
@@ -200,12 +292,97 @@ export class TableStore {
 		this.db.exec(SCHEMA_SQL);
 		this.migrate();
 
+		if (opts.personLock) {
+			this.personLock = opts.personLock;
+			// Created only when the lock is on, so a store opened without it keeps today's schema.
+			// Replay is keyed on (device_id, created_at), never on signature bytes.
+			this.db.exec(
+				"CREATE TABLE IF NOT EXISTS message_devices (message_id TEXT PRIMARY KEY, device_id TEXT NOT NULL, created_at INTEGER NOT NULL, UNIQUE (device_id, created_at))",
+			);
+		}
+
 		if (opts.ledger) {
 			this.ledger = opts.ledger;
 			this.ownsLedger = false;
 		} else {
 			this.ledger = openDefaultTableLedger();
 			this.ownsLedger = true;
+		}
+	}
+
+	hasPersonLock(): boolean {
+		return this.personLock !== undefined;
+	}
+
+	/**
+	 * Slice 1a gate for one new post. Returns the createdAt to store and the
+	 * device to record, or undefined when the post carries no person signature
+	 * (officer ids, and the gate's GAME actor). Throws TableAuthError otherwise.
+	 */
+	private enforcePersonLock(input: {
+		channelId: string;
+		authorId: ParticipantId;
+		content: string;
+		replyTo?: string;
+		sig?: string;
+		deviceId?: string;
+		createdAt?: number;
+		gateActor?: boolean;
+		audioUrl?: string;
+		audioDurationMs?: number;
+	}): { createdAt: number; deviceId: string } | undefined {
+		const lock = this.personLock;
+		if (!lock || !input.authorId.startsWith("human:")) return undefined;
+		if (input.authorId === GATE_GAME_ID) {
+			if (input.gateActor === true) return undefined;
+			throw new TableAuthError(`${GATE_GAME_ID} may post only as the gate's GAME actor`);
+		}
+		if (!PERSON_IDS.has(input.authorId)) {
+			throw new TableAuthError(`${input.authorId} may not post to this store`);
+		}
+		// Audio rides outside the signed bytes, so a person's signed post may not carry any.
+		if (input.audioUrl !== undefined || input.audioDurationMs !== undefined) {
+			throw new TableAuthError("audio fields are not allowed on a person's post under the person lock");
+		}
+		const { deviceId, sig, createdAt } = input;
+		if (!deviceId || !sig || typeof createdAt !== "number" || !Number.isInteger(createdAt)) {
+			throw new TableAuthError(`${input.authorId} must post with deviceId, sig and the createdAt it signed`);
+		}
+		const device = lock.devices().find((d) => d.deviceId === deviceId);
+		if (!device || device.participantId !== input.authorId) {
+			throw new TableAuthError(`device ${deviceId} is not enrolled for ${input.authorId}`);
+		}
+		if (device.class === "browser") throw new TableAuthError("browser devices are read-only");
+		if (device.class === "file" && input.authorId !== "human:desk") {
+			throw new TableAuthError("a file key may sign only for human:desk");
+		}
+		const now = (lock.now ?? Date.now)();
+		if (Math.abs(now - createdAt) > (lock.skewMs ?? ROW_SKEW_MS)) {
+			throw new TableAuthError("createdAt is outside the allowed window of the store's clock");
+		}
+		const bytes = rowSigningBytes({
+			storeName: lock.storeName,
+			deviceId,
+			channelId: input.channelId,
+			authorId: input.authorId,
+			content: input.content,
+			replyTo: input.replyTo,
+			createdAt,
+		});
+		if (!verifyP256Raw(device.publicKey, bytes, sig)) {
+			throw new TableAuthError(`signature does not verify for device ${deviceId}`);
+		}
+		return { createdAt, deviceId };
+	}
+
+	/**
+	 * Under the lock a person's row is final: edit, delete and attach-audio would change
+	 * what a signature covers (or leave it over rewritten content), so any `human:` actor
+	 * is refused and a person reposts. Unlocked stores are unchanged.
+	 */
+	private refuseHumanMutation(actor: ParticipantId, verb: string): void {
+		if (this.personLock && actor.startsWith("human:")) {
+			throw new TableAuthError(`${actor} cannot ${verb} on a store with the person lock; post again instead`);
 		}
 	}
 
@@ -557,6 +734,12 @@ export class TableStore {
 		 *  posts carry neither field. See attachAudio() for adding it later. */
 		audioUrl?: string;
 		audioDurationMs?: number;
+		/** Slice 1a, used only when the store has a personLock. */
+		deviceId?: string;
+		/** The createdAt the person signed over; stored as the message time under the lock. */
+		createdAt?: number;
+		/** True only for the gate's own GAME post path. */
+		gateActor?: boolean;
 	}): Message {
 		this.requireChannel(input.channelId);
 		if (input.content.length === 0) {
@@ -580,6 +763,14 @@ export class TableStore {
 			}
 		}
 
+		const signed = this.enforcePersonLock(input);
+		if (signed) {
+			const dup = this.db
+				.prepare("SELECT 1 AS ok FROM message_devices WHERE device_id = ? AND created_at = ?")
+				.get(signed.deviceId, signed.createdAt);
+			if (dup) throw new TableConflictError(`replay: device ${signed.deviceId} already posted at ${signed.createdAt}`);
+		}
+
 		const message: Message = {
 			id: newMessageId(),
 			channelId: input.channelId,
@@ -587,26 +778,42 @@ export class TableStore {
 			content: input.content,
 			replyTo: input.replyTo,
 			sig: input.sig,
-			createdAt: Date.now(),
+			createdAt: signed ? signed.createdAt : Date.now(),
 			audioUrl: input.audioUrl,
 			audioDurationMs: input.audioDurationMs,
 		};
 
-		this.db
-			.prepare(
-				"INSERT INTO messages (id, channel_id, author_id, content, reply_to, sig, edited_at, deleted_at, created_at, audio_url, audio_duration_ms) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)",
-			)
-			.run(
-				message.id,
-				message.channelId,
-				message.authorId,
-				message.content,
-				message.replyTo ?? null,
-				message.sig ?? null,
-				message.createdAt,
-				message.audioUrl ?? null,
-				message.audioDurationMs ?? null,
-			);
+		const insert = () => {
+			this.db
+				.prepare(
+					"INSERT INTO messages (id, channel_id, author_id, content, reply_to, sig, edited_at, deleted_at, created_at, audio_url, audio_duration_ms) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)",
+				)
+				.run(
+					message.id,
+					message.channelId,
+					message.authorId,
+					message.content,
+					message.replyTo ?? null,
+					message.sig ?? null,
+					message.createdAt,
+					message.audioUrl ?? null,
+					message.audioDurationMs ?? null,
+				);
+			if (signed) {
+				this.db
+					.prepare("INSERT INTO message_devices (message_id, device_id, created_at) VALUES (?, ?, ?)")
+					.run(message.id, signed.deviceId, signed.createdAt);
+			}
+		};
+		try {
+			this.db.transaction(insert)();
+		} catch (err) {
+			// The unique index is the backstop for a race the pre-check cannot see.
+			if (signed && /UNIQUE/i.test((err as Error).message ?? "")) {
+				throw new TableConflictError(`replay: device ${signed.deviceId} already posted at ${signed.createdAt}`);
+			}
+			throw err;
+		}
 
 		this.ledger.append({
 			kind: "table.message.post",
@@ -628,6 +835,7 @@ export class TableStore {
 		editorId: ParticipantId;
 		content: string;
 	}): Message {
+		this.refuseHumanMutation(input.editorId, "edit");
 		const row = this.getMessageRow(input.messageId);
 		if (!row || row.deleted_at !== null) {
 			throw new TableNotFoundError(`message ${input.messageId} not found`);
@@ -674,6 +882,7 @@ export class TableStore {
 		audioUrl: string;
 		audioDurationMs: number;
 	}): Message {
+		this.refuseHumanMutation(input.actorId, "attach audio");
 		const row = this.getMessageRow(input.messageId);
 		if (!row || row.deleted_at !== null) {
 			throw new TableNotFoundError(`message ${input.messageId} not found`);
@@ -706,6 +915,7 @@ export class TableStore {
 	}
 
 	deleteMessage(input: { messageId: string; deleterId: ParticipantId }): Message {
+		this.refuseHumanMutation(input.deleterId, "delete");
 		const row = this.getMessageRow(input.messageId);
 		if (!row || row.deleted_at !== null) {
 			throw new TableNotFoundError(`message ${input.messageId} not found`);
