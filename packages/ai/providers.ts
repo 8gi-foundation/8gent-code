@@ -9,6 +9,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
 import { resolveLlamaServerUrl } from "../local-model-server/select";
 import { trustedEnvValue, trustedProxyFor } from "../permissions/run-command-sandbox";
+import { isCloudProvider } from "../providers";
 import {
 	missingKeyMessage,
 	resolveProviderBaseUrl,
@@ -17,6 +18,7 @@ import {
 import { resolveRetrySettings } from "../settings/retry";
 import { loadSettings } from "../settings/store";
 import { modelFetchAsFetch } from "./model-fetch";
+import { piiGatedFetch } from "./pii-gated-fetch";
 import { resolveOllamaBaseUrl } from "./text-tool-endpoint";
 
 export type LocalOrBuiltinProviderName =
@@ -99,9 +101,13 @@ export function createModel(config: ProviderConfig): LanguageModel {
 		// A hosted provider with no key gets no request at all (#3746): the
 		// refusal fires at send time, so a failover loop records it as this
 		// provider's error and nothing leaves the machine.
+		// A cloud endpoint's requests pass the PII gate first (anonymize, verify,
+		// or refuse), the same rule as ProviderManager.chat(). Local ones do not.
 		fetch: hostedWithoutKey(config.name, baseURL, apiKey)
 			? refuseWithoutKey(config.name, baseURL)
-			: guardedKeyedFetch(modelFetchAsFetch, apiKey),
+			: isCloudProvider({ baseUrl: baseURL })
+				? piiGatedFetch(guardedKeyedFetch(modelFetchAsFetch, apiKey))
+				: guardedKeyedFetch(modelFetchAsFetch, apiKey),
 		headers: {
 			...config.headers,
 			...(config.name === "openrouter"
