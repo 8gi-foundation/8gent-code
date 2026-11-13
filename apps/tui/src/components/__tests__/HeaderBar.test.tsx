@@ -78,8 +78,8 @@ describe("HeaderBar", () => {
 		const [pill, , cluster] = children;
 		expect(pill.props.flexShrink).toBe(0);
 		expect(pill.props.width).toBeUndefined();
-		// The chips render through HeaderChips, a click target (#3239); the
-		// rendered-row tests below pin that it never shrinks or clips.
+		// The chips render through HeaderChips; the rendered-row tests below
+		// pin that it never shrinks or clips.
 		expect(cluster.type).toBe(HeaderChips);
 	});
 
@@ -156,13 +156,11 @@ describe("HeaderBar", () => {
 	test("the chips are never clipped, 50 to 200 columns, every combination (audit #2)", () => {
 		for (const approvalPending of [false, true]) {
 			for (const micOn of [false, true]) {
-				for (const permMode of ["ask", "infinite"]) {
-					const props0 = { ...live, approvalPending, micOn, permMode };
-					// 50 is the floor: the compact pill (22) plus every chip
-					// ("ASK  INFINITE  ● MIC" and the margin, 26) is 48 columns.
-					for (let width = 50; width <= 200; width++) {
-						expect(occupied({ ...props0, width })).toBeLessThanOrEqual(width);
-					}
+				const props0 = { ...live, approvalPending, micOn };
+				// 50 is the floor: the compact pill (22) plus every chip
+				// ("ASK  ● MIC" and the margin) fits with room to spare.
+				for (let width = 50; width <= 200; width++) {
+					expect(occupied({ ...props0, width })).toBeLessThanOrEqual(width);
 				}
 			}
 		}
@@ -217,24 +215,20 @@ describe("HeaderBar", () => {
 		expect(statusClusterWidth(live)).toBe(0);
 	});
 
-	test("chips show only while they apply, in priority order ASK > INFINITE > MIC (#3238)", () => {
-		expect(headerChips({ micOn: false, approvalPending: false, permMode: "ask" })).toEqual([]);
-		expect(headerChips({ micOn: false, approvalPending: false, permMode: "guarded" })).toEqual([]);
-		expect(headerChips({ micOn: true, approvalPending: true, permMode: "infinite" })).toEqual([
-			"ASK",
-			"INFINITE",
-			"● MIC",
-		]);
+	test("chips show only while they apply, in priority order ASK > MIC (#3238)", () => {
+		expect(headerChips({ micOn: false, approvalPending: false })).toEqual([]);
+		expect(headerChips({ micOn: true, approvalPending: true })).toEqual(["ASK", "● MIC"]);
 	});
 
 	for (const width of [80, 120, 160]) {
 		test(`${width} columns: every chip sits on the pill's text row, not its border (#3238)`, () => {
-			const p = { ...live, width, mark: true, approvalPending: true, micOn: true, permMode: "infinite" };
+			const p = { ...live, width, mark: true, approvalPending: true, micOn: true };
 			const lines = stripVTControlCharacters(renderToString(<HeaderBar {...p} />, { columns: width })).split(
 				"\n",
 			);
 			expect(lines.length).toBe(3);
-			for (const chip of ["ASK", "INFINITE", "● MIC"]) {
+			expect(lines[1]).not.toContain("INFINITE");
+			for (const chip of ["ASK", "● MIC"]) {
 				expect(lines[1]).toContain(chip);
 				expect(lines[0]).not.toContain(chip);
 				expect(lines[2]).not.toContain(chip);
@@ -245,15 +239,6 @@ describe("HeaderBar", () => {
 		});
 	}
 
-	test("at 80 columns switching to Infinite never moves the living 8 or the pill (#3238)", () => {
-		const short = { ...base, workspacePath: "/Users/operator/8gent-code", branch: "main", width: 80, mark: true };
-		const ask = planHeader({ ...short, permMode: "ask" });
-		const infinite = planHeader({ ...short, permMode: "infinite" });
-		expect(ask.mark).toBe(true);
-		expect(infinite.mark).toBe(ask.mark);
-		expect(infinite.compactBrand).toBe(ask.compactBrand);
-		expect(infinite.middle.branch).toBe("main");
-	});
 });
 
 // The living 8 (#3160) is written straight to the terminal at the header's

@@ -21,12 +21,15 @@
  * title to the new one in four frames (lib/motion.ts). The labels never
  * move. With animations off (Ctrl+A) or reduced motion, the bar jumps.
  *
- * Permission modes (#3174): a tab whose mode is not Ask carries it after
- * its title, in the mode's colour, outside the underline:
+ * Permission modes (#3174): a background tab whose mode is not Ask
+ * carries it after its title, in the mode's colour, outside the underline.
+ * The active tab carries none: the footer perm segment already names the
+ * focused tab's mode, beside its Shift+Tab key, so it is said once.
  *
- *   1] Orchestrator · Guarded   2] Engineer   3] QA · Plan
+ *   1] Orchestrator   2] Engineer   3] QA · Plan
  *
  * At 120 columns or more the tag is the word; below, one glyph (P, G, ∞).
+ * Below 60 columns background tabs are a number and a lamp, so no tag.
  *
  * Pane grouping support: tabs in the same group carry a "+", and a grabbed
  * tab (Ctrl+G drag mode) is wrapped in [ ]. The drop hint shows only while
@@ -428,8 +431,10 @@ export function TabBar({
 			const badge = tab.badge && tab.badge > 0 ? ` (${tab.badge})` : "";
 			const grouped = groups.some((g) => g.tabIds.includes(tab.id)) ? " +" : "";
 			const perm = permFor?.(tab.id);
+			// The active tab's mode is the footer's to say; a background tab's
+			// is said here, where nothing else shows it.
 			const tag =
-				perm && (!compact || tab.active) ? permTabTag(perm, width >= TAB_TAG_WIDE_COLS) : "";
+				perm && !compact && !tab.active ? permTabTag(perm, width >= TAB_TAG_WIDE_COLS) : "";
 			const frame = lampFrames[tab.id] ?? restFrame("idle");
 			const shape = compact
 				? tab.active

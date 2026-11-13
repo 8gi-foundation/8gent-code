@@ -276,20 +276,20 @@ describe("lamp beside the permission tag (#3174)", () => {
 
 	test("an idle tab is dark, so its tag keeps its one separator", () => {
 		const row = bar(120, {}, []);
-		expect(row).toContain("1] Orchestrator · Guarded   2] Engineer   3] QA · Plan");
+		expect(row).toContain("1] Orchestrator   2] Engineer   3] QA · Plan");
 		expect(row).not.toContain("· ·");
 	});
 
 	test("the lamp follows the tag, never sits between title and tag", () => {
 		const row = bar(120, { t2: { needsYou: true, unread: null } }, ["t0"]);
-		expect(row).toContain("1] Orchestrator · Guarded ◐");
+		expect(row).toContain("1] Orchestrator ◐");
 		expect(row).toContain("3] QA · Plan ▲");
 	});
 
 	test("the tags stay readable at 80 columns, narrow glyph form", () => {
 		const row = bar(80, { t2: { needsYou: true, unread: null } }, []);
 		expect(row).toContain("3] QA P ▲");
-		expect(row).toContain("1] Orchestrator G");
+		expect(row).toContain("1] Orchestrator   2]");
 	});
 });
 
