@@ -7,7 +7,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseCronFile, writeCronFileAtomic } from "../cron/index";
+import { assertCronPathSafe, parseCronFile, writeCronFileAtomic } from "../cron/index";
 import { writeJobFile } from "../core/job-file";
 import { killProcessTree, shellInvocation, spawnShell } from "../core/shell";
 import { getDataDir } from "./data-dir";
@@ -46,6 +46,7 @@ let tickTimer: ReturnType<typeof setInterval> | null = null;
 
 function readFromDisk(): { rows: CronJob[]; rejected: unknown[] } | null {
 	try {
+		if (existsSync(cronPath())) assertCronPathSafe(cronPath(), "read");
 		const parsed = parseCronFile(readFileSync(cronPath(), "utf-8"));
 		if (!parsed) {
 			console.log("[cron] cron.json is not readable right now, keeping the jobs in memory");

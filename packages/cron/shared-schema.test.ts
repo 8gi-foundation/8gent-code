@@ -197,15 +197,41 @@ describe("cron.json has one row shape (#255)", () => {
 		expect(readdirSync(dataDir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
 	});
 
-	test("a cron.json writable by group or world is refused", () => {
-		writeFileSync(file, "[]");
+	test("a cron.json writable by group or world loads no jobs and is not overwritten", async () => {
+		writeFileSync(file, fiveJobs);
 		chmodSync(file, 0o666);
 		try {
+			expect(new CronManager().list()).toEqual([]);
+			expect(await daemon.loadJobs()).toEqual([]);
 			expect(() =>
 				new CronManager().add({ name: "n", schedule: "* * * * *", command: "chat y", enabled: true }),
-			).toThrow(/writable/);
+			).toThrow(/not overwriting/);
+			expect(readFileSync(file, "utf-8")).toBe(fiveJobs);
 		} finally {
 			chmodSync(file, 0o600);
+		}
+	});
+
+	test("a cron.json owned by another user loads no jobs", () => {
+		writeFileSync(file, fiveJobs);
+		const realUid = process.getuid;
+		(process as { getuid?: () => number }).getuid = () => (realUid?.() ?? 0) + 1;
+		try {
+			expect(new CronManager().list()).toEqual([]);
+		} finally {
+			(process as { getuid?: () => number }).getuid = realUid;
+		}
+	});
+
+	test("a data dir at 0775 owned by us is tightened and the save succeeds", () => {
+		writeFileSync(file, "[]");
+		chmodSync(dataDir, 0o775);
+		try {
+			new CronManager().add({ name: "n", schedule: "* * * * *", command: "chat y", enabled: true });
+			expect(statSync(dataDir).mode & 0o022).toBe(0);
+			expect(JSON.parse(readFileSync(file, "utf-8"))).toHaveLength(1);
+		} finally {
+			chmodSync(dataDir, 0o700);
 		}
 	});
 });

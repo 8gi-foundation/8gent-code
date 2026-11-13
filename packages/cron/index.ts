@@ -64,14 +64,24 @@ function eightShellLine(command: string): string {
 	return [...head, ...words].join(" ");
 }
 
-/** Refuse a cron.json (or its folder) that is not ours alone to write. */
-export function assertCronPathSafe(file: string): void {
+/**
+ * Trust check for cron.json and its folder. Another user's path is always refused.
+ * A folder of ours that is group/world-writable (the usual 0775 umask) is tightened with
+ * chmod go-w. cron.json itself: when writing, it is tightened the same way (the rename
+ * replaces its content anyway); when reading, a group/world-writable file is refused, because
+ * someone else may have written it, and tightening would only launder their content.
+ */
+export function assertCronPathSafe(file: string, use: "read" | "write" = "write"): void {
 	const uid = process.getuid?.();
 	for (const target of [path.dirname(file), file]) {
 		if (!fs.existsSync(target)) continue;
 		const st = fs.statSync(target);
 		if (uid !== undefined && st.uid !== uid) throw new Error(`cron: ${target} is not owned by this user`);
-		if (st.mode & 0o022) throw new Error(`cron: ${target} is writable by group or world`);
+		if (!(st.mode & 0o022)) continue;
+		if (use === "read" && target === file) {
+			throw new Error(`cron: ${target} is writable by group or world, not loading it`);
+		}
+		fs.chmodSync(target, st.mode & ~0o022 & 0o7777);
 	}
 }
 
@@ -222,6 +232,7 @@ export class CronManager {
 	private load(): CronRow[] {
 		try {
 			if (fs.existsSync(this.filePath)) {
+				assertCronPathSafe(this.filePath, "read");
 				const parsed = parseCronFile(fs.readFileSync(this.filePath, "utf-8"));
 				if (!parsed) {
 					this.unreadable = true;
