@@ -114,3 +114,47 @@ describe("cloud egress gate", () => {
 		expect(sent).not.toMatch(/\[PERSON_\d+\]/);
 	});
 });
+
+describe("minimax direct provider egress", () => {
+	const prev = process.env.MINIMAX_API_KEY;
+	afterEach(() => {
+		if (prev === undefined) delete process.env.MINIMAX_API_KEY;
+		else process.env.MINIMAX_API_KEY = prev;
+	});
+
+	test("disabled by default: not available without MINIMAX_API_KEY", () => {
+		delete process.env.MINIMAX_API_KEY;
+		writeSettings("8gent", "eight-1.0-q3:14b", {});
+		const mgr = new ProviderManager(settingsPath);
+		const cfg = mgr.getProvider("minimax");
+		expect(cfg.enabled).toBe(false);
+		expect(cfg.apiKeyEnv).toBe("MINIMAX_API_KEY");
+		expect(cfg.baseUrl).toBe("https://api.minimax.io/v1");
+		expect(mgr.listEnabledProviders().map((p) => p.name)).not.toContain("minimax");
+	});
+
+	test("key in env makes it available; outbound payload is anonymized", async () => {
+		process.env.MINIMAX_API_KEY = "test-key";
+		writeSettings("minimax", "MiniMax-M3", {});
+		const mgr = new ProviderManager(settingsPath);
+		expect(mgr.listEnabledProviders().map((p) => p.name)).toContain("minimax");
+
+		let captured: any = null;
+		let calledUrl = "";
+		globalThis.fetch = (async (url: string, init: any) => {
+			calledUrl = String(url);
+			captured = JSON.parse(init.body);
+			return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			});
+		}) as unknown as typeof fetch;
+
+		await mgr.chat({ messages: [{ role: "user", content: PROMPT_PII }] });
+		expect(calledUrl).toContain("api.minimax.io");
+		const outbound = captured.messages.map((m: any) => m.content).join("\n");
+		expect(outbound).not.toContain("sarah.connor@example.com");
+		expect(outbound).not.toContain("555-0182");
+		expect(outbound).toMatch(/\[PERSON_\d+\]/);
+	});
+});
