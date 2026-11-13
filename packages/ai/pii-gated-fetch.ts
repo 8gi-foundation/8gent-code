@@ -53,13 +53,25 @@ function slotsOf(body: { messages?: unknown }): {
 				leaf(v as Record<string, unknown>, k);
 		}
 	};
-	if (!Array.isArray(body.messages)) throw new Error("no messages array");
-	for (const m of body.messages as Record<string, unknown>[]) {
+	// A completion-style body (Ollama /api/generate, /v1/completions) carries
+	// its text in prompt and system.
+	const flat = body as Record<string, unknown>;
+	for (const k of ["prompt", "system"]) if (typeof flat[k] === "string") leaf(flat, k);
+	// A body with no conversation (a model probe, {model}) has no slots; it is
+	// still verified whole below.
+	for (const m of (Array.isArray(body.messages) ? body.messages : []) as Record<
+		string,
+		unknown
+	>[]) {
 		if (typeof m.content === "string") leaf(m, "content");
 		else if (Array.isArray(m.content)) {
-			for (const part of m.content as Record<string, unknown>[])
-				if (typeof part.text === "string") leaf(part, "text");
-		}
+			for (const part of m.content as Record<string, unknown>[]) {
+				// An image or a file cannot be proven clean: refuse, never send it unread (#276).
+				if (typeof part.text !== "string")
+					throw new Error(`unverifiable content part: ${String(part.type)}`);
+				leaf(part, "text");
+			}
+		} else if (m.content != null) throw new Error("unverifiable message content");
 		if (typeof m.reasoning_content === "string") leaf(m, "reasoning_content");
 		if (typeof m.name === "string") fixed.push(m.name);
 		if (typeof m.tool_call_id === "string") fixed.push(m.tool_call_id);
@@ -118,6 +130,8 @@ export async function gateBody(raw: string): Promise<{ body: string; map: Map<st
 	slots.forEach((s, i) => s.set(texts[i]));
 	const outbound = [...texts, ...fixed, ...args()].join("\n");
 	if (!anonymizer.verifyClean(outbound)) throw new Error("PII survived anonymization");
+	if (slots.length === 0 && !anonymizer.verifyClean(raw))
+		throw new Error("PII in a body with no text slots");
 	return { body: JSON.stringify(body), map: gated.map };
 }
 
@@ -202,6 +216,8 @@ function restoreStream(
  */
 export function piiGatedFetch(base: typeof fetch): typeof fetch {
 	return (async (input: string | URL | Request, init?: RequestInit) => {
+		// A Request object carries its own body, which this cannot read: refuse it.
+		if (input instanceof Request && input.body != null) throw new Error(FAIL);
 		if (init?.body == null) return base(input, init);
 		let gated: { body: string; map: Map<string, string> };
 		try {

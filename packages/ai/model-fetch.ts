@@ -32,6 +32,8 @@
  */
 
 import { TurnTimeoutError, resolveTurnTimeoutMs } from "../eight/turn-timeout";
+import { isCloudProvider } from "../providers";
+import { piiGatedFetch } from "./pii-gated-fetch";
 
 /** The timer functions modelFetch schedules with. Tests inject a fake clock. */
 export type ModelFetchTimers = {
@@ -55,10 +57,29 @@ export type ModelFetchOptions = {
 	timers?: ModelFetchTimers;
 };
 
-export async function modelFetch(
+/**
+ * The one exit for model calls (#273, #276). A request to a cloud URL passes
+ * the PII gate (anonymize and verify, or refuse) before it leaves, and its
+ * reply is restored; a loopback URL goes straight out. Every model path (the
+ * AI SDK through modelFetchAsFetch, the text-tool path, ProviderManager, the
+ * local clients) calls this, so none can reach the cloud raw.
+ */
+export function modelFetch(
 	input: string | URL | Request,
 	init: RequestInit = {},
 	opts: ModelFetchOptions = {},
+): Promise<Response> {
+	const url = input instanceof Request ? input.url : String(input);
+	if (!isCloudProvider({ baseUrl: url })) return send(input, init, opts);
+	const gated = piiGatedFetch(((i: string | URL | Request, n?: RequestInit) =>
+		send(i, n ?? {}, opts)) as typeof fetch);
+	return gated(input, init);
+}
+
+async function send(
+	input: string | URL | Request,
+	init: RequestInit,
+	opts: ModelFetchOptions,
 ): Promise<Response> {
 	const timeoutMs = opts.timeoutMs ?? resolveTurnTimeoutMs();
 	const idleMs = opts.idleMs;
@@ -83,7 +104,10 @@ export async function modelFetch(
 	const armIdle = () => {
 		if (idleMs == null) return;
 		if (idleTimer != null) timers.clearTimeout(idleTimer);
-		idleTimer = timers.setTimeout(() => fire("idle"), gotFirstByte ? idleMs : (firstByteMs ?? idleMs));
+		idleTimer = timers.setTimeout(
+			() => fire("idle"),
+			gotFirstByte ? idleMs : (firstByteMs ?? idleMs),
+		);
 		(idleTimer as { unref?: () => void })?.unref?.();
 	};
 	const stop = () => {
