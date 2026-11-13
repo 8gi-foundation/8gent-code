@@ -63,7 +63,12 @@ async function frame(cols: number, rows: number, props: Partial<Props> = {}): Pr
 	});
 	await new Promise((r) => setTimeout(r, 30));
 	app.unmount();
-	const last = stdout.frames.filter((f) => f.includes("mode ") || f.includes("[^P]")).at(-1) ?? "";
+	// Below about 33 columns the row has neither the "mode" label nor the palette
+	// cap, so fall back to the last frame that drew anything.
+	const last =
+		stdout.frames.filter((f) => f.includes("mode ") || f.includes("[^P]")).at(-1) ??
+		stdout.frames.filter((f) => f.trim().length > 0).at(-1) ??
+		"";
 	return (
 		last
 			// biome-ignore lint/suspicious/noControlCharactersInRegex: strip ANSI
@@ -738,9 +743,12 @@ describe("the unverified flag never pushes [^P] palette out at 48 columns and be
 		for (const f of forms) expect(["unverified", "unver.", "!"]).toContain(String(f));
 	});
 
-	test("at 40 columns the flag keeps a word beside the plan perm, and the cap holds", () => {
+	test("at 39 columns the plan perm keeps its glyph beside the flag, and the cap holds", () => {
+		// The perm outranks the flag's word (8SO on #264): the footer is the only
+		// place the mode shows, so at 39 the flag is "!" and the perm is "P".
 		const row = fitFooterRow(build("tests_claimed_not_run", false, 40), 39);
-		expect(row.segments.find((s) => s.key === "verification")?.value).toBe("no tests");
+		expect(row.segments.find((s) => s.key === "perm")?.value).toBe("P");
+		expect(row.segments.find((s) => s.key === "verification")?.value).toBe("!");
 		expect(row.hints[0]).toBe("^P palette");
 	});
 
@@ -858,4 +866,202 @@ describe("the sandbox reason reads in full at 100 columns (design pass)", () => 
 			expect(row.segments.find((s) => s.key === "sandbox")?.note).toBeUndefined();
 		}
 	});
+});
+
+describe("the perm segment never leaves the row unless the mode is Ask (8SO on #264)", () => {
+	// The active tab carries no tag and the header no chip, so the footer is the
+	// only place the focused tab's mode shows. Below 60 columns it shortens to
+	// the mode's glyph; it never disappears.
+	const GLYPH = { plan: "P", guarded: "G", infinite: "∞" } as const;
+	const NAME = { plan: "Plan", guarded: "Guarded", infinite: "Infinite" } as const;
+	const PERMS = ["plan", "guarded", "infinite"] as const;
+	const WORK_MODES = ["Planning", "Researching", "Implementing", "Testing", "Debugging"] as const;
+	/** Every permission mode name and glyph, ASCII form included. */
+	const PERM_WORDS = ["Plan", "Ask", "Guarded", "Infinite", "P", "A", "G", "∞", "I"];
+	/** Flag and sandbox are set apart, not only together: each alone takes its own path through the fit. */
+	const STATES = [
+		{ flag: false, sandbox: false },
+		{ flag: true, sandbox: false },
+		{ flag: false, sandbox: true },
+		{ flag: true, sandbox: true },
+	];
+	const build = (
+		perm: keyof typeof GLYPH,
+		columns: number,
+		state: (typeof STATES)[number],
+		mode: (typeof WORK_MODES)[number] = "Planning",
+	) =>
+		buildFooterSegments({
+			mode,
+			permissions: perm,
+			sessionTime: "2s",
+			providersLive: 2,
+			providersTotal: 3,
+			columns,
+			...(state.flag ? { verification: "unverified" as const } : {}),
+			...(state.sandbox ? { sandboxOff: "nested" } : {}),
+		});
+
+	test("widths 20 to 220, all five work modes, flag on or off, sandbox on or off: the perm segment holds, whole", () => {
+		for (const perm of PERMS) {
+			for (const mode of WORK_MODES) {
+				for (const state of STATES) {
+					for (let w = 20; w <= 220; w++) {
+						const at = `perm ${perm} mode ${mode} at ${w} flag ${state.flag} sandbox off ${state.sandbox}`;
+						const row = fitFooterRow(build(perm, w, state, mode), w);
+						const index = row.segments.findIndex((s) => s.key === "perm");
+						const seg = row.segments[index];
+						expect(seg, at).toBeDefined();
+						// The perm segment ends inside the row, so Ink never cuts it: it is
+						// the full name or the glyph, nothing in between.
+						expect(segmentsWidth(row.segments.slice(0, index + 1)), at).toBeLessThanOrEqual(w);
+						expect<string[]>([NAME[perm], GLYPH[perm]], at).toContain(seg?.value as string);
+						if (w >= 60) expect(seg?.value, at).toBe(NAME[perm]);
+						// The whole row fits, so nothing is cut anywhere. The one stated floor:
+						// the flag and the sandbox state together need 23 columns.
+						if (!(state.flag && state.sandbox && w < 23))
+							expect(segmentsWidth(row.segments), at).toBeLessThanOrEqual(w);
+						// The flag and the sandbox state never leave.
+						expect(
+							row.segments.some((s) => s.key === "verification"),
+							at,
+						).toBe(state.flag);
+						expect(
+							row.segments.some((s) => s.key === "sandbox"),
+							at,
+						).toBe(state.sandbox);
+						// The work mode never leaves either, and a shortened word never reads
+						// as a permission mode (8SO on #264): "Plan" beside "∞" would name
+						// the wrong thing.
+						const word = row.segments.find((s) => s.key === "mode")?.value;
+						expect(word, at).toBeDefined();
+						expect(PERM_WORDS, `mode "${word}" ${at}`).not.toContain(word as string);
+						if (w < 38) continue;
+						expect(row.hints[0], at).toBe("^P palette");
+						expect(
+							segmentsWidth(row.segments) + hintWidth("^P palette") + 3,
+							at,
+						).toBeLessThanOrEqual(w);
+					}
+				}
+			}
+		}
+	});
+
+	// The fitted segments are not the proof: Ink cuts a row that overflows, so
+	// "perm Infi…" passed a segment check and still named nothing (8SO on #264).
+	// So the grid below draws the real BottomBar: every permission mode, held
+	// and not, every work mode, the sandbox on or off, the flag on or off, at
+	// every width from 20 to 59.
+	const ALL_PERMS = ["plan", "guarded", "infinite", "ask"] as const;
+	const ALL_NAME = { ...NAME, ask: "Ask" } as const;
+	const ALL_GLYPH = { ...GLYPH, ask: "A" } as const;
+	/** The row with the flag and the sandbox state both: it needs this many columns to draw whole. */
+	const FLAG_SANDBOX_FLOOR = 23;
+
+	/** The perm modes a drawn row names: each segment that is a mode's name or glyph, whole. */
+	const permsRead = (row: string): string[] => {
+		const found: string[] = [];
+		for (const piece of row.split(FOOTER_SEPARATOR.trim())) {
+			// A segment ends at the gap before the hints.
+			const text = (piece.trim().split(/\s{2,}/)[0] ?? "").replace(/^perm /, "");
+			for (const perm of ALL_PERMS) {
+				// A glyph stands alone; a name may carry its held note and key cap.
+				if (text === ALL_GLYPH[perm] || text.split(" ")[0] === ALL_NAME[perm]) found.push(perm);
+			}
+		}
+		return found;
+	};
+
+	for (const perm of ALL_PERMS) {
+		for (const permHeld of [false, true]) {
+			const shown = perm !== "ask" || permHeld;
+			const title = shown
+				? `names ${ALL_NAME[perm]}${permHeld ? " (held)" : ""}, whole`
+				: "names no mode for Ask, and never draws as Infinite does";
+			test(`the drawn row ${title}: 20 to 59 columns, five work modes, sandbox on or off, flag on or off`, async () => {
+				const jobs: Array<{
+					mode: (typeof WORK_MODES)[number];
+					sandbox: boolean;
+					flag: boolean;
+					cols: number;
+				}> = [];
+				for (const mode of WORK_MODES)
+					for (const sandbox of [false, true])
+						for (const flag of [false, true])
+							for (let cols = 20; cols < 60; cols++) jobs.push({ mode, sandbox, flag, cols });
+				const draw = (p: (typeof ALL_PERMS)[number], held: boolean, j: (typeof jobs)[number]) =>
+					frame(j.cols, 30, {
+						permissions: p,
+						permHeld: held,
+						mode: j.mode,
+						sessionTime: "2s",
+						...(j.sandbox ? { sandboxOff: "nested" } : {}),
+						...(j.flag ? { verification: "unverified" as const } : {}),
+					});
+				const wrong: string[] = [];
+				for (let i = 0; i < jobs.length; i += 100) {
+					await Promise.all(
+						jobs.slice(i, i + 100).map(async (j) => {
+							const lines = await draw(perm, permHeld, j);
+							const row = lines[0] ?? "";
+							const at = `${j.mode}, sandbox ${j.sandbox ? "off" : "on"}, flag ${j.flag ? "on" : "off"}, ${j.cols} columns: "${row}"`;
+							if (lines.length !== 1) wrong.push(`more than one row: ${at}`);
+							if (row.length > j.cols) wrong.push(`wider than the pane: ${at}`);
+							// The mode's own name or glyph is a whole segment, and no other
+							// mode's is. A glyph with an ellipsis stuck to it ("P…") is not whole.
+							const read = permsRead(row);
+							if (read.join() !== (shown ? perm : "")) wrong.push(`reads "${read.join()}": ${at}`);
+							// Nothing is cut, with one stated exception: the flag and the sandbox
+							// state together need 23 columns, so below that the tail of "sbx off"
+							// is what Ink cuts. The glyph and the flag stay whole even there.
+							const tight = j.sandbox && j.flag && j.cols < FLAG_SANDBOX_FLOOR;
+							if (!tight && row.includes("\u2026")) wrong.push(`cut: ${at}`);
+							if (tight && !/! │ sbx/.test(row)) wrong.push(`flag or sandbox gone: ${at}`);
+							if (j.sandbox && !tight && !/(sbx|sandbox) off/.test(row))
+								wrong.push(`sandbox state not whole: ${at}`);
+							if (j.flag && !/unverified|unver\.|!/.test(row)) wrong.push(`flag gone: ${at}`);
+							// Ask is the row with no perm segment, so no other mode may draw the same.
+							if (perm === "infinite" && !permHeld) {
+								const ask = (await draw("ask", false, j))[0] ?? "";
+								if (ask === row) wrong.push(`same as the Ask row: ${at}`);
+							}
+						}),
+					);
+				}
+				expect(wrong.slice(0, 12), `${wrong.length} of ${jobs.length} rows wrong`).toEqual([]);
+			}, 240_000);
+		}
+	}
+
+	test("Ask alone still shows no perm segment, even when crowded", () => {
+		const row = fitFooterRow(
+			buildFooterSegments({
+				mode: "Planning",
+				permissions: "ask",
+				verification: "unverified",
+				sandboxOff: "nested",
+				columns: 40,
+			}),
+			40,
+		);
+		expect(row.segments.some((s) => s.key === "perm")).toBe(false);
+	});
+
+	for (const cols of [40, 59]) {
+		test(`the real frame at ${cols} columns with the flag and sandbox off still names Infinite`, async () => {
+			const row =
+				(
+					await frame(cols, 30, {
+						permissions: "infinite",
+						verification: "unverified",
+						sandboxOff: "nested",
+					})
+				)[0] ?? "";
+			expect(row, `row at ${cols}`).toMatch(/∞|Infinite/);
+			expect(row).toMatch(/(sandbox|sbx) off/);
+			expect(row).toContain("[^P] palette");
+			expect(row.length).toBeLessThanOrEqual(cols);
+		});
+	}
 });

@@ -1,6 +1,8 @@
 /**
  * Permission modes, the rest of the look (#3174): the footer toast, tab tags,
- * the INFINITE header chip, the approval card reason and "held by parent".
+ * the approval card reason and "held by parent". The focused tab's mode is
+ * named once, in the footer perm segment: no header chip, no tag on the
+ * active tab.
  *
  * Every frame here is a REAL Ink render into an in-memory TTY of a fixed
  * width, read back as the text a person would see (ANSI stripped), so each
@@ -251,9 +253,10 @@ describe("tab tags (#3174)", () => {
 		);
 		await tick();
 		const row = frame().split("\n")[0] ?? "";
-		expect(row).toContain("1] Orchestrator · Guarded   2] Engineer   3] QA · Plan");
+		expect(row).toContain("1] Orchestrator   2] Engineer   3] QA · Plan");
 		expect(row).toContain("4] Research · Infinite");
 		expect(row).not.toContain("Engineer ·");
+		expect(row).not.toContain("Guarded");
 	});
 
 	test("below 120 columns: one glyph (P, G, ∞)", async () => {
@@ -263,7 +266,7 @@ describe("tab tags (#3174)", () => {
 		);
 		await tick();
 		const row = frame().split("\n")[0] ?? "";
-		expect(row).toContain("1] Orchestrator G   2] Engineer   3] QA P   4] Research ∞");
+		expect(row).toContain("1] Orchestrator   2] Engineer   3] QA P   4] Research ∞");
 	});
 
 	test("the underline covers the title only, never the tag", () => {
@@ -283,41 +286,51 @@ describe("tab tags (#3174)", () => {
 	});
 });
 
-describe("header chip (#3174)", () => {
-	const header = (permMode: string | undefined, width: number) => (
-		<HeaderBar
-			workspacePath="/Users/me/code/app"
-			branch="main"
-			syncStatus="in sync"
-			micOn={false}
-			approvalPending={false}
-			width={width}
-			mark={false}
-			permMode={permMode}
-		/>
-	);
+describe("the focused mode is named once, in the footer", () => {
+	test("the header carries no INFINITE chip", async () => {
+		const { frame } = mount(
+			<HeaderBar
+				workspacePath="/Users/me/code/app"
+				branch="main"
+				syncStatus="in sync"
+				micOn={false}
+				approvalPending={false}
+				width={160}
+				mark={false}
+			/>,
+			160,
+		);
+		await tick();
+		expect(frame()).not.toContain("INFINITE");
+	});
 
-	test("Infinite, and only Infinite, puts INFINITE in the header", async () => {
-		for (const [mode, shows] of [
-			["infinite", true],
-			["guarded", false],
-			["plan", false],
-			["ask", false],
-		] as const) {
-			const { frame } = mount(header(mode, 160), 160);
+	test("the active tab carries no tag; a background tab on Infinite keeps its own", async () => {
+		const tabs = [tab("a", "AI James", true), tab("b", "Rishi", false)];
+		const modes: Record<string, PermView> = {
+			a: { mode: "infinite", held: false },
+			b: { mode: "infinite", held: false },
+		};
+		for (const columns of [160, 80, 50]) {
+			const { frame } = mount(
+				<TabBar tabs={tabs} onSwitch={() => {}} animate={false} permFor={(id) => modes[id]} />,
+				columns,
+			);
 			await tick();
-			expect(frame().includes("INFINITE")).toBe(shows);
+			const row = frame().split("\n")[0] ?? "";
+			expect(row).not.toMatch(/AI James[^\]2]*(Infinite|∞)/);
+			if (columns >= 120) expect(row).toContain("2] Rishi · Infinite");
 			instance?.unmount();
 			instance = null;
 		}
 	});
 
-	test("80 columns: the chip fits beside the branch, on the text row (#3238)", async () => {
-		const { frame } = mount(header("infinite", 80), 80);
+	test("the footer is where it shows, with its key", async () => {
+		const { frame } = mount(
+			<Footer columns={160} data={{ ...FOOTER, permissions: "infinite" }} />,
+			160,
+		);
 		await tick();
-		const lines = frame().split("\n");
-		expect(lines[1]).toContain("INFINITE");
-		expect(lines[1]).toContain("main");
+		expect(frame()).toContain(`perm Infinite [${PERM_KEY}]`);
 	});
 });
 

@@ -73,7 +73,7 @@ interface LiveFocalStripProps {
 	approvalPending?: boolean;
 	/** The agent runs unattended (Infinite): no card can wait on the person,
 	 *  so the border never turns orange. The word is not repeated here: the
-	 *  header chip and the footer perm segment name it (#3238). */
+	 *  footer perm segment names it, once (#264). */
 	autonomous?: boolean;
 	/** True when the agent is actively processing. Drives the NOW vs READY
 	 *  state label - we don't shout "NOW" at an idle TUI. */
@@ -139,8 +139,8 @@ export function LiveFocalStrip({
 }: LiveFocalStripProps) {
 	// The ^Y mode is not shown here: beside the state it read as a phase the
 	// model was in ("DONE Planning"). The footer carries it with its key
-	// (#3123). Infinite is not repeated here either (#3238): the header chip,
-	// the tab tag and the footer perm segment already name it.
+	// (#3123). Infinite is not repeated here either: the footer perm segment
+	// names the focused tab's mode, once (#264).
 	const showApprovalBorder = approvalPending && !autonomous;
 	// A running turn or a waiting card outranks readiness: both mean an agent
 	// answered. Otherwise a not-ready agent is never shown as READY (#3290).

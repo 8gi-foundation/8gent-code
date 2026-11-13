@@ -4,7 +4,8 @@
  * The living braille 8 and the brand pill on the left; workspace path,
  * branch and sync in the middle; on the right only the state chips that
  * ask for the person, and only while they apply: ASK (an approval card is
- * up), INFINITE (the tab runs without asking), ● MIC (recording). A quiet
+ * up) and ● MIC (recording). The permission mode is not here: it is named
+ * once, in the footer perm segment beside its Shift+Tab key. A quiet
  * header is the default. The clock is in the footer, the palette key is the
  * footer's first key cap, and the Lil Eight badge is gone: the living 8 is
  * the pet, and the NOW strip says what the agent is doing.
@@ -18,7 +19,7 @@
  */
 
 import { Box, Text, useStdout } from "ink";
-import React, { useEffect, useRef } from "react";
+import React, { useEffect } from "react";
 import {
 	cellWidth,
 	fitHeaderMiddle,
@@ -32,8 +33,6 @@ import {
 	headerMarkFrame,
 	livingMarkWriter,
 } from "../lib/living-mark.js";
-import { type ClickSpan, useClickSpans, usePressed } from "../lib/click-targets.js";
-import { injectKeys } from "../lib/mouse-input.js";
 import { drawsColour, glyphs } from "../lib/term-caps.js";
 import { t } from "../theme.js";
 
@@ -59,8 +58,6 @@ const CHIP_GAP = 2;
 
 /** An approval card is up. The card itself says ASK too; the chip is its echo where the eye lands first. */
 const ASK_CHIP = "ASK";
-/** Running without asking is the one permission mode that earns a header chip (#3174). */
-const INFINITE_CHIP = "INFINITE";
 const MIC_CHIP = "● MIC";
 const BRAND_TAGLINE = " The Infinite Gentleman";
 
@@ -85,11 +82,6 @@ interface HeaderBarProps {
 	living?: boolean;
 	/** Draw the braille 8 beside the pill when it fits. Defaults to true where braille draws. */
 	mark?: boolean;
-	/**
-	 * The focused tab's permission mode (#3174). Only Infinite changes the
-	 * header: an INFINITE chip beside ASK. The living 8 never changes with it.
-	 */
-	permMode?: string;
 }
 
 /**
@@ -111,19 +103,16 @@ export function brandPillWidth(
 }
 
 /** The chips the header shows right now, in priority order (#3238). */
-export function headerChips(
-	props: Pick<HeaderBarProps, "micOn" | "approvalPending" | "permMode">,
-): string[] {
+export function headerChips(props: Pick<HeaderBarProps, "micOn" | "approvalPending">): string[] {
 	const chips: string[] = [];
 	if (props.approvalPending) chips.push(ASK_CHIP);
-	if (props.permMode === "infinite") chips.push(INFINITE_CHIP);
 	if (props.micOn) chips.push(MIC_CHIP);
 	return chips;
 }
 
 /** Columns the right-hand chips occupy, gaps and the right margin included. */
 export function statusClusterWidth(
-	props: Pick<HeaderBarProps, "micOn" | "approvalPending" | "permMode">,
+	props: Pick<HeaderBarProps, "micOn" | "approvalPending">,
 ): number {
 	const chips = headerChips(props);
 	if (chips.length === 0) return 0;
@@ -255,34 +244,17 @@ export function HeaderBar(props: HeaderBarProps) {
 /**
  * The chips, one row, centred on the pill's text row by the header's
  * alignItems (they were on the pill's top edge before #3238). The right
- * margin mirrors the pill's border and padding on the left. INFINITE is the
- * chip with a key: a click cycles the mode as Shift+Tab does (#3239); ASK
- * and MIC name states you answer elsewhere.
+ * margin mirrors the pill's border and padding on the left. ASK and MIC
+ * name states you answer elsewhere, so neither is a click target.
  */
 export function HeaderChips({ chips }: { chips: string[] }) {
-	const chipRef = useRef(null);
-	let cx = 0;
-	const spans: ClickSpan[] = [];
-	chips.forEach((chip, i) => {
-		if (i > 0) cx += 2;
-		if (chip === INFINITE_CHIP) {
-			spans.push({ id: "chip:infinite", dx: cx, w: cellWidth(chip), action: () => injectKeys("\x1b[Z") });
-		}
-		cx += cellWidth(chip);
-	});
-	useClickSpans(chipRef, spans);
-	const pressed = usePressed("chip:infinite");
 	return (
-		<Box ref={chipRef} flexShrink={0} marginLeft={1} marginRight={CHIP_GAP}>
+		<Box flexShrink={0} marginLeft={1} marginRight={CHIP_GAP}>
 			<Text>
 				{chips.map((chip, i) => (
 					<Text key={chip}>
 						{i > 0 ? "  " : ""}
-						<Text
-							color={chip === MIC_CHIP ? t.red : t.orange}
-							bold
-							inverse={pressed && chip === INFINITE_CHIP}
-						>
+						<Text color={chip === MIC_CHIP ? t.red : t.orange} bold>
 							{chip}
 						</Text>
 					</Text>

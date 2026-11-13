@@ -40,6 +40,7 @@ import {
 	permHeldNote,
 	permToastForms,
 } from "../lib/perm-modes-design.js";
+import { unicodeRich } from "../lib/term-caps.js";
 import { theme } from "../theme.js";
 import { KEY_CAP_GAP, KeyCap, keyCapText, splitHint } from "./KeyCap.js";
 
@@ -405,6 +406,25 @@ const unlabelled = (s: FooterSegment): FooterSegment =>
 	s.key === "mode" || s.key === "perm" ? { ...s, label: undefined } : s;
 
 /**
+ * The perm segment at its shortest: the mode's glyph (P, G, A, or ∞; I on an
+ * ASCII terminal), no label, note or key cap. The footer is the only place
+ * the focused tab's mode shows, so below 60 columns it shrinks to this
+ * instead of leaving the row.
+ */
+const permGlyph = (s: FooterSegment): FooterSegment => {
+	if (s.key !== "perm") return s;
+	const mode = (Object.keys(PERM_LOOK) as PermissionMode[]).find(
+		(m) => PERM_LOOK[m].name === s.value,
+	);
+	const value = !mode
+		? s.value.slice(0, 1)
+		: mode === "infinite" && !unicodeRich()
+			? "I"
+			: PERM_LOOK[mode].initial;
+	return { ...s, label: undefined, note: undefined, hint: undefined, value };
+};
+
+/**
  * The footer row: segments plus the hints the columns they leave can hold.
  *
  * [^P] palette is reserved first: segments are fitted into what is left, so
@@ -421,8 +441,8 @@ const unlabelled = (s: FooterSegment): FooterSegment =>
  * exactly what it would be without it. Below 60 columns security wins the
  * other way: the segment is never dropped. It sheds its reason, then its
  * word ("sbx off"), then the mode and perm labels, and only then the perm
- * segment, so the [^P] palette cap and the sandbox state are both always
- * there.
+ * segment shrinks to its glyph (P, G, ∞), so the [^P] palette cap, the
+ * sandbox state and the permission mode are always there.
  */
 function fitRow(
 	all: FooterSegment[],
@@ -476,7 +496,7 @@ function fitRowOnce(
 	const hintsFor = (segments: FooterSegment[]) =>
 		fitFooterHints(
 			Math.max(0, width - segmentsWidth(segments, leading) - HINTS_MARGIN),
-			segments.some((s) => s.key === "perm"),
+			segments.some((s) => s.key === "perm" && s.hint),
 			dj,
 		);
 	const fit = (list: FooterSegment[]) => fitFooterSegments(list, budget, leading);
@@ -550,13 +570,14 @@ function fitRowOnce(
 			}
 		}
 	}
-	// Still no room: the sandbox keeps its place in its shortest form. Narrow, the
-	// perm segment yields too (the tab tag and Shift+Tab still show it).
+	// Still no room: the sandbox keeps its place in its shortest form. Nothing else
+	// is shortened here: below 60 columns fitFooterRow walks the one list of
+	// shorter rows (NARROW_STEPS) and this is called once for each.
 	const last = forms[2] as FooterSegment;
 	const kept = fit(
 		all
-			.filter((x) => x.key !== "ctx" && (width >= FOOTER_NARROW_COLS || x.key !== "perm"))
-			.map((x) => (x === sandbox ? last : unlabelled(x))),
+			.filter((x) => x.key !== "ctx")
+			.map((x) => (x === sandbox ? last : width >= FOOTER_NARROW_COLS ? unlabelled(x) : x)),
 	);
 	const segments = kept.some((x) => x.key === "sandbox") ? kept : [...kept, last];
 	return { segments, hints: hintsFor(segments) };
@@ -574,24 +595,75 @@ const FLAG_SHORTEST: Record<string, string> = {
 };
 export const FLAG_GLYPH = "!";
 
-/** The mode segment without its "[^Y]" cap, and its word cut to `max` letters if given. */
+/**
+ * A word cut to `max` cells, marked as cut: "Planning" to "Pla.". The full
+ * stop is the point. A bare cut ("Plan") can read as a permission mode name
+ * beside the perm glyph (8SO on #264), and a word that ends in "." never
+ * equals a mode name or glyph.
+ */
+const cutWord = (word: string, max: number): string =>
+	word.length <= max ? word : `${word.slice(0, Math.max(1, max - 1))}.`;
+
+/** The mode segment without its "[^Y]" cap, and its word cut to `max` cells if given. */
 const modeBare = (s: FooterSegment, max?: number): FooterSegment =>
-	s.key === "mode" ? { ...s, hint: undefined, value: max ? s.value.slice(0, max) : s.value } : s;
+	s.key === "mode" ? { ...s, hint: undefined, value: max ? cutWord(s.value, max) : s.value } : s;
 
 /**
- * The footer row, with the unverified-turn flag (#4510, priority 0) fitted
- * so it can never push [^P] palette out (#4962). Drop order, each step only
- * when the row still does not hold the cap:
+ * The one list of shorter rows, longest first. Every state walks it: flag or
+ * no flag, sandbox on or off, any permission mode. Nothing else in this file
+ * shortens the mode or perm segments, so no state can be missed by a fallback
+ * of its own (8SO on #264, twice).
  *
- *   1. the flag shortens: "unverified" to "unver.", "tests-claimed-not-run"
+ *   0. the flag shortens: "unverified" to "unver.", "tests-claimed-not-run"
  *      to "no tests run";
- *   2. the mode and perm labels go ("Planning [^Y]" for "mode Planning [^Y]");
- *   2b. the flag takes its shortest word ("no tests"), the perm yielding below 60;
+ *   1. the mode and perm labels go ("Planning [^Y]" for "mode Planning [^Y]");
+ *   2. the flag takes its shortest word ("no tests"), the perm shrinking to
+ *      its glyph below 60;
  *   3. the flag shrinks to one glyph, "!";
- *   4. only below 60 columns, the perm segment yields (the tab tag and
- *      Shift+Tab still show it);
- *   5. last resorts: the mode loses its "[^Y]" cap, then its word is cut to
- *      four letters. The mode itself and the sandbox state never leave.
+ *   4. only below 60 columns, the perm segment shrinks to its glyph (P, G,
+ *      ∞). It never leaves: the footer is the only place the mode shows;
+ *   5. the work mode loses its "[^Y]" cap (the palette lists every command);
+ *   6. the work mode's word is cut to four cells and marked ("Pla."), so it
+ *      never reads as a permission mode. The mode itself never leaves.
+ *
+ * With no flag the flag steps change nothing and the list is: labels off,
+ * perm glyph, mode cap off, mode word cut.
+ */
+function shorterRows(all: FooterSegment[], width: number): FooterSegment[][] {
+	const flag = all.find((s) => s.key === "verification");
+	const withFlag = (value: (f: FooterSegment) => string) =>
+		all.map((s) => (s === flag ? { ...s, value: value(s) } : s));
+	const short = withFlag((f) => FLAG_SHORT[f.value] ?? f.value);
+	const shortest = withFlag((f) => FLAG_SHORTEST[f.value] ?? FLAG_SHORT[f.value] ?? f.value);
+	const glyphPerm = (l: FooterSegment[]) => (width >= FOOTER_NARROW_COLS ? l : l.map(permGlyph));
+	const marked = glyphPerm(withFlag(() => FLAG_GLYPH).map(unlabelled));
+	return [
+		short,
+		short.map(unlabelled),
+		glyphPerm(shortest.map(unlabelled)),
+		withFlag(() => FLAG_GLYPH).map(unlabelled),
+		marked,
+		marked.map((x) => modeBare(x)),
+		marked.map((x) => modeBare(x, 4)),
+	];
+}
+
+/**
+ * The footer row. It is the longest row from `shorterRows` that still holds
+ * [^P] palette (#4962): the cap is the only way into about 80 commands on a
+ * phone, so the flag (#4510, priority 0) and the labels shorten before it goes.
+ *
+ * Below 60 columns a pane can be too narrow for the cap at all (under about
+ * 33 columns). The row is then the longest of the glyph rows (steps 4 to 6)
+ * that fits the pane whole, because Ink cuts a row that overflows: a cut
+ * "perm I…" names no mode, and a row with no perm segment is how the footer
+ * says Ask. So below 60 columns the perm glyph is whole in every state but Ask.
+ *
+ * One row has a floor: the flag and the sandbox state together need 23
+ * columns as drawn ("Pla. │ ∞ │ ! │ sbx off"). From 20 to 22 the tail of
+ * "sbx off" is what Ink cuts; the perm glyph and the flag stay whole.
+ * Cutting the work mode further ("P.") would read as a permission glyph, so
+ * nothing more gives. The tests assert both the floor and what holds below it.
  *
  * The sandbox state keeps its place throughout (#4953); fitRow decides how it
  * shortens. Other segments give way only after the flag has used every step,
@@ -603,43 +675,26 @@ export function fitFooterRow(
 	leading = false,
 	dj = false,
 ): { segments: FooterSegment[]; hints: string[] } {
-	const flag = all.find((s) => s.key === "verification");
+	type Row = { segments: FooterSegment[]; hints: string[] };
+	const narrow = width < FOOTER_NARROW_COLS;
 	const plain = fitRow(all, width, leading, dj);
-	if (!flag) return plain;
+	if (!narrow && !all.some((s) => s.key === "verification")) return plain;
 	const budget = Math.max(0, width - hintWidth(PALETTE_HINT) - HINTS_MARGIN);
-	const holds = (r: { segments: FooterSegment[]; hints: string[] }) =>
+	const holds = (r: Row) =>
 		r.hints[0] === PALETTE_HINT && segmentsWidth(r.segments, leading) <= budget;
 	if (holds(plain)) return plain;
-	const withFlag = (value: string) => all.map((s) => (s === flag ? { ...flag, value } : s));
-	const short = FLAG_SHORT[flag.value] ?? flag.value;
-	const dropPerm = (l: FooterSegment[]) =>
-		width >= FOOTER_NARROW_COLS ? l : l.filter((s) => s.key !== "perm");
-	const steps: FooterSegment[][] = [
-		withFlag(short),
-		withFlag(short).map(unlabelled),
-		dropPerm(withFlag(FLAG_SHORTEST[flag.value] ?? short).map(unlabelled)),
-		withFlag(FLAG_GLYPH).map(unlabelled),
-		dropPerm(withFlag(FLAG_GLYPH).map(unlabelled)),
-		// The last resorts, on phones narrower than the mode, flag and sandbox together:
-		// the mode loses its key cap (the palette lists every command), then its word
-		// is cut to four letters. The mode itself never leaves the row.
-		dropPerm(withFlag(FLAG_GLYPH).map(unlabelled)).map(modeBare),
-		dropPerm(withFlag(FLAG_GLYPH).map(unlabelled)).map((x) => modeBare(x, 4)),
-	];
+	const rows: Row[] = shorterRows(all, width).map((list) => fitRow(list, width, leading, dj));
 	// Prefer the earliest step that holds the cap and loses no segment the
-	// last one keeps: shortening the flag comes before anything else gives way.
-	const rows = steps.map((list) => fitRow(list, width, leading, dj));
-	// The glyph row that holds the cap sets the bar: on a phone the perm yields, so the
+	// glyph row keeps: shortening the flag comes before anything else gives way.
+	// The glyph row that holds the cap sets the bar: on a phone the perm shrinks, so the
 	// word forms are measured against that row, not against one that cannot hold.
-	const glyph = (rows.slice(3).find(holds) ?? rows[3]) as {
-		segments: FooterSegment[];
-		hints: string[];
-	};
+	const glyph = (rows.slice(3).find(holds) ?? rows[3]) as Row;
 	for (const r of rows.slice(0, 4)) {
 		if (holds(r) && glyph.segments.every((g) => r.segments.some((x) => x.key === g.key))) return r;
 	}
-	for (const r of rows.slice(4)) if (holds(r)) return r;
-	return rows[rows.length - 1] as { segments: FooterSegment[]; hints: string[] };
+	const shortest = rows[rows.length - 1] as Row;
+	const whole = (r: Row) => segmentsWidth(r.segments, leading) <= width;
+	return rows.slice(4).find(holds) ?? (narrow ? rows.slice(4).find(whole) : undefined) ?? shortest;
 }
 
 /** A permission switch the footer is announcing (#3174). */

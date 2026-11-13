@@ -9300,7 +9300,6 @@ export function App({
 								approvalPending={isApprovalPending}
 								width={cols}
 								living={headerMarkLiving}
-								permMode={activePermMode}
 							/>
 						</Box>
 
