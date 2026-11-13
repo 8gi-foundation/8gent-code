@@ -139,8 +139,8 @@ export function LiveFocalStrip({
 }: LiveFocalStripProps) {
 	// The ^Y mode is not shown here: beside the state it read as a phase the
 	// model was in ("DONE Planning"). The footer carries it with its key
-	// (#3123). Infinite is not repeated here either (#3238): the header chip,
-	// the tab tag and the footer perm segment already name it.
+	// (#3123). Infinite is not repeated here either (#3238): the tab tag and
+	// the footer perm segment already name it.
 	const showApprovalBorder = approvalPending && !autonomous;
 	// A running turn or a waiting card outranks readiness: both mean an agent
 	// answered. Otherwise a not-ready agent is never shown as READY (#3290).
