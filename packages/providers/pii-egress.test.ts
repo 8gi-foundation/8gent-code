@@ -123,14 +123,38 @@ describe("minimax direct provider egress", () => {
 	});
 
 	test("disabled by default: not available without MINIMAX_API_KEY", () => {
-		delete process.env.MINIMAX_API_KEY;
+		// getApiKey also reads the key vault (the OS keychain on a Mac) and
+		// ~/.8gent/auth-profiles.json, so a key stored on the machine running the
+		// test made this fail there. Bun reads HOME once at launch, so the check
+		// runs in a child process with a temp HOME and the file vault forced.
 		writeSettings("8gent", "eight-1.0-q3:14b", {});
-		const mgr = new ProviderManager(settingsPath);
-		const cfg = mgr.getProvider("minimax");
-		expect(cfg.enabled).toBe(false);
-		expect(cfg.apiKeyEnv).toBe("MINIMAX_API_KEY");
-		expect(cfg.baseUrl).toBe("https://api.minimax.io/v1");
-		expect(mgr.listEnabledProviders().map((p) => p.name)).not.toContain("minimax");
+		const home = path.join(tmpDir, "home");
+		fs.mkdirSync(home);
+		const env: Record<string, string> = {
+			...process.env,
+			HOME: home,
+			EIGHT_KEY_BACKEND: "file",
+		} as Record<string, string>;
+		delete env.MINIMAX_API_KEY;
+		delete env.EIGHT_DATA_DIR;
+		delete env.EIGHT_PROVIDERS_SETTINGS_PATH;
+		const script = `
+			const { ProviderManager } = await import(${JSON.stringify(path.join(import.meta.dir, "index.ts"))});
+			const mgr = new ProviderManager(${JSON.stringify(settingsPath)});
+			const cfg = mgr.getProvider("minimax");
+			console.log(JSON.stringify({
+				enabled: cfg.enabled, apiKeyEnv: cfg.apiKeyEnv, baseUrl: cfg.baseUrl,
+				listed: mgr.listEnabledProviders().map((p) => p.name).includes("minimax"),
+			}));`;
+		const run = Bun.spawnSync([process.execPath, "-e", script], { env, cwd: home });
+		const out = run.stdout.toString().trim().split("\n").pop() ?? "";
+		expect(run.exitCode).toBe(0);
+		expect(JSON.parse(out)).toEqual({
+			enabled: false,
+			apiKeyEnv: "MINIMAX_API_KEY",
+			baseUrl: "https://api.minimax.io/v1",
+			listed: false,
+		});
 	});
 
 	test("key in env makes it available; outbound payload is anonymized", async () => {
