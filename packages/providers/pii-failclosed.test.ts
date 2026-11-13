@@ -103,4 +103,32 @@ describe("fail-closed when anonymization cannot run", () => {
 
 		await expect(mgr.chat({ messages: [poisonMessage()] })).rejects.toThrow(/fail-closed/i);
 	});
+
+	test("minimax fails closed too: reroutes local, never contacts api.minimax.io", async () => {
+		const prev = process.env.MINIMAX_API_KEY;
+		process.env.MINIMAX_API_KEY = "test-key";
+		try {
+			fs.writeFileSync(
+				settingsPath,
+				JSON.stringify({ activeProvider: "minimax", activeModel: "MiniMax-M3", providers: {} }),
+			);
+			const mgr = new ProviderManager(settingsPath);
+			const calledUrls: string[] = [];
+			globalThis.fetch = (async (url: string) => {
+				calledUrls.push(String(url));
+				if (/minimax\.io/.test(String(url)))
+					throw new Error("LEAK: minimax contacted on fail-closed");
+				return new Response(JSON.stringify({ message: { content: "local ok" } }), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				});
+			}) as unknown as typeof fetch;
+			const res = await mgr.chat({ messages: [poisonMessage()] });
+			expect(res.content).toBe("local ok");
+			for (const u of calledUrls) expect(u).toMatch(/localhost|127\.0\.0\.1/);
+		} finally {
+			if (prev === undefined) delete process.env.MINIMAX_API_KEY;
+			else process.env.MINIMAX_API_KEY = prev;
+		}
+	});
 });
