@@ -47,10 +47,53 @@ function validExpression(expr: unknown): expr is string {
 	return expr.trim().split(/\s+/).length === 5;
 }
 
-/** Shell line that runs an 8gent subcommand, for rows written in the old `command` shape. */
+/** POSIX single-quote one word. */
+function shq(word: string): string {
+	return `'${word.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Shell line that runs an 8gent subcommand, for rows written in the old `command` shape.
+ * The command is split on whitespace (as the old runner did) and every word is single-quoted,
+ * so `$( )` and backticks in it are plain text, never run.
+ */
 function eightShellLine(command: string): string {
+	const words = command.trim().split(/\s+/).filter(Boolean).map(shq);
 	const cli = eightCliPath();
-	return cli ? `bun ${safeBunFlags().join(" ")} run "${cli}" ${command}`.replace(/\s+/g, " ") : `8gent ${command}`;
+	const head = cli ? ["bun", ...safeBunFlags(), "run", cli].map(shq) : [shq("8gent")];
+	return [...head, ...words].join(" ");
+}
+
+/** Refuse a cron.json (or its folder) that is not ours alone to write. */
+export function assertCronPathSafe(file: string): void {
+	const uid = process.getuid?.();
+	for (const target of [path.dirname(file), file]) {
+		if (!fs.existsSync(target)) continue;
+		const st = fs.statSync(target);
+		if (uid !== undefined && st.uid !== uid) throw new Error(`cron: ${target} is not owned by this user`);
+		if (st.mode & 0o022) throw new Error(`cron: ${target} is writable by group or world`);
+	}
+}
+
+/** Write via a 0600 temp file in the same folder, fsync, then rename over the target. */
+export function writeCronFileAtomic(file: string, text: string): void {
+	const dir = path.dirname(file);
+	if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+	assertCronPathSafe(file);
+	const tmp = path.join(dir, `.cron.json.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`);
+	const fd = fs.openSync(tmp, "wx", 0o600);
+	try {
+		fs.writeFileSync(fd, text);
+		fs.fsyncSync(fd);
+	} finally {
+		fs.closeSync(fd);
+	}
+	try {
+		fs.renameSync(tmp, file);
+	} catch (err) {
+		fs.rmSync(tmp, { force: true });
+		throw err;
+	}
 }
 
 /**
@@ -82,17 +125,17 @@ export function normalizeCronRow(raw: unknown): CronRow | null {
 	};
 }
 
-/** Parse cron.json text. `rows` are runnable; `rejected` are kept verbatim so a rewrite never drops them. */
-export function parseCronFile(text: string): { rows: CronRow[]; rejected: unknown[] } {
+/** Parse cron.json text. `rows` are runnable; `rejected` are kept verbatim so a rewrite never drops them. Null if the text is not a JSON array. */
+export function parseCronFile(text: string): { rows: CronRow[]; rejected: unknown[] } | null {
 	const rows: CronRow[] = [];
 	const rejected: unknown[] = [];
 	let data: unknown;
 	try {
 		data = JSON.parse(text);
 	} catch {
-		return { rows, rejected };
+		return null; // cut off or corrupt: the caller must not write over it
 	}
-	if (!Array.isArray(data)) return { rows, rejected };
+	if (!Array.isArray(data)) return null;
 	for (const raw of data) {
 		const row = normalizeCronRow(raw);
 		if (row) rows.push(row);
@@ -168,6 +211,8 @@ export class CronManager {
 	private filePath: string;
 	private jobs: CronRow[];
 	private rejected: unknown[] = [];
+	/** True when cron.json exists but could not be read; saving would destroy it. */
+	private unreadable = false;
 
 	constructor(dataPath?: string) {
 		this.filePath = dataPath || path.join(dataDirPath(), "cron.json");
@@ -177,20 +222,25 @@ export class CronManager {
 	private load(): CronRow[] {
 		try {
 			if (fs.existsSync(this.filePath)) {
-				const { rows, rejected } = parseCronFile(fs.readFileSync(this.filePath, "utf-8"));
-				this.rejected = rejected;
-				return rows;
+				const parsed = parseCronFile(fs.readFileSync(this.filePath, "utf-8"));
+				if (!parsed) {
+					this.unreadable = true;
+					return [];
+				}
+				this.rejected = parsed.rejected;
+				return parsed.rows;
 			}
 		} catch {
-			// unreadable file - start fresh
+			this.unreadable = true;
 		}
 		return [];
 	}
 
 	private save(): void {
-		const dir = path.dirname(this.filePath);
-		if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-		fs.writeFileSync(this.filePath, JSON.stringify([...this.jobs, ...this.rejected], null, 2));
+		if (this.unreadable) {
+			throw new Error(`cron: ${this.filePath} could not be read; not overwriting it. Fix or move it first.`);
+		}
+		writeCronFileAtomic(this.filePath, JSON.stringify([...this.jobs, ...this.rejected], null, 2));
 	}
 
 	/**

@@ -4,7 +4,16 @@
  * EIGHT_DATA_DIR points at a temp dir, so the real ~/.8gent is never touched.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	readdirSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CronManager } from "./index";
@@ -55,7 +64,8 @@ describe("cron.json has one row shape (#255)", () => {
 		const mine = loaded.find((j) => j.id === job.id);
 		expect(mine?.expression).toBe("*/30 * * * *");
 		expect(mine?.type).toBe("shell");
-		expect(mine?.payload).toContain("chat 'check deploy'");
+		expect(mine?.payload).toContain("'chat' ");
+		expect(mine?.payload).toContain("'deploy'");
 		expect(mine?.enabled).toBe(true);
 		expect(loaded.find((j) => j.id === "keep-me")).toMatchObject(daemonRow);
 	});
@@ -124,5 +134,78 @@ describe("cron.json has one row shape (#255)", () => {
 		expect(daemon.getJobs().some((j) => j.id === late.id)).toBe(true);
 		await Bun.sleep(400);
 		expect(readFileSync(marker, "utf-8").trim()).toBe("ok");
+	});
+
+	const fiveJobs = JSON.stringify(
+		[1, 2, 3, 4, 5].map((n) => ({ ...daemonRow, id: `job${n}`, name: `job${n}` })),
+		null,
+		2,
+	);
+	const cut = fiveJobs.slice(0, Math.floor(fiveJobs.length / 2));
+
+	test("a half-written file stays intact after a CLI add", () => {
+		writeFileSync(file, cut);
+		const mgr = new CronManager();
+		expect(() =>
+			mgr.add({ name: "n", schedule: "* * * * *", command: "chat y", enabled: true }),
+		).toThrow();
+		expect(readFileSync(file, "utf-8")).toBe(cut);
+	});
+
+	test("a daemon tick on a half-written file keeps its jobs", async () => {
+		writeFileSync(file, fiveJobs);
+		const realSet = globalThis.setInterval;
+		let tickFn: (() => void) | undefined;
+		(globalThis as { setInterval: unknown }).setInterval = (fn: () => void) => {
+			tickFn = fn;
+			return 0;
+		};
+		await daemon.startCron();
+		globalThis.setInterval = realSet;
+		expect(daemon.getJobs()).toHaveLength(5);
+		writeFileSync(file, cut);
+		tickFn?.();
+		expect(daemon.getJobs()).toHaveLength(5);
+		expect(readFileSync(file, "utf-8")).toBe(cut);
+	});
+
+	test("an old row with $( ) or backticks becomes a quoted argument list", async () => {
+		writeFileSync(
+			file,
+			JSON.stringify([
+				{
+					id: "inj",
+					name: "x",
+					schedule: "0 3 * * *",
+					command: "chat $(touch pwned) `id` it's",
+					enabled: true,
+				},
+			]),
+		);
+		const [row] = await daemon.loadJobs();
+		expect(row.payload).toContain("'$(touch'");
+		expect(row.payload).toContain("'pwned)'");
+		expect(row.payload).toContain("'`id`'");
+		expect(row.payload).toContain("'it'\\''s'");
+		expect(row.payload).not.toMatch(/(^|\s)\$\(|(^|\s)`/);
+	});
+
+	test("the file is mode 0600 after a save, with no temp file left", () => {
+		writeFileSync(file, "[]");
+		new CronManager().add({ name: "n", schedule: "* * * * *", command: "chat y", enabled: true });
+		expect(statSync(file).mode & 0o777).toBe(0o600);
+		expect(readdirSync(dataDir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+	});
+
+	test("a cron.json writable by group or world is refused", () => {
+		writeFileSync(file, "[]");
+		chmodSync(file, 0o666);
+		try {
+			expect(() =>
+				new CronManager().add({ name: "n", schedule: "* * * * *", command: "chat y", enabled: true }),
+			).toThrow(/writable/);
+		} finally {
+			chmodSync(file, 0o600);
+		}
 	});
 });

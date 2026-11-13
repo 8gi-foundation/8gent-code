@@ -5,9 +5,9 @@
  * persistence to ~/.8gent/cron.json, and restart catchup.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseCronFile } from "../cron/index";
+import { parseCronFile, writeCronFileAtomic } from "../cron/index";
 import { writeJobFile } from "../core/job-file";
 import { killProcessTree, shellInvocation, spawnShell } from "../core/shell";
 import { getDataDir } from "./data-dir";
@@ -47,6 +47,10 @@ let tickTimer: ReturnType<typeof setInterval> | null = null;
 function readFromDisk(): { rows: CronJob[]; rejected: unknown[] } | null {
 	try {
 		const parsed = parseCronFile(readFileSync(cronPath(), "utf-8"));
+		if (!parsed) {
+			console.log("[cron] cron.json is not readable right now, keeping the jobs in memory");
+			return null;
+		}
 		return { rows: parsed.rows as unknown as CronJob[], rejected: parsed.rejected };
 	} catch {
 		return null;
@@ -96,7 +100,14 @@ function refreshFromDisk(keepMine: boolean): void {
 
 async function saveJobs(): Promise<void> {
 	refreshFromDisk(true);
-	await Bun.write(cronPath(), JSON.stringify([...jobs, ...rejected], null, 2));
+	const disk = readFromDisk();
+	if (!disk && existsSync(cronPath())) return; // cut-off file: never write over it
+	try {
+		writeCronFileAtomic(cronPath(), JSON.stringify([...jobs, ...rejected], null, 2));
+	} catch (err) {
+		console.error("[cron] not saving cron.json:", String(err));
+		return;
+	}
 	synced = new Set(jobs.map((j) => j.id));
 }
 
