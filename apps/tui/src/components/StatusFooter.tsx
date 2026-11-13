@@ -611,9 +611,18 @@ const FLAG_SHORTEST: Record<string, string> = {
 };
 export const FLAG_GLYPH = "!";
 
-/** The mode segment without its "[^Y]" cap, and its word cut to `max` letters if given. */
+/**
+ * A word cut to `max` cells, marked as cut: "Planning" to "Pla.". The full
+ * stop is the point. A bare cut ("Plan") can read as a permission mode name
+ * beside the perm glyph (8SO on #264), and a word that ends in "." never
+ * equals a mode name or glyph.
+ */
+const cutWord = (word: string, max: number): string =>
+	word.length <= max ? word : `${word.slice(0, Math.max(1, max - 1))}.`;
+
+/** The mode segment without its "[^Y]" cap, and its word cut to `max` cells if given. */
 const modeBare = (s: FooterSegment, max?: number): FooterSegment =>
-	s.key === "mode" ? { ...s, hint: undefined, value: max ? s.value.slice(0, max) : s.value } : s;
+	s.key === "mode" ? { ...s, hint: undefined, value: max ? cutWord(s.value, max) : s.value } : s;
 
 /**
  * The footer row, with the unverified-turn flag (#4510, priority 0) fitted
@@ -629,7 +638,8 @@ const modeBare = (s: FooterSegment, max?: number): FooterSegment =>
  *   4. only below 60 columns, the perm segment shrinks to its glyph (P, G,
  *      ∞). It never leaves: the footer is the only place the mode shows;
  *   5. last resorts: the mode loses its "[^Y]" cap, then its word is cut to
- *      four letters. The mode itself and the sandbox state never leave.
+ *      four cells and marked ("Pla."), so it never reads as a permission
+ *      mode. The mode itself and the sandbox state never leave.
  *
  * The sandbox state keeps its place throughout (#4953); fitRow decides how it
  * shortens. Other segments give way only after the flag has used every step,
@@ -659,7 +669,7 @@ export function fitFooterRow(
 		glyphPerm(withFlag(FLAG_GLYPH).map(unlabelled)),
 		// The last resorts, on phones narrower than the mode, flag and sandbox together:
 		// the mode loses its key cap (the palette lists every command), then its word
-		// is cut to four letters. The mode itself never leaves the row.
+		// is cut to four cells, marked with a full stop. The mode itself never leaves the row.
 		glyphPerm(withFlag(FLAG_GLYPH).map(unlabelled)).map(modeBare),
 		glyphPerm(withFlag(FLAG_GLYPH).map(unlabelled)).map((x) => modeBare(x, 4)),
 	];

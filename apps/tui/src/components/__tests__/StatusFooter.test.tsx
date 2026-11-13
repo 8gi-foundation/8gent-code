@@ -868,6 +868,8 @@ describe("the perm segment never leaves the row unless the mode is Ask (8SO on #
 	// only place the focused tab's mode shows. Below 60 columns it shortens to
 	// the mode's glyph; it never disappears.
 	const GLYPH = { plan: "P", guarded: "G", infinite: "∞" } as const;
+	/** Every permission mode name and glyph, ASCII form included. */
+	const PERM_WORDS = ["Plan", "Ask", "Guarded", "Infinite", "P", "A", "G", "∞", "I"];
 	const build = (perm: keyof typeof GLYPH, columns: number, crowded: boolean) =>
 		buildFooterSegments({
 			mode: "Planning",
@@ -890,6 +892,10 @@ describe("the perm segment never leaves the row unless the mode is Ask (8SO on #
 					if (crowded) expect(row.segments.some((s) => s.key === "sandbox")).toBe(true);
 					expect(segmentsWidth(row.segments) + hintWidth("^P palette") + 3).toBeLessThanOrEqual(w);
 					if (w >= 60) expect(seg?.value).not.toBe(GLYPH[perm]);
+					// A shortened work-mode word never reads as a permission mode (8SO on
+					// #264): "Plan" beside "∞" would name the wrong thing.
+					const mode = row.segments.find((s) => s.key === "mode")?.value;
+					expect(PERM_WORDS, `mode "${mode}" at ${w} crowded ${crowded}`).not.toContain(mode);
 				}
 			}
 		}
