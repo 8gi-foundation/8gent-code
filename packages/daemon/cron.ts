@@ -5,7 +5,9 @@
  * persistence to ~/.8gent/cron.json, and restart catchup.
  */
 
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { assertCronPathSafe, parseCronFile, writeCronFileAtomic } from "../cron/index";
 import { writeJobFile } from "../core/job-file";
 import { killProcessTree, shellInvocation, spawnShell } from "../core/shell";
 import { getDataDir } from "./data-dir";
@@ -38,26 +40,88 @@ export function cronPath(): string {
 }
 
 let jobs: CronJob[] = [];
+/** Rows in cron.json this module cannot run. Kept so a rewrite never deletes them. */
+let rejected: unknown[] = [];
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 
-export async function loadJobs(): Promise<CronJob[]> {
+/** Last refusal logged, so a tick every minute does not repeat it. */
+let lastReadRefusal = "";
+
+function readFromDisk(): { rows: CronJob[]; rejected: unknown[] } | null {
 	try {
-		const file = Bun.file(cronPath());
-		if (!(await file.exists())) return [];
-		jobs = await file.json();
-		return jobs;
-	} catch {
-		jobs = [];
-		return jobs;
+		if (existsSync(cronPath())) assertCronPathSafe(cronPath(), "read");
+		const parsed = parseCronFile(readFileSync(cronPath(), "utf-8"));
+		if (!parsed) {
+			console.log("[cron] cron.json is not readable right now, keeping the jobs in memory");
+			return null;
+		}
+		lastReadRefusal = "";
+		return { rows: parsed.rows as unknown as CronJob[], rejected: parsed.rejected };
+	} catch (err) {
+		const why = err instanceof Error ? err.message : String(err);
+		if (why !== lastReadRefusal) console.log(`[cron] not loading cron.json: ${why}`);
+		lastReadRefusal = why;
+		return null;
 	}
 }
 
+/** Ids present in cron.json at the last read, to tell "removed elsewhere" from "not saved yet". */
+let synced = new Set<string>();
+
+export async function loadJobs(): Promise<CronJob[]> {
+	const disk = readFromDisk();
+	jobs = disk?.rows ?? [];
+	rejected = disk?.rejected ?? [];
+	synced = new Set(jobs.map((j) => j.id));
+	return jobs;
+}
+
+/**
+ * Pick up rows added, removed or edited in cron.json by another writer (`8gent cron add`)
+ * so they go live without a restart. In-memory run state (lastRun, nextRun, skips) wins.
+ * With `keepMine`, rows already in memory are left untouched (used before a save, so a
+ * one-shot this process just disabled is not re-enabled by the older disk copy).
+ */
+function refreshFromDisk(keepMine: boolean): void {
+	const disk = readFromDisk();
+	if (!disk) return;
+	const onDisk = new Map(disk.rows.map((r) => [r.id, r]));
+	const merged: CronJob[] = [];
+	for (const mine of jobs) {
+		const theirs = onDisk.get(mine.id);
+		if (!theirs) {
+			if (!synced.has(mine.id)) merged.push(mine); // added here, not saved yet
+			continue; // removed elsewhere
+		}
+		merged.push(
+			keepMine
+				? mine
+				: { ...theirs, lastRun: mine.lastRun, nextRun: mine.nextRun, skips: mine.skips },
+		);
+	}
+	const have = new Set(jobs.map((j) => j.id));
+	for (const row of disk.rows) if (!have.has(row.id)) merged.push(row);
+	jobs = merged;
+	rejected = disk.rejected;
+	synced = new Set(disk.rows.map((r) => r.id));
+}
+
 async function saveJobs(): Promise<void> {
-	await Bun.write(cronPath(), JSON.stringify(jobs, null, 2));
+	refreshFromDisk(true);
+	const disk = readFromDisk();
+	if (!disk && existsSync(cronPath())) return; // cut-off file: never write over it
+	try {
+		writeCronFileAtomic(cronPath(), JSON.stringify([...jobs, ...rejected], null, 2));
+	} catch (err) {
+		console.error("[cron] not saving cron.json:", String(err));
+		return;
+	}
+	synced = new Set(jobs.map((j) => j.id));
 }
 
 /** Parse a simple cron expression and check if it matches the current minute */
 function matchesCron(expr: string, now: Date): boolean {
+	if (typeof expr !== "string") return false;
 	if (expr.startsWith("once:")) {
 		const target = new Date(expr.slice(5));
 		return Math.abs(now.getTime() - target.getTime()) < 60_000;
@@ -251,6 +315,7 @@ function tick(): void {
 	const now = new Date();
 	// Saved routines (scouts by default): RoutineManager.tick had no caller before #4926.
 	void tickRoutines({ now });
+	refreshFromDisk(false);
 	for (const job of jobs) {
 		if (!job.enabled) continue;
 		if (matchesCron(job.expression, now)) {
