@@ -411,7 +411,7 @@ const unlabelled = (s: FooterSegment): FooterSegment =>
  * the focused tab's mode shows, so below 60 columns it shrinks to this
  * instead of leaving the row.
  */
-const permGlyph =(s: FooterSegment): FooterSegment => {
+const permGlyph = (s: FooterSegment): FooterSegment => {
 	if (s.key !== "perm") return s;
 	const mode = (Object.keys(PERM_LOOK) as PermissionMode[]).find(
 		(m) => PERM_LOOK[m].name === s.value,
@@ -513,12 +513,21 @@ function fitRowOnce(
 	// Phone: when the row cannot hold the palette cap, the mode and perm labels go,
 	// then the perm shrinks to its glyph. It never leaves the row.
 	if (width < FOOTER_NARROW_COLS && hintsFor(base)[0] !== PALETTE_HINT) {
-		for (const shorten of [unlabelled, (x: FooterSegment) => permGlyph(unlabelled(x))]) {
-			const short = fit(without.map(shorten));
-			if (hintsFor(short)[0] === PALETTE_HINT) {
-				base = short;
-				break;
-			}
+		const glyphed = (x: FooterSegment) => permGlyph(unlabelled(x));
+		const shorts = [unlabelled, glyphed].map((shorten) => fit(without.map(shorten)));
+		const held = shorts.find((short) => hintsFor(short)[0] === PALETTE_HINT);
+		if (held) base = held;
+		else if (without.some((s) => s.key === "perm")) {
+			// Too narrow for the cap (under about 33 columns). The glyph form stays,
+			// and it must fit whole: Ink cuts a row that overflows, a cut "perm I…"
+			// names no mode, and a row with no perm segment reads as Ask. The work
+			// mode gives instead: its "[^Y]" cap goes, then its word is cut ("Pla.").
+			const forms = [
+				glyphed,
+				(x: FooterSegment) => modeBare(glyphed(x)),
+				(x: FooterSegment) => modeBare(glyphed(x), 4),
+			].map((shorten) => fit(without.map(shorten)));
+			base = forms.find((l) => segmentsWidth(l, leading) <= width) ?? (forms[2] as FooterSegment[]);
 		}
 	}
 	const baseHints = hintsFor(base);
