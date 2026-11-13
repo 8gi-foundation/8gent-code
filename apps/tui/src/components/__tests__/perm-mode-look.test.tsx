@@ -325,7 +325,10 @@ describe("the focused mode is named once, in the footer", () => {
 	});
 
 	test("the footer is where it shows, with its key", async () => {
-		const { frame } = mount(<Footer columns={160} data={{ ...FOOTER, permissions: "infinite" }} />, 160);
+		const { frame } = mount(
+			<Footer columns={160} data={{ ...FOOTER, permissions: "infinite" }} />,
+			160,
+		);
 		await tick();
 		expect(frame()).toContain(`perm Infinite [${PERM_KEY}]`);
 	});

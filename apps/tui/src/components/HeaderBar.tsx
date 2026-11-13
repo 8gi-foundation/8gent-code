@@ -103,9 +103,7 @@ export function brandPillWidth(
 }
 
 /** The chips the header shows right now, in priority order (#3238). */
-export function headerChips(
-	props: Pick<HeaderBarProps, "micOn" | "approvalPending">,
-): string[] {
+export function headerChips(props: Pick<HeaderBarProps, "micOn" | "approvalPending">): string[] {
 	const chips: string[] = [];
 	if (props.approvalPending) chips.push(ASK_CHIP);
 	if (props.micOn) chips.push(MIC_CHIP);

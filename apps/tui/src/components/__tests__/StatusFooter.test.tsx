@@ -738,9 +738,12 @@ describe("the unverified flag never pushes [^P] palette out at 48 columns and be
 		for (const f of forms) expect(["unverified", "unver.", "!"]).toContain(String(f));
 	});
 
-	test("at 40 columns the flag keeps a word beside the plan perm, and the cap holds", () => {
+	test("at 39 columns the plan perm keeps its glyph beside the flag, and the cap holds", () => {
+		// The perm outranks the flag's word (8SO on #264): the footer is the only
+		// place the mode shows, so at 39 the flag is "!" and the perm is "P".
 		const row = fitFooterRow(build("tests_claimed_not_run", false, 40), 39);
-		expect(row.segments.find((s) => s.key === "verification")?.value).toBe("no tests");
+		expect(row.segments.find((s) => s.key === "perm")?.value).toBe("P");
+		expect(row.segments.find((s) => s.key === "verification")?.value).toBe("!");
 		expect(row.hints[0]).toBe("^P palette");
 	});
 
@@ -858,4 +861,68 @@ describe("the sandbox reason reads in full at 100 columns (design pass)", () => 
 			expect(row.segments.find((s) => s.key === "sandbox")?.note).toBeUndefined();
 		}
 	});
+});
+
+describe("the perm segment never leaves the row unless the mode is Ask (8SO on #264)", () => {
+	// The active tab carries no tag and the header no chip, so the footer is the
+	// only place the focused tab's mode shows. Below 60 columns it shortens to
+	// the mode's glyph; it never disappears.
+	const GLYPH = { plan: "P", guarded: "G", infinite: "∞" } as const;
+	const build = (perm: keyof typeof GLYPH, columns: number, crowded: boolean) =>
+		buildFooterSegments({
+			mode: "Planning",
+			permissions: perm,
+			sessionTime: "2s",
+			providersLive: 2,
+			providersTotal: 3,
+			columns,
+			...(crowded ? { verification: "unverified" as const, sandboxOff: "nested" } : {}),
+		});
+
+	test("widths 38 to 220, with and without the flag and sandbox off: perm, sandbox and the cap all hold", () => {
+		for (const perm of ["plan", "guarded", "infinite"] as const) {
+			for (const crowded of [false, true]) {
+				for (let w = 38; w <= 220; w++) {
+					const row = fitFooterRow(build(perm, w, crowded), w);
+					const seg = row.segments.find((s) => s.key === "perm");
+					expect(seg, `perm ${perm} at ${w} crowded ${crowded}`).toBeDefined();
+					expect(row.hints[0]).toBe("^P palette");
+					if (crowded) expect(row.segments.some((s) => s.key === "sandbox")).toBe(true);
+					expect(segmentsWidth(row.segments) + hintWidth("^P palette") + 3).toBeLessThanOrEqual(w);
+					if (w >= 60) expect(seg?.value).not.toBe(GLYPH[perm]);
+				}
+			}
+		}
+	});
+
+	test("Ask alone still shows no perm segment, even when crowded", () => {
+		const row = fitFooterRow(
+			buildFooterSegments({
+				mode: "Planning",
+				permissions: "ask",
+				verification: "unverified",
+				sandboxOff: "nested",
+				columns: 40,
+			}),
+			40,
+		);
+		expect(row.segments.some((s) => s.key === "perm")).toBe(false);
+	});
+
+	for (const cols of [40, 59]) {
+		test(`the real frame at ${cols} columns with the flag and sandbox off still names Infinite`, async () => {
+			const row =
+				(
+					await frame(cols, 30, {
+						permissions: "infinite",
+						verification: "unverified",
+						sandboxOff: "nested",
+					})
+				)[0] ?? "";
+			expect(row, `row at ${cols}`).toMatch(/∞|Infinite/);
+			expect(row).toMatch(/(sandbox|sbx) off/);
+			expect(row).toContain("[^P] palette");
+			expect(row.length).toBeLessThanOrEqual(cols);
+		});
+	}
 });
