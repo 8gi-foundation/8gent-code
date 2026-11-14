@@ -555,6 +555,7 @@ import {
 } from "./lib/model-selection.js";
 import { routeOnScreen } from "./lib/model-truth.js";
 import { PACKAGE_ROOT, packageBinScript } from "./lib/package-scripts.js";
+import { voiceReplyText } from "./lib/voice-reply.js";
 
 let firstShellTraced = false;
 
@@ -1360,10 +1361,7 @@ export function App({
 					);
 				}
 				voiceReplyRef.current.commit(agent, response || "");
-				const cleanResponse = (response || "")
-					.replace(/\[_EOT_\]/g, "")
-					.replace(/<\|.*?\|>/g, "")
-					.trim();
+				const cleanResponse = voiceReplyText(response);
 				// Show the agent's response on screen
 				if (cleanResponse) {
 					setMessages((prev) => [
@@ -1376,7 +1374,8 @@ export function App({
 						},
 					]);
 				}
-				return cleanResponse || "Done.";
+				// An empty reply is returned empty: the voice loop speaks nothing for it.
+				return cleanResponse;
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				return `Error: ${msg}`;

@@ -41,6 +41,25 @@ export function cosWorkspace(): string {
 	return join(getDataDir(), "workspace");
 }
 
+/**
+ * Body of the task-complete notification. A result is shown as the task
+ * returned it. A task that returned nothing is reported as exactly that, and
+ * one whose own registry status is failed is reported as failed (#153).
+ */
+export function taskCompleteMessage(payload: {
+	taskId: string;
+	description?: string;
+	result?: string;
+}): string {
+	const what = payload.description || payload.taskId;
+	const result = (payload.result ?? "").trim();
+	if (result) return `*Task Complete*\n\n${what}\n\nResult: ${result.slice(0, 500)}`;
+	if (getTask(payload.taskId)?.status === "failed") {
+		return `*Task Failed*\n\n${what}\n\nThe task failed and returned no result.`;
+	}
+	return `*Task Complete*\n\n${what}\n\nThe task finished and returned no result.`;
+}
+
 interface CoSConfig {
 	pool: AgentPool;
 	notifications: NotificationDispatcher;
@@ -56,10 +75,7 @@ export class CoSRouter {
 
 		// Subscribe to task events for proactive notifications
 		bus.on("task:completed", (payload: any) => {
-			this.notifications.notify(
-				"task-complete",
-				`*Task Complete*\n\n${payload.description || payload.taskId}\n\nResult: ${(payload.result || "Done").slice(0, 500)}`,
-			);
+			this.notifications.notify("task-complete", taskCompleteMessage(payload));
 		});
 
 		bus.on("task:failed", (payload: any) => {
