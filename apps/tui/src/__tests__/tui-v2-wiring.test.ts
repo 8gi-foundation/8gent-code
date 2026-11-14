@@ -6,6 +6,8 @@
  *   - tui-approval-channel + a simulated keypress-driven approval flow
  */
 import { beforeEach, describe, expect, test } from "bun:test";
+import { renderToString } from "ink";
+import React from "react";
 
 import {
 	type TuiApprovalDecision,
@@ -15,6 +17,7 @@ import {
 	requestTuiApproval,
 } from "../../../../packages/permissions/tui-approval-channel";
 import { ModelFailover } from "../../../../packages/providers/failover";
+import { ActivityRail } from "../components/ActivityRail";
 import { type GitRunner, computeGitSync, gitView } from "../hooks/useGitSync";
 import {
 	deriveActiveTasks,
@@ -282,8 +285,8 @@ describe("activity-rail-derivation", () => {
 		expect(rows.map((r) => r.state)).toEqual(["primary"]);
 	});
 
-	test("deriveAgents collapses statuses and falls back to main", () => {
-		expect(deriveAgents([])).toEqual([{ name: "main", state: "idle" }]);
+	test("deriveAgents collapses statuses and returns no placeholder row when none run", () => {
+		expect(deriveAgents([])).toEqual([]);
 		const rows = deriveAgents([
 			{ id: "1", name: "Core", status: "running" },
 			{ id: "2", name: "Tester", status: "blocked" },
@@ -292,6 +295,20 @@ describe("activity-rail-derivation", () => {
 		expect(rows[0]).toEqual({ name: "Core", state: "active" });
 		expect(rows[1]).toEqual({ name: "Tester", state: "blocked" });
 		expect(rows[2]).toEqual({ name: "Other", state: "idle" });
+	});
+
+	test("the rail draws no 8GENTS section when no agent runs, and no fake main row", () => {
+		const out = renderToString(
+			React.createElement(ActivityRail, {
+				tasks: [],
+				tools: [],
+				providers: [],
+				agents: deriveAgents([]),
+			}),
+			{ columns: 34 },
+		);
+		expect(out).not.toContain("8GENTS");
+		expect(out).not.toContain("main");
 	});
 
 	test("TASKS reads the plan: the active step with the real done/total bar", () => {

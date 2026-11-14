@@ -171,10 +171,9 @@ export interface OrchestrationAgentSnapshot {
 export function deriveAgents(
 	agents: ReadonlyArray<OrchestrationAgentSnapshot>,
 ): ActivityRailAgentRow[] {
-	if (agents.length === 0) {
-		// No real agents wired - return a quiet idle row instead of stub names.
-		return [{ name: "main", state: "idle" }];
-	}
+	// No agent is running: no rows. A placeholder "main" would be an invented
+	// row, and the rail hides its 8GENTS section instead.
+	if (agents.length === 0) return [];
 	return agents.map((a) => {
 		const s = (a.status || "").toLowerCase();
 		let state: ActivityRailAgentRow["state"] = "idle";

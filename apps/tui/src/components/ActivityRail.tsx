@@ -205,7 +205,7 @@ export function railSpareRows(
 		(2 + 3) +
 		(2 + p.providers.length + asked) +
 		memory +
-		(2 + p.agents.length) +
+		(p.agents.length > 0 ? 2 + p.agents.length : 0) +
 		(p.bodyParts ? 2 + 3 : 0);
 	return height - RAIL_CHROME_ROWS - used;
 }
@@ -464,15 +464,17 @@ export function ActivityRail({
 				</RailSection>
 			) : null}
 
-			<RailSection title="8GENTS">
-				{agents.map((agent) => (
-					<NamedRow
-						key={agent.name}
-						name={`${AGENT_GLYPH[agent.state]} ${agent.name}`}
-						color={AGENT_COLOR[agent.state]}
-					/>
-				))}
-			</RailSection>
+			{agents.length > 0 ? (
+				<RailSection title="8GENTS">
+					{agents.map((agent) => (
+						<NamedRow
+							key={agent.name}
+							name={`${AGENT_GLYPH[agent.state]} ${agent.name}`}
+							color={AGENT_COLOR[agent.state]}
+						/>
+					))}
+				</RailSection>
+			) : null}
 
 			{bodyParts ? (
 				<RailSection title="BODY">
