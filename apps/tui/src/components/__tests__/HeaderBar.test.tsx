@@ -346,3 +346,31 @@ describe("HeaderMark drives the living-mark writer", () => {
 		w.dispose();
 	});
 });
+
+// A local branch with no upstream is the normal state of new work. Saying
+// "no upstream" in the header on every such branch is noise the person
+// cannot act on from the header, so the sync note stays quiet for it. A real
+// divergence still shows.
+describe("HeaderBar sync note stays quiet without an upstream", () => {
+	const local: HeaderBarProps = {
+		...base,
+		version: "0.20.45",
+		workspacePath: "/Users/operator/8gent-code",
+		branch: "docs/software-factory-architecture",
+	};
+
+	test("a branch with no upstream shows no sync note", () => {
+		const out = stripVTControlCharacters(
+			renderToString(<HeaderBar {...local} width={200} syncStatus="no upstream" />, { columns: 200 }),
+		);
+		expect(out).not.toContain("no upstream");
+		expect(out).toContain("⎇ docs/software-factory");
+	});
+
+	test("a real divergence still shows", () => {
+		const out = stripVTControlCharacters(
+			renderToString(<HeaderBar {...local} width={200} syncStatus="2 ahead" />, { columns: 200 }),
+		);
+		expect(out).toContain("2 ahead");
+	});
+});

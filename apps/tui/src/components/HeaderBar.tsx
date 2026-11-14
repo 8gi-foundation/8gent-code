@@ -175,6 +175,16 @@ export function planHeader(props: HeaderBarProps): HeaderPlan {
 	return { ...plain, mark: false };
 }
 
+/**
+ * A local branch with no upstream is the normal state of new work. The
+ * header says nothing about it: the person cannot act on it from here, and
+ * it would sit on every such branch. Real states (ahead, behind, diverged,
+ * no repo) still show.
+ */
+function headerSync(syncStatus: string): string {
+	return syncStatus === "no upstream" ? "" : syncStatus;
+}
+
 function planRow(props: HeaderBarProps, width: number): Omit<HeaderPlan, "mark"> {
 	// Below TAGLINE_MIN_COLS the tagline always steps aside (#3238): at 80
 	// columns the living 8 and the branch say more than the brand line, and
@@ -188,7 +198,7 @@ function planRow(props: HeaderBarProps, width: number): Omit<HeaderPlan, "mark">
 		// The tagline needs a roomy middle: a merely-fitting branch still trades it away.
 		const floor = compactBrand ? MIDDLE_MIN : TAGLINE_MIDDLE_MIN;
 		if (available >= floor) {
-			const middle = fitHeaderMiddle(props.workspacePath, props.branch, props.syncStatus, available);
+			const middle = fitHeaderMiddle(props.workspacePath, props.branch, headerSync(props.syncStatus), available);
 			if (middle.branch || middle.path || middle.sync) {
 				return { compactBrand, middle, middleAvailable: available };
 			}
