@@ -139,6 +139,16 @@ describe("HeaderBar", () => {
 		expect(occupied(props)).toBeLessThanOrEqual(120);
 	});
 
+	test("a branch with no upstream draws no 'no upstream' in the header, the branch stays", () => {
+		const props = { ...live, branch: "main", syncStatus: "no upstream", width: 140 };
+		const plan = planHeader(props);
+		expect(plan.middle.sync).toBe("");
+		expect(plan.middle.branch).toBe("main");
+		const text = stripVTControlCharacters(renderToString(<HeaderBar {...props} />, { columns: 140 }));
+		expect(text).not.toContain("no upstream");
+		expect(text).toContain("main");
+	});
+
 	test("at 140 columns a short branch shows path, branch and sync together", () => {
 		const props = { ...live, branch: "main", width: 140 };
 		const plan = planHeader(props);
