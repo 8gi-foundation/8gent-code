@@ -24,7 +24,7 @@ import {
 import { resolveOllamaBaseUrl } from "../../../packages/ai/text-tool-endpoint.js";
 import { dropOllamaCloudNames } from "../../../packages/core/ollama-cloud.js";
 import { answerFromLine } from "../../../packages/eight/android-setup.js";
-import { sanitizeForDisplay } from "../../../packages/eight/changelog-view.js";
+import { changelogOutput, readBundledChangelog, sanitizeForDisplay } from "../../../packages/eight/changelog-view.js";
 import { killLiveShells } from "../../../packages/eight/live-shells.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
 import { chatMessages } from "../../../packages/eight/session-messages.js";
@@ -4721,6 +4721,11 @@ export function App({
 				case "hotkeys":
 					addSystemMessage(formatHotkeys());
 					break;
+
+				case "changelog": {
+					addSystemMessage(changelogOutput(readBundledChangelog(), args[0], pkgInfo.version));
+					break;
+				}
 
 				case "thinking": {
 					const arg = args[0]?.toLowerCase();
