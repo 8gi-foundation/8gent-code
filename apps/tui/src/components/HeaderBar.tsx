@@ -63,6 +63,8 @@ const ASK_CHIP = "ASK";
 const INFINITE_CHIP = "INFINITE";
 const MIC_CHIP = "● MIC";
 const BRAND_TAGLINE = " The Infinite Gentleman";
+/** A branch with no upstream is a quiet state: the note is not header news, so the header drops it. */
+const QUIET_SYNC = "no upstream";
 
 interface HeaderBarProps {
 	updateAvailable?: { latest: string; current: string } | null;
@@ -188,7 +190,8 @@ function planRow(props: HeaderBarProps, width: number): Omit<HeaderPlan, "mark">
 		// The tagline needs a roomy middle: a merely-fitting branch still trades it away.
 		const floor = compactBrand ? MIDDLE_MIN : TAGLINE_MIDDLE_MIN;
 		if (available >= floor) {
-			const middle = fitHeaderMiddle(props.workspacePath, props.branch, props.syncStatus, available);
+			const sync = props.syncStatus === QUIET_SYNC ? "" : props.syncStatus;
+			const middle = fitHeaderMiddle(props.workspacePath, props.branch, sync, available);
 			if (middle.branch || middle.path || middle.sync) {
 				return { compactBrand, middle, middleAvailable: available };
 			}

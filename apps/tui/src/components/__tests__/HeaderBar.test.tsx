@@ -346,3 +346,39 @@ describe("HeaderMark drives the living-mark writer", () => {
 		w.dispose();
 	});
 });
+
+// A branch with no upstream is a quiet state, not news: the header keeps the
+// branch and the path and drops the "no upstream" note, as Ask drops its perm
+// chip. A real sync state still shows.
+describe("HeaderBar sync note on a branch with no upstream", () => {
+	const noUpstream: HeaderBarProps = {
+		...base,
+		version: "0.20.45",
+		workspacePath: "/Users/operator/8gent-code",
+		branch: "wip",
+		syncStatus: "no upstream",
+	};
+
+	test("the plan carries no sync note for a branch with no upstream", () => {
+		for (const width of [100, 120, 160]) {
+			expect(planHeader({ ...noUpstream, width }).middle.sync).toBe("");
+		}
+	});
+
+	test("the rendered header never says no upstream", () => {
+		for (const width of [100, 120, 160]) {
+			const out = stripVTControlCharacters(
+				renderToString(<HeaderBar {...noUpstream} width={width} />, { columns: width }),
+			);
+			expect(out).not.toContain("no upstream");
+			expect(out).toContain("wip");
+		}
+	});
+
+	test("a real sync state still shows", () => {
+		const out = stripVTControlCharacters(
+			renderToString(<HeaderBar {...noUpstream} syncStatus="ahead 1" width={160} />, { columns: 160 }),
+		);
+		expect(out).toContain("ahead 1");
+	});
+});
