@@ -18,7 +18,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { resolveHome } from "../core/home";
-import { realpathLoose, securityEnvSnapshot } from "./run-command-sandbox.js";
+import { realpathLoose, securityEnvSnapshot } from "./security-env.js";
 
 /**
  * Where the HMAC key lives on disk: <data dir>/keys/state-hmac.key.
