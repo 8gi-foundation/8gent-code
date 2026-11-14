@@ -12,6 +12,7 @@
  * It does NOT cover run_command tools such as curl, clients that do not use
  * fetch, or child processes that do not load it (see LOCAL_ONLY_GAPS).
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
 	type CallInfo,
 	type LedgerEntry,
@@ -152,11 +153,58 @@ const MAX_HOPS = 5;
 const CREDENTIAL_HEADERS = ["authorization", "cookie", "proxy-authorization"];
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 
+/**
+ * Why each cloud provider is being called, held on the turn that chose it (#179). A turn
+ * runs its chain walk inside withCloudReasons, so a reason is only ever read by a request
+ * made from that same turn: never by another session in this process, never by a later turn.
+ */
+const cloudReasonScope = new AsyncLocalStorage<Map<string, string>>();
+
+/**
+ * Run one turn's chain walk with its own reasons. They are cleared when it ends, by
+ * return, throw or abort, so a request still in flight after that reads no reason.
+ */
+export async function withCloudReasons<T>(fn: () => Promise<T>): Promise<T> {
+	const reasons = new Map<string, string>();
+	try {
+		return await cloudReasonScope.run(reasons, fn);
+	} finally {
+		reasons.clear();
+	}
+}
+
+/**
+ * Record the one reason `provider` is called in this turn; null clears it. Outside a
+ * turn (no withCloudReasons) it records nothing. Read by the notice below.
+ */
+export function setCloudReason(provider: string, reason: string | null): void {
+	const reasons = cloudReasonScope.getStore();
+	if (!reasons) return;
+	if (reason === null) reasons.delete(provider);
+	else reasons.set(provider, reason);
+}
+
+/**
+ * The one true reason a cloud provider was chosen, from the value the router used:
+ * `picked` is the same flag decideRoute takes as pickedForTab. Never two causes.
+ */
+export function cloudReasonLine(i: {
+	picked: boolean;
+	localFailures: ReadonlyArray<{ provider: string; reason: string }>;
+}): string {
+	if (i.picked) return "you picked it for this tab";
+	const why = i.localFailures.map((f) => `${f.provider}: ${f.reason}`).join(", ");
+	return (why
+		? `no local provider could serve this (${why})`
+		: "no local provider could serve this"
+	).replace(/\s+or\s+/gi, " / ");
+}
+
 function notice(policy: string, provider: string): string {
 	const why =
 		policy === "cloud-first"
 			? "policy is cloud-first"
-			: "you picked it for this tab, or no local provider could serve this";
+			: (cloudReasonScope.getStore()?.get(provider) ?? "no reason was recorded for this call");
 	return `Cloud call: ${provider}. Policy ${policy}: ${why}. See /privacy.`;
 }
 
@@ -197,7 +245,8 @@ export function guardFetch(base: typeof fetch, deps: WireDeps): typeof fetch {
 			throw new LocalOnlyRefusal(d.action === "refuse" ? d.message : "refused");
 		}
 		if (!local && label && st.policy !== "local-only") {
-			tell(`${provider}|${st.policy}`, notice(st.policy, provider));
+			const line = notice(st.policy, provider);
+				tell(`${provider}|${st.policy}|${line}`, line);
 		}
 
 		// Count: every off-box write, and every local model call. Written now, so a reply

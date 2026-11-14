@@ -687,6 +687,15 @@ export class ModelFailover {
 	}
 
 	/**
+	 * The chain in effect for `model`: ~/.8gent/failover.json when the person has one,
+	 * else the built-in default, after the allowlist and the hosted opt-in. Empty when
+	 * there is none. Read-only, no policy reorder.
+	 */
+	chainFor(model: string, channel: FailoverChannel = "text"): readonly FailoverEntry[] {
+		return this.chainsByChannel[channel]?.[model]?.models ?? [];
+	}
+
+	/**
 	 * Where the agent would go if `provider`/`model` failed right now: the
 	 * entry `resolve()` returns after `markDown(model, provider)`, which is
 	 * the walk `packages/eight/agent.ts` does on an error. Read-only: nothing
