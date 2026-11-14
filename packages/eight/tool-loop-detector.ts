@@ -49,8 +49,10 @@ const READ_ONLY_NUDGEABLE = new Set(["read_file", "list_files"]);
  * failure or timeout) is false and keeps the stop at 3.
  */
 export function isQuietSuccess(toolName: string, resultText: string): boolean {
-	const text = (resultText ?? "").trim();
+	let text = (resultText ?? "").trim();
 	if (toolName === "run_command") {
+		// A success ends with its own `Exit code 0` line; any other Exit code line is a failure.
+		text = text.replace(/(^|\n)Exit code 0$/, "").trim();
 		if (/^Exit code\b|^TIMEOUT after\b/m.test(text)) return false;
 		return text === "" || text.startsWith("Command completed successfully.");
 	}

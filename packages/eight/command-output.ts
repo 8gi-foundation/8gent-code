@@ -25,6 +25,7 @@ import {
 	readSync,
 	realpathSync,
 } from "node:fs";
+import { constants as osConstants } from "node:os";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { isWindowsDeviceName } from "../permissions/path-guard";
 import { redirectTargets } from "../permissions/s1-created-files";
@@ -250,6 +251,20 @@ export function silentSuccessNote(
 	return note + redirectNote(command, workingDirectory, projectRoot) + loopbackFormHint(command);
 }
 
+/**
+ * The exit code a shell shows for a process a signal killed: 128 plus the signal number.
+ * 1 when the signal is unknown. Hooks get this instead of 0 on a signal kill.
+ */
+export function signalExitCode(signal?: NodeJS.Signals | null): number {
+	const n = signal ? osConstants.signals[signal] : undefined;
+	return n ? 128 + n : 1;
+}
+
+/**
+ * Every result states how the command ended, once. A non-zero or signal exit keeps the
+ * `Exit code N:` line at the head, where the gates and the TUI read it; exit 0 ends with
+ * `Exit code 0`. A signal kill names the signal and carries the shell's 128+N code, never null.
+ */
 export function formatCommandOutput(
 	code: number | null,
 	stdout: string,
@@ -257,12 +272,20 @@ export function formatCommandOutput(
 	command?: string,
 	workingDirectory?: string,
 	projectRoot?: string,
+	signal?: NodeJS.Signals | null,
 ): string {
 	if (code === 0) {
 		const out = stdout.trimEnd();
 		const err = stderr.trimEnd();
-		if (out && err) return capOutput(`${out}\n[stderr]\n${err}`);
-		return capOutput(out || err) || silentSuccessNote(command, workingDirectory, projectRoot);
+		const body =
+			out && err
+				? capOutput(`${out}\n[stderr]\n${err}`)
+				: capOutput(out || err) || silentSuccessNote(command, workingDirectory, projectRoot);
+		return `${body}\nExit code 0`;
+	}
+	if (code === null) {
+		const how = signal ? `Killed by signal ${signal}` : "Killed by a signal that was not reported";
+		return `Exit code ${signalExitCode(signal)}: ${how}\n${stdout}\n${stderr}`;
 	}
 	return `Exit code ${code}:\n${stdout}\n${stderr}`;
 }
