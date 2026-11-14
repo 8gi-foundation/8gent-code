@@ -94,8 +94,62 @@ Shared store opens at `$EIGHT_DATA_DIR/audit/decisions.db` (or
 ```bash
 bun run packages/audit/cli.ts decisions --tool run_command --decision deny
 bun run packages/audit/cli.ts decisions --session s_123 --limit 100
-bun run packages/audit/cli.ts verify   # exit 2 when the chain is broken
+bun run packages/audit/cli.ts verify   # all chains; exit 2 when one is broken
 ```
+
+## Hash chain on every audit store (8gi-governance#1108)
+
+`hash-chain.ts` makes the access and capability logs tamper-evident, the
+same way the decision log already is. Each row now carries two more columns:
+
+```
+prev_hash    = hash of the chained row before it, or GENESIS_HASH
+hash         = sha256_hex(prev_hash + canonical_json(row without prev_hash and hash))
+GENESIS_HASH = 64 zeros
+```
+
+Canonical JSON means object keys sorted at every depth and no whitespace.
+Rows are verified in insertion order (`rowid`). The first broken row is
+reported by its 0-based index: an edited row fails its own hash; a deleted,
+inserted or reordered row fails the `prev_hash` link. Cutting rows off the
+end is only visible against a head hash kept elsewhere, so `verify` prints
+the head.
+
+**Migration.** Opening a store runs `ALTER TABLE ... ADD COLUMN` for
+`prev_hash` and `hash` when they are missing. Nothing else changes. Rows
+written before that have no hashes and are reported as pre-chain, never as
+tampered, as long as they sit before the first chained row. A row with no
+hashes after the chain has started is reported as broken.
+
+```bash
+bun run audit verify                        # access, capability, decisions
+bun run audit verify --ledger merges.jsonl  # one JSONL ledger
+# exit 0 when everything is ok, 2 when a chain is broken
+```
+
+## JSONL ledgers: `ledger-chain.mjs`
+
+A dependency-free script (node:crypto and node:fs only, runs under node or
+bun) for plain append files such as the factory merge ledger. Same rules as
+above: one JSON object per line, and the writer adds the two fields.
+
+```
+{"repo":"8gent-code","pr":5001,"verdict":"merged","prev_hash":"000...0","hash":"9f2c..."}
+```
+
+```bash
+node ledger-chain.mjs append ledger.jsonl '{"pr":5001,"verdict":"merged"}'   # or JSON on stdin
+node ledger-chain.mjs verify ledger.jsonl   # "ok: N lines (P pre-chain), head H" or "broken at line L"
+```
+
+- The appended record must be a JSON object without `prev_hash` or `hash`.
+- Appends take `<file>.lock` (created exclusively, stale after 30 s), so
+  concurrent writers cannot fork the chain.
+- Lines without hashes at the top of an existing file are pre-chain; the
+  first appended line links to `GENESIS_HASH`.
+- `appendChained`, `verifyLedger`, `sealLine`, `canonicalJson` and
+  `chainHash` are exported for callers that import instead of shelling out.
+  `hash-chain.test.ts` checks it hashes exactly like `hash-chain.ts`.
 
 ## 8gentjr integration
 

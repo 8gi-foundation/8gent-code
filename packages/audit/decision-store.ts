@@ -24,6 +24,7 @@
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { trackStatements } from "../memory/tracked-db.js";
+import { GENESIS_HASH } from "./hash-chain.js";
 import type {
 	ChainVerification,
 	DecisionEvent,
@@ -55,8 +56,8 @@ CREATE INDEX IF NOT EXISTS idx_dec_decision   ON policy_decision_log(decision);
 CREATE INDEX IF NOT EXISTS idx_dec_created_at ON policy_decision_log(created_at DESC);
 `;
 
-/** prev_hash of the first entry in the chain. */
-export const GENESIS_HASH = "0".repeat(64);
+/** prev_hash of the first entry in the chain. One genesis value for every audit chain. */
+export { GENESIS_HASH };
 
 const VALID_DECISIONS: readonly DecisionOutcome[] = ["allow", "deny"];
 const VALID_KINDS: readonly DecisionRequestKind[] = ["fs_read", "fs_write", "network", "exec"];
