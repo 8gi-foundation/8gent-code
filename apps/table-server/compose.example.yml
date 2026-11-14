@@ -1,21 +1,20 @@
 # Example only: the 8gi-ops reconciler owns the real compose file.
 #
-# Publishes ONLY on 192.168.218.1 (the box's wg0 address). Never publish on
-# 0.0.0.0 or the public IP. With Docker's iptables management off on 8gi-ops,
-# the host address in "ports" is the only thing scoping the listener.
+# Network: publishes ONLY on 192.168.218.1 (the box's wg0 address); never on
+# 0.0.0.0 or the public IP. Docker's iptables management is off on 8gi-ops,
+# so the host address in "ports" is the only thing scoping the listener.
+# The service gets its OWN bridge network, never a shared one: no other
+# container shares its L2 segment, and the box's FORWARD policy is DROP, so
+# nothing routes into or out of it. The server makes no outbound calls.
 #
-# First start on a NEW store creates the ledger key, explicitly, once:
-#   docker compose run --rm table-server --init-key
-# (stop it with Ctrl-C once it prints "listening"). An imported store brings
-# its own keys/state-hmac.key in /data, and --init-key is never used.
-#
-# The token comes from the SOPS secrets the box decrypts to /run/8gi/secrets.
-# The file must be owned by uid 1000 (the image's bun user), mode 0600, and
-# hold one random token of at least 32 characters; anything else and the
-# server refuses to start.
-#
-# The server makes no outbound connections, so the box's no-egress rule for
-# containers costs it nothing.
+# Secrets come from the SOPS files decrypted to /run/8gi/secrets. Each must be
+# owned by uid 1000 (the image's user) and mode 0600, or the server refuses to start:
+#   table-server-tokens      one "<sha256 hex of token> human:<handle>" per line.
+#                            Each token acts as exactly one identity.
+#   table-server-ledger-key  the 32-byte ledger HMAC key, mounted read-only,
+#                            so the key never sits on the data volume beside the ledger.
+# An imported store brings the key it was signed with; a brand new store needs
+# a fresh 32-byte key written to that secret once.
 
 services:
   table-server:
@@ -23,13 +22,21 @@ services:
     restart: unless-stopped
     ports:
       - "192.168.218.1:18789:18789"
+    networks: [table-server]
+    environment:
+      TABLE_KEY_FILE: /run/table/ledger.key
     volumes:
       - table-data:/data
-      - /run/8gi/secrets/table-server-token:/run/table/token:ro
+      - /run/8gi/secrets/table-server-tokens:/run/table/tokens:ro
+      - /run/8gi/secrets/table-server-ledger-key:/run/table/ledger.key:ro
+    # Hardening the Dockerfile cannot carry; the real compose MUST keep all four.
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     tmpfs: [/tmp]
+
+networks:
+  table-server: {}
 
 volumes:
   table-data:
