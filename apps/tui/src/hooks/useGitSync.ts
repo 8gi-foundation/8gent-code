@@ -111,7 +111,8 @@ export function gitView(r: Pick<GitSyncResult, "status" | "branch" | "ahead" | "
 		case "diverged":
 			return { branch: r.branch, sync: "diverged", noRepo: false };
 		case "no-upstream":
-			return { branch: r.branch, sync: "no upstream", noRepo: false };
+			// Never pushed: there is no sync state to report, so the name alone shows.
+			return { branch: r.branch, sync: "", noRepo: false };
 	}
 }
 
