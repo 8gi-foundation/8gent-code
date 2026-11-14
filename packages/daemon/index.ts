@@ -50,6 +50,7 @@ import { bus } from "./events";
 import { startGateway } from "./gateway";
 import { DefaultGoalExecutorFactory, GoalManager } from "./goal-rpc";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
+import { DaemonAlreadyRunning, acquireDaemonLock } from "./instance-lock";
 import { ensureTokenFile, removeDiscovery, writeDiscovery } from "./local-link";
 import { logLine } from "./log-line";
 import { resolveBestFreeModel } from "./model-resolver";
@@ -154,6 +155,7 @@ process.on("unhandledRejection", (reason) => {
 let pool: AgentPool | null = null;
 let stopWake: (() => void) | null = null;
 let mesh: VesselMesh | null = null;
+let releaseInstanceLock: (() => void) | null = null;
 
 /** Save active session IDs to disk so they can be resumed after restart */
 function saveState(): void {
@@ -190,6 +192,8 @@ async function shutdown(signal: string): Promise<void> {
 	stopWake = null;
 	pool?.shutdown(); // releases the work queue lock (#4254)
 	pool = null;
+	releaseInstanceLock?.(); // last: until here this process still owns cron.json
+	releaseInstanceLock = null;
 	bus.clear();
 	console.log("[daemon] stopped");
 	process.exit(0);
@@ -210,6 +214,15 @@ export async function configuredPort(): Promise<number> {
 }
 
 export async function main(): Promise<void> {
+	// One daemon per data dir, taken before the pool or cron exist (governance #1123).
+	try {
+		releaseInstanceLock = acquireDaemonLock(DATA_DIR);
+	} catch (err) {
+		if (!(err instanceof DaemonAlreadyRunning)) throw err;
+		console.error(`[daemon] ${err.message}`);
+		process.exit(1);
+	}
+
 	const localMode = isLocalMode(process.argv.slice(2));
 	if (localMode) {
 		// Set both env vars so child modules (gateway, telegram-bridge,
