@@ -1,0 +1,12 @@
+{
+	"name": "@8gent/table-server",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "Standalone Table server: the table-gate WebSocket subset over TableStore, with no daemon, agent pool, providers or cron.",
+	"main": "src/main.ts",
+	"scripts": {
+		"start": "bun src/main.ts",
+		"test": "bun test"
+	}
+}
