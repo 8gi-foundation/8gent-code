@@ -48,7 +48,8 @@ swiftc \
   -framework Speech \
   -framework ScreenCaptureKit \
   -O \
-  "$SCRIPT_DIR/LilEight/main.swift"
+  "$SCRIPT_DIR/LilEight/main.swift" \
+  "$SCRIPT_DIR/LilEight/DaemonService.swift"
 
 # 7. Write PkgInfo
 echo -n "APPL????" > "$APP_DIR/Contents/PkgInfo"

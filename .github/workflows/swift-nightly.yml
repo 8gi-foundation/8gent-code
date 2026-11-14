@@ -91,3 +91,6 @@ jobs:
           test -f "$APP/Contents/Resources/sprites/manifest.json"
           file "$APP/Contents/MacOS/LilEight" | tee /dev/stderr | grep -q "Mach-O 64-bit executable"
           echo "Lil Eight build: PASS"
+      # governance #1123: Lil Eight is a daemon client only, never starts one itself.
+      - name: Lil Eight never starts the daemon
+        run: bun test apps/lil-eight/tests

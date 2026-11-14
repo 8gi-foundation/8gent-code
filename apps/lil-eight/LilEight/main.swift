@@ -2433,80 +2433,24 @@ class PetManager: DaemonClientDelegate {
 
     // MARK: - Daemon Lifecycle
 
+    /// Lil Eight is a client only (governance #1123). If the daemon does not answer,
+    /// it asks launchd to start the installed service and otherwise reports
+    /// "daemon not running". It never execs the daemon itself. See DaemonService.swift.
     func ensureDaemonRunning() {
-        // Check if daemon is already listening
-        let checkURL = URL(string: "http://localhost:18789/health")!
+        let (port, _) = PetManager.readDaemonConfig()
+        let checkURL = URL(string: "http://127.0.0.1:\(port)/health")!
         var request = URLRequest(url: checkURL)
         request.timeoutInterval = 2
 
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        // The WebSocket client's own reconnect loop picks the daemon up once launchd has it.
+        URLSession.shared.dataTask(with: request) { _, response, _ in
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
                 eightLog("Daemon already running")
                 return
             }
-
-            // Daemon not running - try to start it
-            eightLog("Daemon not running, attempting to start...")
-            self?.startDaemon()
+            eightLog("Daemon not answering on port \(port)")
+            eightLog(DaemonService.requestStart())
         }.resume()
-    }
-
-    func startDaemon() {
-        // Find 8gent-code repo: check env, then common locations
-        let eightCodePath: String = ProcessInfo.processInfo.environment["EIGHT_CODE_PATH"]
-            ?? {
-                let candidates = [
-                    Bundle.main.bundlePath + "/../../../..", // relative to app in repo
-                    NSString(string: "~/8gent-code").expandingTildeInPath,
-                    NSString(string: "~/Code/8gent-code").expandingTildeInPath,
-                    NSString(string: "~/.8gent/repo").expandingTildeInPath,
-                ]
-                for path in candidates {
-                    if FileManager.default.fileExists(atPath: path + "/packages/daemon/index.ts") {
-                        return path
-                    }
-                }
-                return NSString(string: "~/8gent-code").expandingTildeInPath
-            }()
-        let daemonScript = "\(eightCodePath)/packages/daemon/index.ts"
-
-        guard FileManager.default.fileExists(atPath: daemonScript) else {
-            eightLog("Daemon script not found at \(daemonScript)")
-            return
-        }
-
-        DispatchQueue.global(qos: .utility).async {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/local/bin/bun")
-            // Try common bun paths
-            for bunPath in [
-                "/usr/local/bin/bun",
-                "/opt/homebrew/bin/bun",
-                NSString(string: "~/.bun/bin/bun").expandingTildeInPath
-            ] {
-                if FileManager.default.fileExists(atPath: bunPath) {
-                    process.executableURL = URL(fileURLWithPath: bunPath)
-                    break
-                }
-            }
-
-            process.arguments = ["run", daemonScript]
-            process.currentDirectoryURL = URL(fileURLWithPath: eightCodePath)
-            process.environment = ProcessInfo.processInfo.environment
-
-            do {
-                try process.run()
-                eightLog("Daemon started (pid \(process.processIdentifier))")
-
-                // Wait a moment then reconnect
-                Thread.sleep(forTimeInterval: 3)
-                DispatchQueue.main.async { [weak self] in
-                    self?.daemonClient.connect()
-                }
-            } catch {
-                eightLog("Failed to start daemon: \(error)")
-            }
-        }
     }
 
     static func readDaemonConfig() -> (Int, String?) {
@@ -3321,7 +3265,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func updateMenu() {
         let menu = NSMenu()
 
-        let daemonStatus = (petManager?.daemonOnline ?? false) ? "Connected" : "Offline"
+        let daemonStatus = (petManager?.daemonOnline ?? false) ? "Connected" : "not running"
         let sessionCount = petManager?.sessionCount ?? 0
         let petCount = petManager?.pets.count ?? 0
 
