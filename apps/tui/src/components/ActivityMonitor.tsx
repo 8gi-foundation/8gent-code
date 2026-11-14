@@ -23,7 +23,7 @@ interface ActivityEntry {
 	action: string;
 	detail: string;
 	icon: string;
-	color: "cyan" | "green" | "yellow" | "magenta" | "blue" | "red";
+	color: string;
 	timestamp: number;
 	done: boolean;
 	durationMs?: number;
@@ -38,7 +38,7 @@ function toolToActivity(
 	action: string;
 	detail: string;
 	icon: string;
-	color: "cyan" | "green" | "yellow" | "magenta" | "blue" | "red";
+	color: string;
 } {
 	switch (toolName) {
 		case "web_search":
@@ -93,7 +93,7 @@ function toolToActivity(
 				action: "RUN",
 				detail: cmd,
 				icon: "▶",
-				color: "magenta",
+				color: t.teal,
 			};
 		}
 		case "search_text":

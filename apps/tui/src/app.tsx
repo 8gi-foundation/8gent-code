@@ -5830,7 +5830,7 @@ export function App({
 						const killId = args[1];
 						if (!killId) {
 							addSystemMessage(
-								"Usage: /agent kill <agent-id>\n\nUse /agent list to see active 8gents.",
+								"Usage: /agent kill <helper-id>\n\nUse /agent list to see active 8gents.",
 							);
 						} else {
 							const found = orchestration.agents.find(
