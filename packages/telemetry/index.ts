@@ -46,6 +46,8 @@ export { estimateCostUsd } from "./cost";
 // off-box, never in a cloud model prompt. See docs/specs/FLOW-TELEMETRY-SCHEMA.md.
 export * from "./flow-stream";
 export * from "./flow-metrics";
+// Run trace (#1108 lane 5): one local record of each run, spans in the OTel shape.
+export * from "./run-trace";
 
 /**
  * Convenience namespace for callers that prefer
