@@ -346,3 +346,23 @@ describe("HeaderMark drives the living-mark writer", () => {
 		w.dispose();
 	});
 });
+
+// A branch that has never been pushed has no upstream. That is a normal
+// local state, not a warning, so the header keeps the branch and drops the
+// "no upstream" note instead of printing it beside every new branch.
+describe("no upstream is not a header note", () => {
+	test("a branch with no upstream keeps its name and shows no sync note", () => {
+		const props = { ...live, syncStatus: "no upstream", width: 140 };
+		const plan = planHeader(props);
+		expect(plan.middle.branch).toBe("fix/header-rail-100-cols");
+		expect(plan.middle.sync).toBe("");
+	});
+
+	test("the rendered header never says no upstream", () => {
+		const out = stripVTControlCharacters(
+			renderToString(<HeaderBar {...live} syncStatus="no upstream" width={140} />, { columns: 140 }),
+		);
+		expect(out).toContain("fix/header-rail-100-cols");
+		expect(out).not.toContain("no upstream");
+	});
+});

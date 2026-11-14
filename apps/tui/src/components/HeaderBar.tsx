@@ -175,7 +175,15 @@ export function planHeader(props: HeaderBarProps): HeaderPlan {
 	return { ...plain, mark: false };
 }
 
+/**
+ * Sync states the header does not print. "no upstream" is the normal state of
+ * a branch that has not been pushed yet, so it is not a warning and it does
+ * not earn a note beside the branch name.
+ */
+const SILENT_SYNC = new Set(["no upstream"]);
+
 function planRow(props: HeaderBarProps, width: number): Omit<HeaderPlan, "mark"> {
+	const syncStatus = SILENT_SYNC.has(props.syncStatus) ? "" : props.syncStatus;
 	// Below TAGLINE_MIN_COLS the tagline always steps aside (#3238): at 80
 	// columns the living 8 and the branch say more than the brand line, and
 	// a chip appearing must never be what pushes the 8 out.
@@ -188,7 +196,7 @@ function planRow(props: HeaderBarProps, width: number): Omit<HeaderPlan, "mark">
 		// The tagline needs a roomy middle: a merely-fitting branch still trades it away.
 		const floor = compactBrand ? MIDDLE_MIN : TAGLINE_MIDDLE_MIN;
 		if (available >= floor) {
-			const middle = fitHeaderMiddle(props.workspacePath, props.branch, props.syncStatus, available);
+			const middle = fitHeaderMiddle(props.workspacePath, props.branch, syncStatus, available);
 			if (middle.branch || middle.path || middle.sync) {
 				return { compactBrand, middle, middleAvailable: available };
 			}
