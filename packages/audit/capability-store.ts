@@ -15,6 +15,13 @@
 
 import { Database } from "bun:sqlite";
 import { trackStatements } from "../memory/tracked-db.js";
+import {
+	type ChainReport,
+	addChainColumns,
+	chainHash,
+	chainHead,
+	verifyTable,
+} from "./hash-chain.js";
 import type {
 	ActorKind,
 	CapabilityEvent,
@@ -41,6 +48,19 @@ CREATE INDEX IF NOT EXISTS idx_cap_actor      ON capability_audit_log(actor);
 CREATE INDEX IF NOT EXISTS idx_cap_created_at ON capability_audit_log(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_cap_session    ON capability_audit_log(session_id);
 `;
+
+/** Fields covered by each row's hash, in the order the writer and verifier read them. */
+const CAPABILITY_CHAIN_COLUMNS = [
+	"id",
+	"created_at",
+	"actor",
+	"actor_kind",
+	"skill",
+	"capability",
+	"operation",
+	"reason",
+	"session_id",
+] as const;
 
 const VALID_OPERATIONS: readonly CapabilityOperation[] = ["grant", "revoke"];
 const VALID_ACTOR_KINDS: readonly ActorKind[] = ["human", "agent", "system"];
@@ -75,30 +95,52 @@ export class CapabilityAuditStore {
 			console.warn("[audit] capability PRAGMA init warning:", (err as Error).message);
 		}
 		this.db.exec(SCHEMA_SQL);
+		addChainColumns(this.db, "capability_audit_log");
 	}
 
 	/** Record a single capability event. Append only. Returns the generated id. */
 	logCapability(input: LogCapabilityInput): string {
 		assertValid(input);
-		const id = generateEventId();
+		const record = {
+			id: generateEventId(),
+			created_at: Date.now(),
+			actor: input.actor,
+			actor_kind: input.actorKind,
+			skill: input.skill,
+			capability: input.capability,
+			operation: input.operation,
+			reason: input.reason,
+			session_id: input.sessionId ?? null,
+		};
+		// IMMEDIATE takes the write lock before the head read, so two writers
+		// cannot both link to the same head.
 		this.db
-			.prepare(
-				`INSERT INTO capability_audit_log
-          (id, created_at, actor, actor_kind, skill, capability, operation, reason, session_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			)
-			.run(
-				id,
-				Date.now(),
-				input.actor,
-				input.actorKind,
-				input.skill,
-				input.capability,
-				input.operation,
-				input.reason,
-				input.sessionId ?? null,
-			);
-		return id;
+			.transaction(() => {
+				const prevHash = chainHead(this.db, "capability_audit_log");
+				const hash = chainHash(prevHash, record);
+				this.db
+					.prepare(
+						`INSERT INTO capability_audit_log
+              (id, created_at, actor, actor_kind, skill, capability, operation, reason, session_id,
+               prev_hash, hash)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					)
+					.run(
+						record.id,
+						record.created_at,
+						record.actor,
+						record.actor_kind,
+						record.skill,
+						record.capability,
+						record.operation,
+						record.reason,
+						record.session_id,
+						prevHash,
+						hash,
+					);
+			})
+			.immediate();
+		return record.id;
 	}
 
 	/** Query the log. Read-only. Filters compose as AND. */
@@ -167,6 +209,14 @@ export class CapabilityAuditStore {
 			reason: r.reason,
 			sessionId: r.session_id,
 		}));
+	}
+
+	/**
+	 * Recompute the hash chain in insertion order. Rows written before the
+	 * chain existed are counted as pre-chain, not as tampered.
+	 */
+	verifyChain(): ChainReport {
+		return verifyTable(this.db, "capability_audit_log", CAPABILITY_CHAIN_COLUMNS);
 	}
 
 	/** Total row count. Used by admin CLI and tests. */
