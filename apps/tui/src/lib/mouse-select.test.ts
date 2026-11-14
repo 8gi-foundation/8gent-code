@@ -16,6 +16,7 @@ import {
 	_disposeMouse,
 	arrowsToWheel,
 	installMouse,
+	mouseCaptureOn,
 	mouseMode,
 	onMouse,
 	setWheelInputEmpty,
@@ -53,8 +54,14 @@ afterEach(() => {
 });
 
 describe("mouseMode", () => {
-	test("default on macOS is full: clicks work and a drag selects and copies inside the TUI", () => {
-		expect(mouseMode(TTY, true, null, undefined, false, "darwin")).toBe("full");
+	test("default on macOS is select: Terminal.app and iTerm select and copy on their own (#181)", () => {
+		expect(mouseMode(TTY, true, null, undefined, false, "darwin")).toBe("select");
+	});
+	test("full reporting on macOS is still one switch away", () => {
+		expect(mouseMode({ ...TTY, EIGHT_MOUSE: "1" }, true, null, undefined, false, "darwin")).toBe(
+			"full",
+		);
+		expect(mouseMode(TTY, true, null, true, false, "darwin")).toBe("full");
 	});
 	test("default on other desktops stays select: the terminal selects and copies", () => {
 		expect(mouseMode(TTY, true, null, undefined, false, "linux")).toBe("select");
@@ -149,6 +156,57 @@ describe("escape sequences on start and exit", () => {
 		expect(out.written).toBe("");
 	});
 
+	test("the macOS default writes no reporting sequence at startup (#181)", () => {
+		const out = new FakeStdout();
+		installMouse(new FakeStdin() as unknown as NodeJS.ReadStream, out, {
+			mode: mouseMode(TTY, true, null, undefined, false, "darwin"),
+			processHooks: false,
+		});
+		for (const n of ["1000", "1002", "1003", "1006", "1015"]) {
+			expect(out.written).not.toContain(`?${n}h`);
+		}
+	});
+
+	// Each exit path writes the reset. A dummy listener keeps the layer from
+	// re-raising the signal at the test process once its own handler steps aside.
+	for (const sig of ["SIGTERM", "SIGINT", "SIGHUP", "SIGQUIT"]) {
+		for (const mode of ["select", "full"] as const) {
+			test(`${sig} restores the terminal in ${mode} mode`, () => {
+				const out = new FakeStdout();
+				const keep = () => {};
+				process.on(sig, keep);
+				try {
+					installMouse(new FakeStdin() as unknown as NodeJS.ReadStream, out, { mode });
+					(process as unknown as EventEmitter).emit(sig);
+					const off = mode === "full" ? DISABLE_MOUSE : DISABLE_SELECT;
+					expect(out.written.endsWith(off + off)).toBe(true);
+				} finally {
+					process.removeListener(sig, keep);
+				}
+			});
+		}
+	}
+
+	test("a normal exit restores the terminal, in both modes", () => {
+		for (const [mode, off] of [
+			["select", DISABLE_SELECT],
+			["full", DISABLE_MOUSE],
+		] as const) {
+			const out = new FakeStdout();
+			installMouse(new FakeStdin() as unknown as NodeJS.ReadStream, out, { mode });
+			(process as unknown as EventEmitter).emit("exit", 0);
+			expect(out.written.endsWith(off + off)).toBe(true);
+			_disposeMouse();
+		}
+	});
+
+	test("a crash restores the terminal in full mode too", () => {
+		const out = new FakeStdout();
+		installMouse(new FakeStdin() as unknown as NodeJS.ReadStream, out, { mode: "full" });
+		(process as unknown as EventEmitter).emit("uncaughtExceptionMonitor", new Error("boom"));
+		expect(out.written.endsWith(DISABLE_MOUSE + DISABLE_MOUSE)).toBe(true);
+	});
+
 	test("a crash restores the terminal in select mode too", () => {
 		const out = new FakeStdout();
 		installMouse(new FakeStdin() as unknown as NodeJS.ReadStream, out, { mode: "select" });
@@ -218,5 +276,26 @@ describe("wheel as arrows", () => {
 		});
 		stdin.push(`${UP}${UP}`);
 		expect(drain(stdin)).toBe(`${UP}${UP}`);
+	});
+});
+
+describe("Settings row default (#181)", () => {
+	test("with no setting stored the row reads Off on macOS and On on Termux", () => {
+		expect(mouseCaptureOn(undefined, false)).toBe(false);
+		expect(mouseCaptureOn(undefined, true)).toBe(true);
+	});
+	test("one press from the unset macOS state turns clicks On", () => {
+		const shown = mouseCaptureOn(undefined, false);
+		const afterPress = mouseCaptureOn(!shown, false);
+		expect(afterPress).toBe(true);
+		expect(mouseMode(TTY, true, null, afterPress, false, "darwin")).toBe("full");
+	});
+	test("the row and mouseMode agree for every stored value and host", () => {
+		for (const stored of [undefined, true, false]) {
+			for (const android of [false, true]) {
+				const mode = mouseMode(TTY, true, null, stored, android, "darwin");
+				expect(mouseCaptureOn(stored, android)).toBe(mode === "full");
+			}
+		}
 	});
 });

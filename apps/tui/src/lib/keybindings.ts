@@ -55,6 +55,7 @@ export const KEYBINDINGS: readonly KeyBinding[] = [
 	{ keys: "Ctrl+G", action: "Send the running task to the background", group: "views" },
 	{ keys: "Ctrl+V", action: "Show or hide the model's thinking", group: "views" },
 	{ keys: "Ctrl+R", action: "Start or stop voice input", group: "extras" },
+	{ keys: "Ctrl+U", action: "Copy the last message to the clipboard", group: "core" },
 	{
 		keys: "Ctrl+D",
 		action: "Hand the keyboard to the DJ deck (with a track loaded)",

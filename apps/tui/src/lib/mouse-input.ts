@@ -24,10 +24,12 @@
  * Reporting captures every drag, so the terminal's own select and copy never
  * happen; "full" makes up for that inside the TUI: a press and release on one
  * cell is a click, a drag highlights cells and copies on release (OSC 52, plus
- * pbcopy on a local Mac). "full" is the default on macOS and Android/Termux.
- * "select" is the opt-in (EIGHT_MOUSE=select, `"mouse": "select"` in
- * ~/.8gent/config.json, or ui.mouseCapture off in Settings) and the default
- * elsewhere: no reporting; the alternate screen plus alternate scroll mode
+ * pbcopy on a local Mac). "full" is the default on Android/Termux only, where
+ * touch has no native selection. "select" is the default everywhere else
+ * (macOS included, #181: with reporting on, Terminal.app and iTerm could not
+ * select an error line or a session id) and can be set with
+ * EIGHT_MOUSE=select, `"mouse": "select"` in ~/.8gent/config.json, or
+ * ui.mouseCapture off in Settings: no reporting; the alternate screen plus alternate scroll mode
  * (?1049 ?1007), so the wheel arrives as arrow keys and a burst of them
  * scrolls the chat while the input is empty, and the terminal selects. "full"
  * can also be forced with EIGHT_MOUSE=1, `"mouse": "on"`. "off" is
@@ -200,6 +202,15 @@ export class MouseFilter {
 	}
 }
 
+/**
+ * Whether click capture is on when the owner has not chosen: only Termux (touch
+ * has no native selection there). The one place this default lives; the
+ * Settings row reads it too, so the row shows the state the process runs in.
+ */
+export function mouseCaptureOn(settingCapture: boolean | undefined, android: boolean): boolean {
+	return settingCapture ?? android;
+}
+
 /** Which mouse mode this process runs, or "off" when the layer stays out. */
 export function mouseMode(
 	env: Record<string, string | undefined> = process.env,
@@ -220,12 +231,11 @@ export function mouseMode(
 	if (flag === "select") return "select";
 	if (configMouse === "on" || configMouse === "full") return "full";
 	if (configMouse === "select") return "select";
-	// No owner choice: Termux and macOS run the reporting layer. A press and
-	// release on one cell is a click, a drag is selected inside the TUI and
-	// copied on release (text-selection.ts), so both work at once. Other
-	// desktops keep the terminal's own select and copy until they are tried.
-	if (settingCapture === undefined) return android || platform === "darwin" ? "full" : "select";
-	return settingCapture ? "full" : "select";
+	// No owner choice: only Termux runs the reporting layer (touch has no native
+	// selection there). Desktops, macOS included, keep the terminal's own select
+	// and copy: reporting stays off unless EIGHT_MOUSE or the setting turns it on.
+	void platform;
+	return mouseCaptureOn(settingCapture, android) ? "full" : "select";
 }
 
 /** Whether the mouse layer turns on, in either mode, for this process. */
@@ -463,6 +473,7 @@ export function installMouse(
 		const onTerm = reraise("SIGTERM");
 		const onHup = reraise("SIGHUP");
 		const onInt = reraise("SIGINT");
+		const onQuit = reraise("SIGQUIT");
 		process.on("exit", onExit);
 		process.on("SIGTSTP", onTstp);
 		process.on("SIGCONT", onCont);
@@ -470,6 +481,7 @@ export function installMouse(
 		process.on("SIGTERM", onTerm);
 		process.on("SIGHUP", onHup);
 		process.on("SIGINT", onInt);
+		process.on("SIGQUIT", onQuit);
 		hooks.push(
 			["exit", onExit],
 			["SIGTSTP", onTstp],
@@ -478,6 +490,7 @@ export function installMouse(
 			["SIGTERM", onTerm],
 			["SIGHUP", onHup],
 			["SIGINT", onInt],
+			["SIGQUIT", onQuit],
 		);
 	}
 

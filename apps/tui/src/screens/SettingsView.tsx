@@ -32,6 +32,7 @@ import { AppText, Heading, MutedText } from "../components/primitives/AppText.js
 import { Divider } from "../components/primitives/Divider.js";
 import { Stack } from "../components/primitives/Stack.js";
 import { fmtTokens } from "../lib/context-view.js";
+import { mouseCaptureOn } from "../lib/mouse-input.js";
 import { parseWindowInput } from "../lib/tab-context-window.js";
 import { KeyVaultScreen } from "./KeyVaultScreen.js";
 
@@ -371,7 +372,7 @@ const CATEGORIES: Category[] = [
 				description:
 					"On: click key caps and tabs, and drag to select text inside the TUI (copied on release). Off: the terminal selects and copies, key caps are not clickable. Takes effect on restart.",
 				kind: "toggle",
-				get: (s) => s.ui.mouseCapture ?? (isAndroidHost() || process.platform === "darwin"),
+				get: (s) => mouseCaptureOn(s.ui.mouseCapture, isAndroidHost()),
 				set: (s, v) => ({ ...s, ui: { ...s.ui, mouseCapture: Boolean(v) } }),
 			},
 			{
