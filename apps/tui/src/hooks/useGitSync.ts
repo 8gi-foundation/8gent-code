@@ -111,7 +111,10 @@ export function gitView(r: Pick<GitSyncResult, "status" | "branch" | "ahead" | "
 		case "diverged":
 			return { branch: r.branch, sync: "diverged", noRepo: false };
 		case "no-upstream":
-			return { branch: r.branch, sync: "no upstream", noRepo: false };
+			// A local branch with no tracking remote is the normal state of new work.
+			// It is not a sync fact the chrome needs on every screen, and the note
+			// was the first thing cut when the header row ran short.
+			return { branch: r.branch, sync: "", noRepo: false };
 	}
 }
 
