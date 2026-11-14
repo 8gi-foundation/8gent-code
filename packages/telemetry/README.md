@@ -96,6 +96,35 @@ telemetry.recordLLM({
 }
 ```
 
+## Run trace (local record of a run)
+
+`run-trace.ts` keeps one record per Agent turn: a root `run` span, one `model`
+span per model call and one `tool` span per tool call, in the OpenTelemetry
+shape (trace id, span id, parent, start/end, GenAI attribute names: session,
+officer, provider, model, tokens in/out, est. cost, outcome).
+
+- Written as JSONL to `~/.8gent/traces/<run-id>.jsonl` (`$EIGHT_DATA_DIR/traces`,
+  or `$EIGHT_TRACE_DIR`). Nothing leaves the machine.
+- Names, counts and outcomes only. The API takes no prompt text, tool
+  arguments, results or file contents.
+- `EIGHT_TRACE=off` turns it off. `EIGHT_TRACE_OTLP_ENDPOINT=<url>` (unset by
+  default) also posts each finished run as OTLP/HTTP JSON to `<url>/v1/traces`.
+- Officer comes from `EIGHT_OFFICER` (or `EIGHT_VESSEL_ROLE`) when set.
+
+```bash
+8gent trace show            # the latest run
+8gent trace show 7811fe81   # a run by id or id prefix
+8gent trace show <id> --json
+```
+
+```
+run 7811fe81e6721b45146c6f8757a3123b  session s1  ok  3.1s
+  model 8gent/eight-1.0-q3:14b  in 900  out 120  2.0s
+  tool edit_file  ok  0.1s
+
+totals: 1 model calls, 1 tool calls (0 failed), tokens in 900 out 120, est. cost $0.000000, 3.1s
+```
+
 ## Vector config
 
 `vector.toml` ships in this package. Run:

@@ -329,6 +329,7 @@ import { resolveUselessStreak } from "../ai/useless-streak";
 import { cdPrefixShape } from "../permissions/cd-prefix";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { isShellToolName } from "../permissions/shell-tools";
+import { type RunTracer, startRunTrace } from "../telemetry/run-trace";
 import { scrub } from "./secret-scanner";
 
 /** One warning per process for a bad EIGHT_BROWSER_PROFILE (#3622). */
@@ -737,6 +738,8 @@ export class Agent {
 
 	/** 0 for a user's session, 1 or more for a spawned sub-agent (#3583). */
 	private readonly agentDepth: number = currentAgentDepth();
+	/** This turn's run trace (#1108 lane 5), null between turns or when tracing is off. */
+	private runTrace: RunTracer | null = null;
 
 	constructor(config: AgentConfig) {
 		// Backstop for #3341: no model loop in a process past MAX_AGENT_DEPTH,
@@ -745,7 +748,7 @@ export class Agent {
 		const depthRefusal = processAgentDepthRefusal();
 		if (depthRefusal) throw new AgentDepthError(depthRefusal);
 		this.config = config;
-		this.events = this.withLocalityLedger(config.events || {});
+		this.events = this.withRunTrace(this.withLocalityLedger(config.events || {}));
 		this.executor = new ToolExecutor(
 			config.workingDirectory || process.cwd(),
 			config.agentScope ?? "primary",
@@ -2692,6 +2695,32 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
+	 * Tees model and tool events into this turn's run trace. Names, token counts
+	 * and outcomes only: the trace never sees text, args or results.
+	 */
+	private withRunTrace(events: AgentEventCallbacks): AgentEventCallbacks {
+		return {
+			...events,
+			onStepStart: (e) => {
+				this.runTrace?.modelStart(e.stepNumber, e.provider, e.model);
+				events.onStepStart?.(e);
+			},
+			onStepFinish: (e) => {
+				this.runTrace?.modelEnd(e.stepNumber, e.usage, e.finishReason, e.durationMs);
+				events.onStepFinish?.(e);
+			},
+			onToolStart: (e) => {
+				this.runTrace?.toolStart(e.toolCallId, e.toolName);
+				events.onToolStart?.(e);
+			},
+			onToolEnd: (e) => {
+				this.runTrace?.toolEnd(e.toolCallId, e.toolName, e.success);
+				events.onToolEnd?.(e);
+			},
+		};
+	}
+
+	/**
 	 * Sovereign meter (#4607): fetch-based calls are counted at the wire
 	 * (packages/providers/locality-wire.ts). Providers that never touch the
 	 * network (the Apple on-device model, host CLIs) are on this machine and have
@@ -2769,6 +2798,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							const turn = ++this.turnCounter;
 							this.steerQueue = [];
 							this.activeTurn = turn;
+							const trace = startRunTrace({
+								sessionId: this.sessionId,
+								provider: String(this.config.runtime),
+								model: this.config.model,
+								depth: this.agentDepth,
+							});
+							this.runTrace = trace;
+							let outcome = "error";
 							try {
 								const reply = await this.runTurn(
 									userMessage,
@@ -2778,8 +2815,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 								);
 								this.reviewFinishedTurn(userMessage, reply);
 								this.countTurnOutcome();
+								outcome = this.lastTurnFailure ? `failed: ${this.lastTurnFailure.reason}` : "ok";
 								return reply;
 							} finally {
+								trace?.end(outcome);
+								if (this.runTrace === trace) this.runTrace = null;
 								this.friction.turnEnd();
 								if (this.activeTurn === turn) this.activeTurn = null;
 							}
