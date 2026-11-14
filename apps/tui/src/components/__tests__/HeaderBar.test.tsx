@@ -148,6 +148,16 @@ describe("HeaderBar", () => {
 		expect(occupied(props)).toBeLessThanOrEqual(140);
 	});
 
+	test("a branch with no upstream shows no sync note: the header keeps the branch and drops 'no upstream'", () => {
+		const props = { ...live, branch: "feat/local-only", width: 140, syncStatus: "no upstream" };
+		const plan = planHeader(props);
+		expect(plan.middle.sync).toBe("");
+		expect(plan.middle.branch).toBe("feat/local-only");
+		const screen = stripVTControlCharacters(renderToString(<HeaderBar {...props} />, { columns: 140 }));
+		expect(screen).not.toContain("no upstream");
+		expect(screen).toContain("feat/local-only");
+	});
+
 	test("at 90 columns the row still fits in one line", () => {
 		const props = { ...live, width: 90 };
 		expect(occupied(props)).toBeLessThanOrEqual(90);

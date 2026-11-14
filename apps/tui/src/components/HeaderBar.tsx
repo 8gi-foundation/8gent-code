@@ -188,7 +188,10 @@ function planRow(props: HeaderBarProps, width: number): Omit<HeaderPlan, "mark">
 		// The tagline needs a roomy middle: a merely-fitting branch still trades it away.
 		const floor = compactBrand ? MIDDLE_MIN : TAGLINE_MIDDLE_MIN;
 		if (available >= floor) {
-			const middle = fitHeaderMiddle(props.workspacePath, props.branch, props.syncStatus, available);
+			// A local-only branch is the normal state for a feature branch, not news.
+			// The hook keeps reporting "no upstream"; the header just stops saying it.
+			const sync = props.syncStatus === "no upstream" ? "" : props.syncStatus;
+			const middle = fitHeaderMiddle(props.workspacePath, props.branch, sync, available);
 			if (middle.branch || middle.path || middle.sync) {
 				return { compactBrand, middle, middleAvailable: available };
 			}
