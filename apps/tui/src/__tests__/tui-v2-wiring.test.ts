@@ -197,7 +197,9 @@ describe("gitView (audit #10: header and rail must agree)", () => {
 		expect(r("up-to-date", "main")).toEqual({ branch: "main", sync: "in sync", noRepo: false });
 		expect(r("ahead", "feat/x", 3)).toMatchObject({ branch: "feat/x", sync: "3 ahead" });
 		expect(r("behind", "main", 0, 2)).toMatchObject({ sync: "2 behind" });
-		expect(r("no-upstream", "wip")).toMatchObject({ branch: "wip", sync: "no upstream" });
+		// No upstream is the normal state of a new local branch. The chrome shows
+		// the branch alone; the note would repeat on every fresh branch.
+		expect(r("no-upstream", "wip")).toEqual({ branch: "wip", sync: "", noRepo: false });
 		expect(r("detached", "HEAD")).toMatchObject({ branch: "HEAD", sync: "detached" });
 	});
 });

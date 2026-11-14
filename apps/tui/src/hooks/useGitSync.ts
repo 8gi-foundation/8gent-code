@@ -111,7 +111,8 @@ export function gitView(r: Pick<GitSyncResult, "status" | "branch" | "ahead" | "
 		case "diverged":
 			return { branch: r.branch, sync: "diverged", noRepo: false };
 		case "no-upstream":
-			return { branch: r.branch, sync: "no upstream", noRepo: false };
+			// A branch with no upstream is normal for new local work. Show the branch alone.
+			return { branch: r.branch, sync: "", noRepo: false };
 	}
 }
 
