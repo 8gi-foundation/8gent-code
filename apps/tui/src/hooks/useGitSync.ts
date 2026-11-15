@@ -111,7 +111,9 @@ export function gitView(r: Pick<GitSyncResult, "status" | "branch" | "ahead" | "
 		case "diverged":
 			return { branch: r.branch, sync: "diverged", noRepo: false };
 		case "no-upstream":
-			return { branch: r.branch, sync: "no upstream", noRepo: false };
+			// No tracking remote is the normal state for a local branch. Naming it
+			// on every header is noise; ahead, behind and diverged still show.
+			return { branch: r.branch, sync: "", noRepo: false };
 	}
 }
 
