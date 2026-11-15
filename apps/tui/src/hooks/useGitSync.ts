@@ -111,7 +111,9 @@ export function gitView(r: Pick<GitSyncResult, "status" | "branch" | "ahead" | "
 		case "diverged":
 			return { branch: r.branch, sync: "diverged", noRepo: false };
 		case "no-upstream":
-			return { branch: r.branch, sync: "no upstream", noRepo: false };
+			// A new local branch has no upstream yet. That is normal, so the
+			// header and the rail show the branch alone, with no note.
+			return { branch: r.branch, sync: "", noRepo: false };
 	}
 }
 

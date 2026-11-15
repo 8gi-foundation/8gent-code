@@ -197,7 +197,9 @@ describe("gitView (audit #10: header and rail must agree)", () => {
 		expect(r("up-to-date", "main")).toEqual({ branch: "main", sync: "in sync", noRepo: false });
 		expect(r("ahead", "feat/x", 3)).toMatchObject({ branch: "feat/x", sync: "3 ahead" });
 		expect(r("behind", "main", 0, 2)).toMatchObject({ sync: "2 behind" });
-		expect(r("no-upstream", "wip")).toMatchObject({ branch: "wip", sync: "no upstream" });
+		// A new local branch has no upstream yet. That is normal, not a note:
+		// the header and the rail show the branch alone.
+		expect(r("no-upstream", "wip")).toEqual({ branch: "wip", sync: "", noRepo: false });
 		expect(r("detached", "HEAD")).toMatchObject({ branch: "HEAD", sync: "detached" });
 	});
 });
