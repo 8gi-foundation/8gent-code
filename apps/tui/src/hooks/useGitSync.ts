@@ -110,8 +110,11 @@ export function gitView(r: Pick<GitSyncResult, "status" | "branch" | "ahead" | "
 			return { branch: r.branch, sync: `${r.behind} behind`, noRepo: false };
 		case "diverged":
 			return { branch: r.branch, sync: "diverged", noRepo: false };
+		// A branch that was never pushed is the default state of every new
+		// branch. It is not a thing to act on in the header, so the note stays
+		// empty. Ahead, behind, diverged and detached still show.
 		case "no-upstream":
-			return { branch: r.branch, sync: "no upstream", noRepo: false };
+			return { branch: r.branch, sync: "", noRepo: false };
 	}
 }
 
