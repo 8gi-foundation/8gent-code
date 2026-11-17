@@ -111,7 +111,8 @@ export function gitView(r: Pick<GitSyncResult, "status" | "branch" | "ahead" | "
 		case "diverged":
 			return { branch: r.branch, sync: "diverged", noRepo: false };
 		case "no-upstream":
-			return { branch: r.branch, sync: "no upstream", noRepo: false };
+			// A local branch with no upstream is normal for new work. Naming it on every frame is noise.
+			return { branch: r.branch, sync: "", noRepo: false };
 	}
 }
 
