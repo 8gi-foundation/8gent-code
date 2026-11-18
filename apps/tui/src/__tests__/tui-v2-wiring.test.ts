@@ -197,7 +197,9 @@ describe("gitView (audit #10: header and rail must agree)", () => {
 		expect(r("up-to-date", "main")).toEqual({ branch: "main", sync: "in sync", noRepo: false });
 		expect(r("ahead", "feat/x", 3)).toMatchObject({ branch: "feat/x", sync: "3 ahead" });
 		expect(r("behind", "main", 0, 2)).toMatchObject({ sync: "2 behind" });
-		expect(r("no-upstream", "wip")).toMatchObject({ branch: "wip", sync: "no upstream" });
+		// A local branch with no tracking remote is the normal state for new work.
+		// The header shows the branch and nothing else; the note only appears when it is actionable.
+		expect(r("no-upstream", "wip")).toEqual({ branch: "wip", sync: "", noRepo: false });
 		expect(r("detached", "HEAD")).toMatchObject({ branch: "HEAD", sync: "detached" });
 	});
 });

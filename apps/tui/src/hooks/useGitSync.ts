@@ -111,7 +111,8 @@ export function gitView(r: Pick<GitSyncResult, "status" | "branch" | "ahead" | "
 		case "diverged":
 			return { branch: r.branch, sync: "diverged", noRepo: false };
 		case "no-upstream":
-			return { branch: r.branch, sync: "no upstream", noRepo: false };
+			// No tracking remote is the normal state for a new local branch: nothing to act on, so no note.
+			return { branch: r.branch, sync: "", noRepo: false };
 	}
 }
 
