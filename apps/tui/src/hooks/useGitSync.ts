@@ -111,7 +111,9 @@ export function gitView(r: Pick<GitSyncResult, "status" | "branch" | "ahead" | "
 		case "diverged":
 			return { branch: r.branch, sync: "diverged", noRepo: false };
 		case "no-upstream":
-			return { branch: r.branch, sync: "no upstream", noRepo: false };
+			// No note: a local-only branch is the normal state, and the branch
+				// already sits beside it in the header.
+				return { branch: r.branch, sync: "", noRepo: false };
 	}
 }
 
