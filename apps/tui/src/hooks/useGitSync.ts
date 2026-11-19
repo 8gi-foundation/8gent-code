@@ -111,7 +111,9 @@ export function gitView(r: Pick<GitSyncResult, "status" | "branch" | "ahead" | "
 		case "diverged":
 			return { branch: r.branch, sync: "diverged", noRepo: false };
 		case "no-upstream":
-			return { branch: r.branch, sync: "no upstream", noRepo: false };
+			// A local-only branch is the normal state of work in progress: the branch
+			// name says where we are, and "no upstream" is noise beside it (#295).
+			return { branch: r.branch, sync: "", noRepo: false };
 	}
 }
 
