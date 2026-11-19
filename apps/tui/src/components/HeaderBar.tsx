@@ -4,8 +4,8 @@
  * The living braille 8 and the brand pill on the left; workspace path,
  * branch and sync in the middle; on the right only the state chips that
  * ask for the person, and only while they apply: ASK (an approval card is
- * up), ● MIC (recording). Infinite is named once by the tab tag and once by the footer, never here. A quiet
- * header is the default. The clock is in the footer, the palette key is the
+ * up), ● MIC (recording). Infinite is named by the tab tag and the footer,
+ * never here. A quiet header is the default. The clock is in the footer, the palette key is the
  * footer's first key cap, and the Lil Eight badge is gone: the living 8 is
  * the pet, and the NOW strip says what the agent is doing.
  *
