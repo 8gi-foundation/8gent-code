@@ -625,7 +625,9 @@ describe("synthesis does not block the event loop", () => {
 		expect(r.status).toBe(0);
 		expect(elapsed).toBeGreaterThanOrEqual(350);
 		// A blocking spawn would let at most one tick through after it returned.
-		expect(ticks).toBeGreaterThanOrEqual(15);
+		// About 40 ticks fit in 400 ms, but a busy CI runner delivered only 6 (#294),
+		// so the floor sits just above what a blocking spawn could produce.
+		expect(ticks).toBeGreaterThanOrEqual(3);
 	});
 
 	test("defaultDeps().spawn is the async spawn, and synthesize returns a promise", () => {
