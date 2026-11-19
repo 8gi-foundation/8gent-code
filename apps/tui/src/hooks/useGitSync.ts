@@ -111,7 +111,8 @@ export function gitView(r: Pick<GitSyncResult, "status" | "branch" | "ahead" | "
 		case "diverged":
 			return { branch: r.branch, sync: "diverged", noRepo: false };
 		case "no-upstream":
-			return { branch: r.branch, sync: "no upstream", noRepo: false };
+			// Unpushed is the normal state of a local branch, so it says nothing here.
+			return { branch: r.branch, sync: "", noRepo: false };
 	}
 }
 
