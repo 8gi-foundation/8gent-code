@@ -9,7 +9,7 @@
  * runs the child, a scripted Agent plays the provider.
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -54,7 +54,14 @@ class FakeAgent {
 	}
 }
 
+// bun's mock.module is process-wide and outlives this file. Keep a plain copy of
+// the real exports and put them back in afterAll, so files that run later in the
+// same process get the real Agent (#294).
+const eightBefore = { ...((await import("../eight")) as Record<string, unknown>) };
 mock.module("../eight", () => ({ Agent: FakeAgent }));
+afterAll(() => {
+	mock.module("../eight", () => eightBefore);
+});
 
 const { AgentPool } = await import("./index");
 const { agentOutcome } = await import("./agent-outcome");
