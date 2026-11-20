@@ -16,9 +16,10 @@ describe("judge privacy gate", () => {
 	});
 
 	test("a secret that survives redaction trips containsSecret", () => {
-		// redact() has no 'password=' rule, so this survives redaction...
-		const survived = redact("login password = hunter2supersecret");
-		expect(survived).toContain("hunter2supersecret"); // not redacted
+		// redact() now scrubs password=, so use a shape it still misses: a ghp_ token
+		// shorter than redact's 36 character floor, which the goal scrubber (20+) catches...
+		const survived = redact("login ghp_abcdefghij0123456789wxyz now");
+		expect(survived).toContain("ghp_abcdefghij0123456789wxyz"); // not redacted
 		expect(containsSecret(survived)).toBe(true); // ...but the tripwire catches it
 	});
 
@@ -38,12 +39,12 @@ describe("judge privacy gate", () => {
 				"s1",
 				0,
 				"test-model",
-				"deploy with password = hunter2supersecret please",
+				"deploy with ghp_abcdefghij0123456789wxyz please",
 				"ok done",
 			);
 			expect(fetched).toBe(false); // no cloud call happened
 			expect(rec.scores.overall).toBe(0); // neutral, untrained
-			expect(rec.prompt).not.toContain("hunter2supersecret"); // never stored raw
+			expect(rec.prompt).not.toContain("ghp_abcdefghij0123456789wxyz"); // never stored raw
 		} finally {
 			globalThis.fetch = origFetch;
 		}

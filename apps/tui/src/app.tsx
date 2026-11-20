@@ -2659,15 +2659,10 @@ export function App({
 			stopBangRuns();
 		};
 	}, [stopBangRuns]);
-	// Per-tab "agent currently running" guard. Replaces the legacy global
-	// boolean - now keyed by tab id so concurrent tabs no longer block each
-	// other on the same flag.
-	const agentRunningTabsRef = useRef<Set<string>>(new Set());
-	const isAgentRunningOnTab = (tabId: string) => agentRunningTabsRef.current.has(tabId);
-	const setAgentRunningOnTab = (tabId: string, val: boolean) => {
-		if (val) agentRunningTabsRef.current.add(tabId);
-		else agentRunningTabsRef.current.delete(tabId);
-	};
+	// Per-tab "a turn is running" guard. It is the same state the status row
+	// shows (usePerTabAgents), so submit routing and the row cannot disagree (#178).
+	const isAgentRunningOnTab = perTabAgents.isTabRunning;
+	const setAgentRunningOnTab = perTabAgents.setTabProcessing;
 
 	// Multi-agent orchestration
 	const orchestration = useAgentOrchestration();
@@ -4325,6 +4320,15 @@ export function App({
 						built();
 						return;
 					}
+					// The rebuild ends the turn on the old agent: steers it never took go
+					// to the next turn, and the tab is idle until then (#178).
+					const undelivered = _existing.takeQueuedSteers();
+					if (undelivered.length > 0)
+						pendingSteersRef.current.set(_initTabId, [
+							...(pendingSteersRef.current.get(_initTabId) ?? []),
+							...undelivered,
+						]);
+					chatStartedTabsRef.current.delete(_initTabId);
 					perTabAgents.removeTabAgent(_initTabId);
 				}
 

@@ -34,6 +34,7 @@ import {
 	readdirSync,
 	rmSync,
 	statSync,
+	writeFileSync,
 	writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -138,6 +139,15 @@ export function claimRun(run: TmuxRun = currentRun): void {
 	chmodSync(run.ownerPath, 0o600);
 }
 
+/**
+ * Add the tmux server's pid as line 2 of the run's owner record. A child 8gent in a pane reads
+ * it (core/one-yes.ts) where this platform's tmux does not show the socket path in `ps`.
+ */
+export function recordServerPid(serverPid: number, run: TmuxRun = currentRun): void {
+	if (!Number.isInteger(serverPid) || serverPid <= 1) return;
+	writeFileSync(run.ownerPath, `${run.pid}\n${serverPid}\n`, { mode: 0o600 });
+}
+
 /** Remove a run's socket file and owner record. */
 export function releaseRun(run: TmuxRun = currentRun): void {
 	rmSync(run.socketPath, { force: true });
@@ -198,7 +208,8 @@ function recordedOwner(dir: string, id: string): number | null {
 	} catch {
 		return null;
 	}
-	if (!/^\d+\n?$/.test(text)) return null;
+	// Line 1 is the run's process id; an optional line 2 is its tmux server's (recordServerPid).
+	if (!/^\d+(\n\d+)?\n?$/.test(text)) return null;
 	const pid = Number.parseInt(text, 10);
 	if (!(pid > 0) || String(pid) !== m[1]) return null;
 	return pid;
@@ -420,10 +431,18 @@ export function sessionShellCommand(
 	env: Record<string, string> = sessionEnv(),
 ): string {
 	const vars = Object.entries(env)
+		.filter(([k]) => k !== "EIGHT_UNATTENDED")
 		.map(([k, v]) => `${k}=${shellSingleQuote(v)}`)
 		.join(" ");
-	return `exec /usr/bin/env -i TERM="$TERM" ${vars ? `${vars} ` : ""}/bin/sh -c ${shellSingleQuote(composed)}`;
+	return `exec /usr/bin/env -i TERM="$TERM" ${vars ? `${vars} ` : ""}${UNATTENDED_VAR} /bin/sh -c ${shellSingleQuote(composed)}`;
 }
+
+/**
+ * Always last, set here as a constant and never copied from the parent environment: an
+ * 8gent in a pane has nobody present (core/one-yes.ts forcedUnattended). A shell in the pane can
+ * unset it, so the child also finds its tmux server among its parents; this is the plain marker.
+ */
+const UNATTENDED_VAR = "EIGHT_UNATTENDED=1";
 
 /** Build the argv for `tmux new-session -d -s <id> -x C -y R -c CWD CMD...`. */
 export function buildTmuxNewSessionArgs(
@@ -550,6 +569,12 @@ async function startSession(
 		rows: opts.rows,
 	});
 	await tmux(newArgs);
+	try {
+		const { stdout } = await tmux(["display-message", "-p", "#{pid}"]);
+		recordServerPid(Number.parseInt(stdout.trim(), 10));
+	} catch {
+		/* the socket path in ps still marks the server */
+	}
 
 	// 2. Wire the pipe-pane logger
 	const pipeArgs = buildPipePaneArgs(sessionId, logPath);

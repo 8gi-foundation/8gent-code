@@ -24,6 +24,8 @@ import {
 	resolveStreamIdleMs,
 	resolveTurnTimeoutMs,
 } from "../eight/turn-timeout";
+import { closeSync, constants as fsc, fchmodSync, fstatSync, mkdirSync, openSync, writeSync } from "node:fs";
+import { dirname } from "node:path";
 import { isKnownVisionModel } from "../eight/vision-router";
 import {
 	DEFAULT_OLLAMA_BASE_URL,
@@ -209,6 +211,40 @@ export function prefixMeterSink(
 	env: Record<string, string | undefined> = process.env,
 ): ((r: ModelRound) => void) | undefined {
 	return env.EIGHT_PREFIX_METER === "1" ? (r) => writer.writeModelRound(r) : undefined;
+}
+
+/**
+ * #229 step 1: how long the first reply of a turn takes to arrive on a local
+ * run. Appends one line (time, model, prompt tokens, firstReplyMs) to the given
+ * file for the turn's first request only (share `once` across a reroute so a turn
+ * writes one line). Stops writing once the file is over 1 MB. Local file, no prompt text, never
+ * throws. Call it for on-box runs.
+ */
+export const FIRST_REPLY_LOG_MAX_BYTES = 1_000_000;
+
+export function firstReplyLog(
+	model: string,
+	file: string,
+	once: { done: boolean } = { done: false },
+): (r: ModelRound) => void {
+	return (r) => {
+		if (once.done) return;
+		once.done = true;
+		try {
+			mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+			// Never through a symlink, regular file only, mode 0600 (same as openPrivate in local-runtime.ts).
+			const fd = openSync(file, fsc.O_WRONLY | fsc.O_APPEND | fsc.O_CREAT | (fsc.O_NOFOLLOW ?? 0), 0o600);
+			try {
+				const st = fstatSync(fd);
+				if (!st.isFile() || st.size > FIRST_REPLY_LOG_MAX_BYTES) return;
+				fchmodSync(fd, 0o600);
+				const line = { at: new Date().toISOString(), model, promptTokens: r.promptTokens, firstReplyMs: r.headersMs };
+				writeSync(fd, `${JSON.stringify(line)}\n`);
+			} finally {
+				closeSync(fd);
+			}
+		} catch {}
+	};
 }
 
 /**

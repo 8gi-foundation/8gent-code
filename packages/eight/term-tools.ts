@@ -315,6 +315,26 @@ function unsubmitted(line: string, enter: boolean): string {
 const PROMPT_TAIL = 4096;
 const tail = (t: string) => (t.length > PROMPT_TAIL ? `...${t.slice(-PROMPT_TAIL)}` : t);
 
+/**
+ * A line that sets, unsets, exports or overrides an EIGHT_* or CI variable, clears the
+ * environment (`env -u`, `env -i`, `unset`, `exec -c`), or starts 8gent with --yes, -y,
+ * --infinite or -i. In a terminal session these change what the next 8gent may do without a
+ * person, so policy alone never lets them through: a person is asked, default No.
+ */
+const ALTERS_PERMISSION_ENV: RegExp[] = [
+	/\bEIGHT_[A-Za-z0-9_]*/,
+	/(?:^|[\s;&|(])CI\s*=/,
+	/\b(?:export|unset|declare|typeset|readonly|env)\b[^;&|\n]*(?:^|[\s;&|(])CI\b/,
+	/\bunset\b/,
+	/\benv\s+(?:\S+\s+)*?(?:-[A-Za-z]*[iuS][A-Za-z]*\b|-\s|--(?:unset|ignore-environment|split-string)\b)/,
+	/\bexec\s+(?:\S+\s+)*?-[A-Za-z]*c\b/,
+	/\b8gent\b[^;&|\n]*\s(?:--yes|-y|--infinite|-infinite|-i)(?=\s|$)/,
+];
+
+export function altersPermissionEnvironment(text: string): boolean {
+	return ALTERS_PERMISSION_ENV.some((re) => re.test(text));
+}
+
 /** Null when the input may go ahead, else the refusal to hand back to the agent. */
 export async function gateInput(tool: string, text: string): Promise<string | null> {
 	const pm = getPermissionManager();
@@ -340,6 +360,15 @@ export async function gateInput(tool: string, text: string): Promise<string | nu
 		if (pm.checkPermission(line) === "denied") {
 			return refuse(`blocked by security policy: ${line}`);
 		}
+	}
+
+	if (altersPermissionEnvironment(text)) {
+		const ok = await pm.askPerson(
+			"Change Permission Settings In Terminal Session",
+			"8gent wants to type a line that changes the settings an 8gent in a terminal session runs with.",
+			tail(text),
+		);
+		return ok ? null : refuse(`a person declined a line that changes permission settings: ${text}`);
 	}
 
 	if (unreadable(text)) {

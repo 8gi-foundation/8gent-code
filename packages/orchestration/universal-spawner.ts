@@ -8,9 +8,6 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import { killProcessTree, shellInvocation } from "../core/shell";
 
 // ============================================
@@ -53,6 +50,37 @@ export interface RunningCLIAgent {
 // ============================================
 
 const cliAgents = new Map<string, RunningCLIAgent>();
+
+// Detached children lead their own process group, so they no longer die with
+// our terminal's Ctrl+C / hangup. Track every live child and kill its group
+// when this process goes away, so none outlives the person who stopped us.
+const liveChildren = new Set<ChildProcess>();
+let exitCleanupInstalled = false;
+
+function killAllLiveChildren(): void {
+	for (const child of liveChildren) killProcessTree(child.pid, "SIGKILL");
+	liveChildren.clear();
+}
+
+function installExitCleanup(): void {
+	if (exitCleanupInstalled) return;
+	exitCleanupInstalled = true;
+	process.on("exit", killAllLiveChildren);
+	if (process.platform === "win32") return;
+	for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+		const handler = () => {
+			killAllLiveChildren();
+			process.removeListener(sig, handler);
+			// Re-raise only when nobody else listens, so the default exit still
+			// happens. If another listener exists it already ran for this signal
+			// and owns shutdown; re-raising would run it twice. The handler is
+			// not reinstalled after one absorbed signal; the exit handler above
+			// still covers any child spawned later.
+			if (process.listenerCount(sig) === 0) process.kill(process.pid, sig);
+		};
+		process.on(sig, handler);
+	}
+}
 let cliIdCounter = 0;
 
 function generateCLIId(): string {
@@ -79,9 +107,6 @@ export function spawnCLIAgent(
 	const id = generateCLIId();
 	const workingDirectory = options.workingDirectory || process.cwd();
 	const timeout = options.timeout || 5 * 60 * 1000; // 5 minutes
-
-	// Create a temp working directory for isolation
-	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `8gent-cli-${runtime}-`));
 
 	// Determine the actual cwd: use the project's working directory, not tmp
 	// (tmp is available for scratch if needed, but commands run in project context)
@@ -114,10 +139,18 @@ export function spawnCLIAgent(
 		env: { ...process.env, ...(options.env || {}) },
 		windowsHide: true,
 		windowsVerbatimArguments,
+		// POSIX: make the child its own process-group leader so a timeout or cancel
+		// can signal the whole group (killProcessTree uses the negative pid, and
+		// falls back to the direct child). Windows has no groups; taskkill /T walks
+		// the tree there, so the current behaviour stays.
+		detached: process.platform !== "win32",
 	});
+	liveChildren.add(proc);
+	installExitCleanup();
 
 	const promise = new Promise<CLIAgentResult>((resolve) => {
 		let settled = false;
+		let killTimer: ReturnType<typeof setTimeout> | undefined;
 
 		const timeoutHandle = setTimeout(() => {
 			if (settled) return;
@@ -125,7 +158,7 @@ export function spawnCLIAgent(
 			timedOut = true;
 			killProcessTree(proc.pid, "SIGTERM");
 			// Give it 5s to die gracefully, then SIGKILL
-			setTimeout(() => killProcessTree(proc.pid, "SIGKILL"), 5000);
+			killTimer = setTimeout(() => killProcessTree(proc.pid, "SIGKILL"), 5000);
 
 			const result: CLIAgentResult = {
 				runtime,
@@ -143,11 +176,6 @@ export function spawnCLIAgent(
 				agent.result = result;
 			}
 
-			// Clean up temp dir
-			try {
-				fs.rmSync(tmpDir, { recursive: true, force: true });
-			} catch {}
-
 			resolve(result);
 		}, timeout);
 
@@ -159,6 +187,9 @@ export function spawnCLIAgent(
 		});
 
 		proc.on("close", (code) => {
+			liveChildren.delete(proc);
+			// The child is reaped: its pid may be reused, so never SIGKILL it later.
+			if (killTimer) clearTimeout(killTimer);
 			if (settled) return;
 			settled = true;
 			clearTimeout(timeoutHandle);
@@ -179,15 +210,11 @@ export function spawnCLIAgent(
 				agent.result = result;
 			}
 
-			// Clean up temp dir
-			try {
-				fs.rmSync(tmpDir, { recursive: true, force: true });
-			} catch {}
-
 			resolve(result);
 		});
 
 		proc.on("error", (err) => {
+			liveChildren.delete(proc);
 			if (settled) return;
 			settled = true;
 			clearTimeout(timeoutHandle);
@@ -207,11 +234,6 @@ export function spawnCLIAgent(
 				agent.completedAt = new Date();
 				agent.result = result;
 			}
-
-			// Clean up temp dir
-			try {
-				fs.rmSync(tmpDir, { recursive: true, force: true });
-			} catch {}
 
 			resolve(result);
 		});
@@ -293,9 +315,7 @@ export function resetCLIAgents(): void {
 	// Kill any still-running processes
 	for (const agent of cliAgents.values()) {
 		if (!agent.completedAt && agent.process) {
-			try {
-				agent.process.kill("SIGTERM");
-			} catch {}
+			killProcessTree(agent.process.pid, "SIGTERM");
 		}
 	}
 	cliAgents.clear();

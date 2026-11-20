@@ -151,7 +151,15 @@ export function usePerTabAgents() {
 	// Reactive map driving UI - one boolean per tab id.
 	const [processingMap, setProcessingMap] = useState<Record<string, boolean>>({});
 
+	// The same fact, readable the moment it changes (state is one render behind).
+	// The status row and the submit routing both come from this one pair, so a
+	// turn cannot read as idle in one place and busy in the other (#178).
+	const runningRef = useRef<Set<string>>(new Set());
+	const isTabRunning = useCallback((tabId: string) => runningRef.current.has(tabId), []);
+
 	const setTabProcessing = useCallback((tabId: string, value: boolean) => {
+		if (value) runningRef.current.add(tabId);
+		else runningRef.current.delete(tabId);
 		setProcessingMap((prev) => {
 			if (Boolean(prev[tabId]) === value) return prev;
 			const next = { ...prev };
@@ -235,6 +243,7 @@ export function usePerTabAgents() {
 			agentsRef.current.delete(tabId);
 			promisesRef.current.delete(tabId);
 			labelsRef.current.delete(tabId);
+			runningRef.current.delete(tabId);
 			setProcessingMap((prev) => {
 				if (!(tabId in prev)) return prev;
 				const next = { ...prev };
@@ -275,6 +284,7 @@ export function usePerTabAgents() {
 		// state
 		processingMap,
 		isTabProcessing,
+		isTabRunning,
 		setTabProcessing,
 		// agent registry
 		getAgent,

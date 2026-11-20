@@ -15,6 +15,7 @@ import type { ToolSet } from "ai";
 import { z } from "zod";
 import { activeShellKind, killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
+import { judgedShellEnv, withShellEnv } from "../eight/harness/child-env";
 import { readOnlyChain, readPrefixesFor } from "../eight/read-chain";
 import {
 	OFFICE_TOOLS,
@@ -880,12 +881,16 @@ const runCommand = tool({
 		// `a; b` and `a && b` run when every part is read-only (#4715).
 		if (!validation.safe && !readOnlyChain(command))
 			return `[BLOCKED] ${validation.reason}. Command: ${command}`;
-		const refused = gateCommand(command);
-		if (refused) return refused;
-		const startedAt = Date.now();
-		const output = await runShellCommand(command, cwd);
-		// Report images the command drew, and any cut off at an edge (#3580).
-		return withImagesWritten(output, cwd, startedAt);
+		// This shell keeps the full process environment: every check below and the spawn
+		// read it through judgedShellEnv, so they agree on what `$VAR` is.
+		return withShellEnv(toolShellEnv(), async () => {
+			const refused = gateCommand(command);
+			if (refused) return refused;
+			const startedAt = Date.now();
+			const output = await runShellCommand(command, cwd);
+			// Report images the command drew, and any cut off at an edge (#3580).
+			return withImagesWritten(output, cwd, startedAt);
+		});
 	},
 });
 
@@ -1862,7 +1867,7 @@ async function runShellCommand(
 			cwd,
 			stdio: ["pipe", "pipe", "pipe"],
 			processGroup: true,
-			env: toolShellEnv(),
+			env: judgedShellEnv(),
 		});
 
 		let stdout = "";

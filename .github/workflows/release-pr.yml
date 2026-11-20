@@ -131,8 +131,10 @@ jobs:
         env:
           NEXT: ${{ steps.next.outputs.next }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Release commits are authored and committed by the maintainer, not
+          # the bot (12 Nov 2026). Author and committer both come from here.
+          git config user.name "James Spalding"
+          git config user.email "podjamz@gmail.com"
           git checkout -B release/next
           bun scripts/release-version.ts apply "$NEXT"
           # Hand-written notes still under [Unreleased] (from before #3575) are

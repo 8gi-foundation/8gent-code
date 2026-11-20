@@ -1,8 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { askOneYes, askOneYesDetailed, refuseIfUnattended, unattended } from "./one-yes";
+import {
+	OWNED_PANE_MAX_HOPS,
+	type ProcessLookup,
+	askOneYes,
+	askOneYesDetailed,
+	forcedUnattended,
+	inOwnedPane,
+	refuseIfUnattended,
+	unattended,
+} from "./one-yes";
 
 function rig(over: { tty?: boolean } = {}) {
 	const input = Object.assign(new PassThrough(), { isTTY: over.tty ?? true });
@@ -223,4 +233,88 @@ describe("refuseIfUnattended, for prompts the TUI shows itself (#4919)", () => {
 			expect(r.ledger[0]).toMatchObject({ event: "one-yes-resolved-no", label: "judge-install" });
 		});
 	}
+});
+
+// S0 of the terminal session ownership spec: a child 8gent in an owned terminal session has
+// nobody present. The marker is the process's parents, not a variable a shell can strip.
+describe("forcedUnattended and the owned-session ancestry", () => {
+	const DIR = "/home/person/.8gent/term";
+	type Rows = Record<number, [number, string]>;
+	/** A process table as `ps -o ppid=,command= -p <pid>` shows it: pid -> [ppid, command]. */
+	const table =
+		(rows: Rows): ProcessLookup =>
+		(pid) =>
+			rows[pid] ? { ppid: rows[pid][0], command: rows[pid][1] } : undefined;
+	const inPane = (rows: Rows, dirs = [DIR]) => inOwnedPane({ pid: 100, lookup: table(rows), dirs });
+
+	test("each marker alone forces it, and neither does not", () => {
+		expect(forcedUnattended({ EIGHT_UNATTENDED: "1" }, false)).toBe(true);
+		expect(forcedUnattended({}, true)).toBe(true);
+		expect(forcedUnattended({}, false)).toBe(false);
+		expect(forcedUnattended({ EIGHT_UNATTENDED: "0" }, false)).toBe(false);
+		expect(forcedUnattended({ EIGHT_UNATTENDED: "" }, false)).toBe(false);
+	});
+
+	test("a tmux server whose -S socket is under the app's term directory is found", () => {
+		const sock = `tmux -S ${DIR}/123-abcd1234.sock new-session -d -s x sleep 99`;
+		expect(inPane({ 100: [90, "bun run 8gent"], 90: [80, "/bin/sh -c cat"], 80: [1, sock] })).toBe(
+			true,
+		);
+		const titled = `tmux: server (${DIR}/1-ab.sock)`;
+		expect(inPane({ 100: [90, "bun"], 90: [80, "sh"], 80: [1, titled] })).toBe(true);
+	});
+
+	test("a person's own tmux is not found, nor a tmux on a socket elsewhere", () => {
+		for (const cmd of [
+			"tmux",
+			"tmux new -s work",
+			"tmux: server (/private/tmp/tmux-501/default)",
+			"tmux -S /tmp/mine.sock new-session",
+			`tmux new-session -d "cat ${DIR}/x"`,
+			"tmux -S /elsewhere/.8gent/term/1-ab.sock new-session",
+		]) {
+			expect(inPane({ 100: [90, "bun"], 90: [80, "zsh"], 80: [1, cmd] })).toBe(false);
+		}
+	});
+
+	test("a program other than tmux that names the socket is not a server", () => {
+		expect(inPane({ 100: [90, "bun"], 90: [1, `vim -S ${DIR}/1-ab.sock`] })).toBe(false);
+	});
+
+	test("a server that hides its socket is found by the pid its spawner recorded", () => {
+		const home = mkdtempSync(join(tmpdir(), "oy-"));
+		const dir = join(home, ".8gent", "term");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "4242-deadbeef.pid"), "4242\n80\n");
+		const hidden: Rows = { 100: [90, "bun"], 90: [80, "sh"], 80: [1, "tmux: server"] };
+		try {
+			expect(inPane(hidden, [dir])).toBe(true);
+			// A recorded pid that belongs to something other than tmux proves nothing.
+			expect(inPane({ ...hidden, 80: [1, "zsh"] }, [dir])).toBe(false);
+			// No record: a hidden tmux is not claimed.
+			rmSync(join(dir, "4242-deadbeef.pid"));
+			expect(inPane(hidden, [dir])).toBe(false);
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("the walk is capped, ends at pid 1, and an unreadable table answers false", () => {
+		const loop: Rows = {};
+		for (let i = 100; i < 200; i++) loop[i] = [i + 1, "sh"];
+		let reads = 0;
+		const counted: ProcessLookup = (pid) => {
+			reads++;
+			return table(loop)(pid);
+		};
+		expect(inOwnedPane({ pid: 100, lookup: counted, dirs: [DIR] })).toBe(false);
+		expect(reads).toBeLessThanOrEqual(OWNED_PANE_MAX_HOPS + 1);
+		expect(inPane({})).toBe(false);
+	});
+
+	test("unattended() is true with a terminal on both ends when EIGHT_UNATTENDED is set", () => {
+		const tty = { isTTY: true };
+		expect(unattended({}, tty, tty)).toBe(false);
+		expect(unattended({ EIGHT_UNATTENDED: "1" }, tty, tty)).toBe(true);
+	});
 });

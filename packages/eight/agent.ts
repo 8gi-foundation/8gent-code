@@ -22,7 +22,7 @@ import {
 } from "../ai/harness-profile";
 import { notePlanTask } from "../ai/plan-file";
 import { postMessageAvailable } from "../ai/post-message";
-import { modelSupportsVision, prefixMeterSink, shouldDeclareTools } from "../ai/text-tool-endpoint";
+import { firstReplyLog, modelSupportsVision, prefixMeterSink, shouldDeclareTools } from "../ai/text-tool-endpoint";
 import {
 	emptyReplyNote,
 	emptyReplyStall,
@@ -2174,6 +2174,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			startedAt: chatStartTime,
 			nudgeFraction: this.harnessProfileFor(providerModel, true).nudgeFraction,
 		});
+		const firstReplyOnce = { done: false }; // one first-reply line per turn, even across a reroute
 		const runTurn = (provider: string, model: string) => {
 			// #3487: the built prompt was judged on-box for the session's runtime. If
 			// this turn goes to a provider whose endpoint is off this machine (a
@@ -2207,7 +2208,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				declareDescriptions: this.config.headless !== true,
 				// #3655: per-request prefill/decode counts into the session log,
 				// only with EIGHT_PREFIX_METER=1.
-				onRound: prefixMeterSink(this.sessionWriter),
+				onRound: (() => {
+					const meter = prefixMeterSink(this.sessionWriter);
+					if (!runsOnBox(provider, this.config.baseUrl || resolveTextToolEndpoint(provider))) return meter;
+					const first = firstReplyLog(model, path.join(resolveHome(), ".8gent", "logs", "prefill-times.jsonl"), firstReplyOnce);
+					return (r) => {
+						meter?.(r);
+						first(r);
+					};
+				})(),
 				onUsage,
 				// #4462: a profile with think false (local qwen3.8) answers without
 				// reasoning; buildTextToolCall sends the switch to Ollama only.

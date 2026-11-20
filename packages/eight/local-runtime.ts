@@ -100,7 +100,12 @@ export function runtimeEnv(
  * and a key we generate for this start (llama-server otherwise answers any web page: its
  * CORS allows every origin). /health is public by design, everything else needs the key.
  */
-export function llamaServerArgs(gguf: string, keyFile: string): string[] {
+export function llamaServerArgs(
+	gguf: string,
+	keyFile: string,
+	env: Env = process.env,
+	warn: (msg: string) => void = console.warn,
+): string[] {
 	return [
 		"-m",
 		gguf,
@@ -115,7 +120,25 @@ export function llamaServerArgs(gguf: string, keyFile: string): string[] {
 		"--no-slots",
 		"--api-key-file",
 		keyFile,
+		...kvCacheArgs(env.EIGHT_KV_CACHE, warn),
 	];
+}
+
+const KV_TYPES = ["q8_0", "q4_0"];
+const kvWarned = new Set<string>();
+
+/**
+ * Opt-in KV cache quantization with llama.cpp's stock cache-type flags. Unset adds nothing.
+ * An unknown value warns once and adds nothing. Nothing is downloaded or installed.
+ */
+export function kvCacheArgs(value: string | undefined, warn: (msg: string) => void): string[] {
+	if (value === undefined || value === "") return [];
+	if (KV_TYPES.includes(value)) return ["--cache-type-k", value, "--cache-type-v", value];
+	if (!kvWarned.has(value)) {
+		kvWarned.add(value);
+		warn(`EIGHT_KV_CACHE=${value} is not supported (use q8_0 or q4_0); starting without it.`);
+	}
+	return [];
 }
 
 // ── files ────────────────────────────────────────────────────────────────

@@ -9,6 +9,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.47] - 2026-11-11
+
+### Fixed
+- term: an 8gent inside an owned terminal session has nobody present (S0) ([#204](https://github.com/8gi-foundation/8gent-code/pull/204))
+- eight: sort the file-links walk so a truncated search keeps the same files on every filesystem ([#201](https://github.com/8gi-foundation/8gent-code/pull/201))
+- tui: a message sent while no turn runs starts a turn ([#183](https://github.com/8gi-foundation/8gent-code/pull/183))
+- term: term_* tools reach only sessions they started, on a private tmux server, ended on quit ([#148](https://github.com/8gi-foundation/8gent-code/pull/148))
+- eight: native tool path reads one error-aware outcome for every consumer ([#152](https://github.com/8gi-foundation/8gent-code/pull/152))
+
 ## [0.20.46] - 2026-11-10
 
 ### Fixed

@@ -11,9 +11,19 @@ const PATTERNS: Array<[RegExp, string]> = [
 		/(?<=(?:secret|aws)[_\s-]?(?:access)?[_\s-]?key['":\s=]+)[A-Za-z0-9/+=]{40}/gi,
 		"[REDACTED_AWS_SECRET]",
 	],
-	// GitHub tokens (classic + fine-grained)
-	[/gh[ps]_[A-Za-z0-9_]{36,255}/g, "[REDACTED_GITHUB_TOKEN]"],
+	// GitHub tokens: personal (ghp_), OAuth (gho_), user-to-server (ghu_),
+	// server-to-server (ghs_) and refresh (ghr_), plus fine-grained PATs
+	[/gh[pousr]_[A-Za-z0-9_]{36,255}/g, "[REDACTED_GITHUB_TOKEN]"],
 	[/github_pat_[A-Za-z0-9_]{22,255}/g, "[REDACTED_GITHUB_PAT]"],
+	// Google API keys: "AIza" then 35 url-safe characters
+	[/AIza[0-9A-Za-z_-]{35}/g, "[REDACTED_GOOGLE_API_KEY]"],
+	// Hugging Face user access tokens: "hf_" then 34 letters or digits, standing alone
+	[/(?<![A-Za-z0-9_])hf_[A-Za-z0-9]{34}(?![A-Za-z0-9_])/g, "[REDACTED_HF_TOKEN]"],
+	// GitLab personal access tokens: "glpat-" then 20 or more url-safe characters,
+	// with the optional ".<version>.<id>" tail of the newer routable form
+	[/glpat-[A-Za-z0-9_-]{20,}(?:\.[A-Za-z0-9_-]+)*/g, "[REDACTED_GITLAB_TOKEN]"],
+	// npm access tokens: "npm_" then 36 letters or digits (npm_config_* names have underscores)
+	[/(?<![A-Za-z0-9_])npm_[A-Za-z0-9]{36}(?![A-Za-z0-9_])/g, "[REDACTED_NPM_TOKEN]"],
 	// Generic API keys (key=... or key: ...)
 	[/(?<=(?:api[_-]?key|apikey|token|secret)['":\s=]+)[A-Za-z0-9\-_.]{20,}/gi, "[REDACTED_API_KEY]"],
 	// JWTs (three base64url segments separated by dots)
@@ -43,6 +53,15 @@ const PATTERNS: Array<[RegExp, string]> = [
 	[
 		/\b([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)[A-Za-z0-9_]*)(\s*[=:]\s*)(?!\[REDACTED)[^\s'"]+/g,
 		"$1$2[REDACTED_SECRET]",
+	],
+	// password= and password: in any case (the rule above is upper case only, so
+	// "monkey: x" or "author: y" are not touched). The name must end in pass(word|wd),
+	// so "passwordless: true" and prose like "the password field" are left alone.
+	// A quoted JSON key ("password":) is matched too, and a quoted value is redacted
+	// up to its closing quote, so "correct horse battery" does not leak its tail.
+	[
+		/\b([A-Za-z0-9_]*pass(?:word|wd))(["']?\s*[=:]\s*)(["']?)(?!\[REDACTED)(?:(?<=")[^"\n]+|(?<=')[^'\n]+|[^\s'"]+)/gi,
+		"$1$2$3[REDACTED_SECRET]",
 	],
 	// Credentials inside a URL: scheme://user:pass@host keeps scheme and host
 	[/(?<=:\/\/)[^\s/:@]{1,256}:[^\s/@]{1,256}(?=@)/g, "[REDACTED_URL_CREDENTIALS]"],
