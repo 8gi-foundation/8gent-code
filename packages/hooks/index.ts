@@ -48,6 +48,8 @@ export interface HookContext {
 	errorStack?: string;
 
 	// Result context (for onComplete)
+	/** Set to "failed" when the turn ended in an error, a stop or a timeout; absent on success. */
+	status?: "failed";
 	result?: string;
 	tokenCount?: number;
 	duration?: number;
