@@ -10,6 +10,7 @@
 
 import { Database } from "bun:sqlite";
 import { admitMemory } from "./admission.js";
+import { prepareDbFile, tightenDbFiles } from "./db-file-mode.js";
 import { type EmbeddingProvider, cosineSimilarity } from "./embeddings.js";
 import { safeJsonParse, safeJsonStringify } from "./json-guard.js";
 import { type PurgeResult, type PurgeScope, purgeMemory } from "./purge.js";
@@ -194,6 +195,8 @@ export class MemoryStore {
 		// Must run before the first Database is opened in this process.
 		ensureSqliteSupportsExtensions();
 
+		// Owner-only on disk: the db can hold copies of private session turns.
+		if (typeof dbPath === "string") prepareDbFile(dbPath);
 		this.db = trackStatements(
 			typeof dbPath === "string" ? new Database(dbPath, { create: true }) : dbPath,
 		);
@@ -210,6 +213,7 @@ export class MemoryStore {
 			// Gracefully degrade if pragmas fail (some SQLite builds restrict them)
 			console.warn("[memory] PRAGMA init warning:", (err as Error).message);
 		}
+		if (typeof dbPath === "string") tightenDbFiles(dbPath);
 
 		// Load sqlite-vec extension (best-effort). On failure we silently
 		// fall back to the legacy JS cosine search path.
