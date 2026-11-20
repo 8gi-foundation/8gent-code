@@ -115,9 +115,12 @@ policies:
 
   - name: "extension-call-unattended-require-approval"
     action: extension_call
-    condition: "attended equals false"
+    # run_approved is true only after `8gent ext approve-run` signed this run (#47). The engine
+    # sets it to false for every extension_call that does not say exactly true, so a caller
+    # that omits it fails closed. A rule of your own on "attended equals false" still applies.
+    condition: "attended equals false and run_approved equals false"
     decision: require_approval
-    message: "An extension tool needs a person at the keyboard: this session is unattended (daemon, channel, Table or a headless run without a terminal), so it was not run."
+    message: "An extension tool needs a person at the keyboard: this session is unattended (daemon, channel, Table or a headless run without a terminal), so it was not run. Run 8gent ext approve-run <name> to allow one run."
 
   # ── File access ───────────────────────────────────────────────────────────────
 

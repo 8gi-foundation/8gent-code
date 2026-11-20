@@ -105,6 +105,8 @@ COMMANDS:
                               or npm); never installs a lower version. --check only reports.
   permissions                 Diagnose macOS Accessibility + Screen Recording grants for your terminal
                               Use --open to auto-launch System Settings panes for missing grants
+  ext enable <name>           Review and turn on an installed extension (asks, default No)
+  ext approve-run <name>      Let an enabled extension start in one unattended run (--ttl, default 1h)
   keys set <provider>         Save an API key from a hidden prompt (works over SSH and on a phone)
   keys [reload|status|open]   Open ~/.8gent/keys.env in your editor for API keys
                               "keys reload" re-reads the file into the running env (default action)
@@ -707,6 +709,13 @@ async function main() {
 		case "env":
 			await keysCommand(restArgs);
 			break;
+
+		case "ext": {
+			// Both ask a person at a terminal, default No (packages/extensions/process.ts).
+			const { runExtCli } = await import("../packages/extensions/process.ts");
+			process.exitCode = await runExtCli(restArgs);
+			break;
+		}
 
 		case "me": {
 			// #4708: `8gent me import <dir>` copies a memory folder into ~/.8gent/me/.

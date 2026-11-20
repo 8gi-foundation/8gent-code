@@ -804,7 +804,12 @@ export function evaluatePolicy(
 	action: PolicyActionType | string,
 	given: PolicyContext,
 ): PolicyDecision {
-	const context = withResolvedPath(action, given);
+	// An extension call is run-approved only when the caller says exactly true (#47); anything
+	// else is false, so a caller that omits the field never slips past the unattended rule.
+	const context = withResolvedPath(
+		action,
+		action === "extension_call" ? { ...given, run_approved: given.run_approved === true } : given,
+	);
 	const guard = pathGuardGate(action, context);
 	if (guard) return guard;
 
