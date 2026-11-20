@@ -6,7 +6,7 @@ The first four abilities that run on the Eight vessel without a sandbox.
 
 All persistent paths respect `EIGHT_DATA_DIR`. When unset, defaults to `~/.8gent/`.
 
-On Fly.io the volume is mounted at `/root/.8gent/` and `HOME=/root`, so the default works. Setting `EIGHT_DATA_DIR=/data` would redirect all storage to a different mount point.
+In a container, mount a persistent volume at the data directory (default `~/.8gent/`), or set `EIGHT_DATA_DIR` to redirect all storage to a different mount point.
 
 `EIGHT_TURN_TIMEOUT_MS` bounds a single provider attempt inside the agent's failover loop by wall-clock time. On the native tool path (a non-streamed generate(), which gives no progress signal) it defaults to `300000` (5 minutes). On the text-tool path a step is judged by progress instead (see `EIGHT_STREAM_IDLE_MS`), so there the wall clock is only a safety net and defaults to `1200000` (20 minutes); setting this variable makes its value the ceiling on both paths. On timeout the attempt is aborted and treated as a provider failure, so the chain fails over and an exhausted chain returns a clean error instead of hanging the turn (and any WebSocket caller) until the 30-minute session watchdog. Lower it for fast cloud-only setups that want quicker failover; raise it when a local model legitimately needs longer than the ceiling for one answer. Values of `0`, negative, or non-numeric fall back to the default; a 1000 ms floor is enforced so an attempt is never effectively instant.
 
@@ -27,12 +27,12 @@ On Fly.io the volume is mounted at `/root/.8gent/` and `HOME=/root`, so the defa
 **Cloud readiness:**
 - SQLite WAL mode for concurrent reads
 - Global store path uses `EIGHT_DATA_DIR` env var
-- Data persists on the Fly.io volume across container restarts
+- Data persists on the mounted volume across container restarts
 
 **How to test:**
 ```
 1. Send: "Remember that James prefers dark mode"
-2. Restart the vessel (fly machine restart)
+2. Restart the vessel
 3. Send: "What does James prefer?"
 4. Verify the response mentions dark mode
 ```
@@ -55,9 +55,9 @@ On Fly.io the volume is mounted at `/root/.8gent/` and `HOME=/root`, so the defa
 
 **How to test:**
 ```
-1. Send: "Search the web for 'Fly.io Dublin data center'"
+1. Send: "Search the web for 'Dublin data center'"
 2. Verify results come back with titles and URLs
-3. Send: "Fetch the content from https://fly.io/docs/"
+3. Send: "Fetch the content from https://www.rfc-editor.org/rfc/rfc6455"
 4. Verify readable text is returned
 ```
 

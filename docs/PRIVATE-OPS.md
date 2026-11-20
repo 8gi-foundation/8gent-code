@@ -11,7 +11,7 @@ Some files describe how one operator runs their own machines. They have no place
 
 ## What to use instead
 
-- Deploy the daemon from the repository `Dockerfile` and `fly.toml`, or run it locally with `bun run tui`.
+- Deploy the daemon from the repository `Dockerfile` on a host you control, or run it locally with `bun run tui`.
 - Configuration that used to be written into scripts and docs is read from the environment. The names are listed in the files that read them, for example `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_GROUP_VOICE_OPERATOR_ID`, `TELEGRAM_REFUSED_BOT_USERNAMES`, `OPERATOR_BOT_TOKEN_SHA256`, `MODEL_PROXY_URL`, `CONTROL_PLANE_URL`, `VESSEL_URL` and `DAEMON_URL`.
 - Test fixtures use documentation values only: `example.com` addresses, `192.0.2.x`, chat ids in the `100000001` and `-200000001` ranges, and role names such as `Person-A`.
 

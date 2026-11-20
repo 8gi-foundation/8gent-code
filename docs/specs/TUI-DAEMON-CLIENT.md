@@ -21,7 +21,7 @@ session for another local user or a web page.
   are the transport.
 - No merge of the TUI's local memory store with the daemon's. A linked session
   uses the daemon's memory, full stop. Reconciling two stores is a separate issue.
-- No remote (non-loopback) TUI. Fly.io and phone relay stay as they are.
+- No remote (non-loopback) TUI. The phone relay stays as it is.
 - No prompt access for non-operator Telegram senders in this work. The prompt
   tier stays refused until it gets its own deny-by-default session (section 5.4).
 - No yolo across surfaces. `yolo.json` stays TUI-only and in-process-only.

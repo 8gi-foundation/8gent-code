@@ -28,7 +28,7 @@ packages/
   tools/            # Browser, web, actuators, utilities
   music/            # DJ, radio, synth, MusicGen
   pet/              # Companion system (terminal + dock)
-  daemon/           # Persistent vessel daemon (Fly.io)
+  daemon/           # Persistent vessel daemon
   kernel/           # RL fine-tuning pipeline (GRPO)
   ast-index/        # Import graph, change impact estimation
   proactive/        # GitHub bounty scanner, opportunity pipeline
