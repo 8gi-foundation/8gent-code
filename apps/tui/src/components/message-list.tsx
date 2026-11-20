@@ -1166,11 +1166,11 @@ export function CompactMessageItem({ message }: { message: Message }) {
 		tool: " ",
 	};
 
-	const roleColors: Record<string, "yellow" | "cyan" | "green" | "magenta"> = {
+	const roleColors: Record<string, string> = {
 		user: "yellow",
 		assistant: "cyan",
 		system: "cyan",
-		tool: "magenta",
+		tool: t.teal,
 	};
 
 	if (message.role === "tool") {

@@ -7,6 +7,7 @@
 
 import { Box, Text } from "ink";
 import React, { useState, useEffect, useMemo } from "react";
+import { t } from "../theme.js";
 
 // ── Status Phases ──────────────────────────────────────────────────────
 
@@ -157,7 +158,7 @@ export function ThinkingView({
 					<Text dimColor> · Tools: </Text>
 					<Text color="cyan">{toolCount}</Text>
 					<Text dimColor> · </Text>
-					<Text color="magenta">{stageLabel}</Text>
+					<Text color={t.teal}>{stageLabel}</Text>
 				</Box>
 			)}
 
