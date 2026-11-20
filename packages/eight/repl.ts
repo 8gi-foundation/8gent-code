@@ -685,6 +685,8 @@ async function handlePlanCommands(trimmed: string, agent: Agent): Promise<boolea
 		console.log(`  Model: ${agent.getModel()}`);
 		console.log(`  Working Dir: ${process.cwd()}`);
 		console.log(`  History: ${agent.getHistoryLength()} messages`);
+		console.log("  Roles:");
+		for (const line of agent.describeRoles()) console.log(`    ${line}`);
 		return true;
 	}
 
