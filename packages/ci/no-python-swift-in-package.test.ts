@@ -78,11 +78,14 @@ function packedPaths(run: () => PackRun = runPacker): string[] {
 }
 
 describe("installed package has no Python or Swift (#4567)", () => {
+	// Runs a real `npm pack --dry-run`. On the build machine that took 1.2-1.6 s
+	// idle and 5041 ms in a loaded rerun, which hit bun's 5000 ms default and
+	// refused #184 (8gent-code#200). 30 s leaves room; runPacker still caps at 120 s.
 	test("no .py or .swift file is in the packed surface", () => {
 		const paths = packedPaths();
 		const offenders = findOffenders(paths);
 		expect(offenders, failureMessage(offenders)).toEqual([]);
-	});
+	}, 30_000);
 
 	test("the check itself names offenders and honours the exception list", () => {
 		const sample = ["bin/8gent-run.js", "x/a.py", "y/B.SWIFT", "README.md"];
