@@ -79,8 +79,41 @@ function unquoteWord(w: string): string {
 const bare = (w: string): string => w.replace(/^["'`$(]+|["'`)]+$/g, "");
 const base = (w: string): string => bare(w).replace(/^.*\//, "");
 
+/** Interpreters whose quoted `-c`/`-e` body is that language's code, not shell words (#298). */
+const CODE_INTERPRETERS = new Set(["python", "node", "bun", "deno", "ruby", "perl"]);
+
+/**
+ * Spans of each plain '...' string handed to a code interpreter (`python3 -c '...'`). The shell
+ * never expands inside it and the interpreter is not a shell, so `d["train"]` there is a Python
+ * subscript, not a glob command word (#298). A shell body (`bash -c '...'`) is never a span.
+ */
+function codeBodies(command: string): Array<[number, number]> {
+	const spans: Array<[number, number]> = [];
+	let segStart = 0;
+	for (let i = 0; i < command.length; i++) {
+		const ch = command[i];
+		if (ch === "\\") {
+			i++;
+		} else if (ch === '"') {
+			for (i++; i < command.length && command[i] !== '"'; i++) if (command[i] === "\\") i++;
+		} else if (ch === "'") {
+			const end = command.indexOf("'", i + 1);
+			if (end < 0) break;
+			const words = command.slice(segStart, i).trim().split(/\s+/);
+			let k = 0;
+			while (k < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[k] ?? "")) k++;
+			const prog = base(words[k] ?? "").replace(/[\d.]+$/, "");
+			if (command[i - 1] !== "$" && CODE_INTERPRETERS.has(prog)) spans.push([i, end]);
+			i = end;
+		} else if (/[;&|\n(]/.test(ch ?? "")) {
+			segStart = i + 1;
+		}
+	}
+	return spans;
+}
+
 /** True when this one simple command, after unwrapping env/sudo/xargs and the like, makes sound. */
-function segmentIsAudio(segment: string, command: string): boolean {
+function segmentIsAudio(segment: string, command: string, inCode = false): boolean {
 	const words = segment.trim().split(/\s+/).filter(Boolean);
 	let i = 0;
 	for (;;) {
@@ -103,16 +136,19 @@ function segmentIsAudio(segment: string, command: string): boolean {
 	// must not be an audio program, and must not still build its name from a variable.
 	const word = unquoteWord(words[i] ?? "");
 	// A command word that is a glob, a brace expansion or the head of a $( ) cannot be read.
+	// Inside a code interpreter's quoted body there is no shell command word, so it does not
+	// apply there; audio program names are still checked below and by the bare-name backstop.
 	if (
-		word === "$" ||
-		/^[A-Za-z0-9_./-]+\$$/.test(word) ||
-		(word !== "[" &&
-			word !== "[[" &&
-			NAMEISH.test(word) &&
-			/[*?]|\[.+\]|\{[^}]*(,|\.\.)[^}]*\}/.test(word))
+		!inCode &&
+		(word === "$" ||
+			/^[A-Za-z0-9_./-]+\$$/.test(word) ||
+			(word !== "[" &&
+				word !== "[[" &&
+				NAMEISH.test(word) &&
+				/[*?]|\[.+\]|\{[^}]*(,|\.\.)[^}]*\}/.test(word)))
 	)
 		return true;
-	if (/\$[A-Za-z_{(]/.test(word)) return true;
+	if (!inCode && /\$[A-Za-z_{(]/.test(word)) return true;
 	const prog = base(word);
 	if (AUDIO_PROGRAMS.has(prog)) return true;
 	if (prog === "osascript") {
@@ -157,8 +193,13 @@ export function isAudioCommand(command: string): boolean {
 		)
 	)
 		return true;
+	const spans = codeBodies(command);
+	let at = 0;
 	for (const segment of command.split(/&&|\|\||[;|&\n`()]/)) {
-		if (segmentIsAudio(segment, command)) return true;
+		const start = command.indexOf(segment, at);
+		at = start + segment.length;
+		const inCode = spans.some(([s, e]) => start > s && start < e);
+		if (segmentIsAudio(segment, command, inCode)) return true;
 	}
 	// A line that names an audio program and hands text to a shell (`echo say hi | sh`).
 	if (BARE_NAME.test(command) && SHELL_WORD.test(command)) return true;

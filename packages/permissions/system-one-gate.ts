@@ -510,7 +510,9 @@ function blockMessage(
 	command: string,
 	hint?: string,
 ): string {
-	const fields = `verdict=${g.verdict} pYes=${fmtP(g.pYes)} backend=${g.backend} model=${g.model} thresholds=${thresholds}`;
+	// The rule that fired, so the reader knows which check stopped it (#298).
+	const rule = g.rule ? ` rule=${g.rule}` : "";
+	const fields = `verdict=${g.verdict}${rule} pYes=${fmtP(g.pYes)} backend=${g.backend} model=${g.model} thresholds=${thresholds}`;
 	// A block is final: no card was shown and no approval can pass it. Say so,
 	// so the reply never tells the person their approval is what is missing (#3124).
 	const final =
@@ -601,9 +603,14 @@ async function systemOneGateChecks(
 					pYes: Number.NaN,
 					backend: "allowlist",
 					model: "allowlist",
+					rule: "audio",
 					reason: refuse,
 				};
-				return { run: false, guard, message: blockMessage(guard, "unknown", refuse, command) };
+				return {
+					run: false,
+					guard,
+					message: blockMessage(guard, "unknown", `audio rule (s1-audio): ${refuse}`, command),
+				};
 			}
 		}
 	}
