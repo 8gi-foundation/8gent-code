@@ -105,6 +105,21 @@ describe("#298 a NaN score never blocks a read-only python3 -c silently", () => 
 		// 4. A quoted argument to a script is not a -c/-e body.
 		["script argument", `python3 script.py 'x; /usr/bin/sa? hi'`],
 		["script argument variable", `python3 script.py 'x; $Y'`],
+		// 8SO re-read at 8336ba9: a class opening with ] (sh reads []a] as "] or a").
+		["code body, class opening with ]", `python3 -c 'import os; os.system("/usr/bin/s[]a]y hi")'`],
+		["code body, negated ] class", `python3 -c 'import os; os.system("/usr/bin/s[!]x]y hi")'`],
+		["code body, -ic flags", `python3 -ic 'import os; os.system("/usr/bin/s[]a]y hi")'`],
+		[
+			"node body, class opening with ]",
+			`node -e 'require("child_process").execSync("/usr/bin/s[]a]y hi")'`,
+		],
+		// Negated and POSIX classes, at top level and inside a code body.
+		["negated class !", "/usr/bin/s[!x]y hi"],
+		["negated class ^", "/usr/bin/s[^x]y hi"],
+		["posix class", "/usr/bin/s[[:alpha:]]y hi"],
+		["code body, negated class !", `python3 -c 'import os; os.system("/usr/bin/s[!x]y hi")'`],
+		["code body, negated class ^", `python3 -c 'import os; os.system("/usr/bin/s[^x]y hi")'`],
+		["code body, posix class", `python3 -c 'import os; os.system("/usr/bin/s[[:alpha:]]y hi")'`],
 	])("still refused: %s", (_name, command) => {
 		expect(isAudioCommand(command)).toBe(true);
 	});

@@ -58,8 +58,15 @@ const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 /** Wrapper flags that take a value as the next word. */
 const FLAG_WITH_VALUE = new Set(["-u", "-g", "-h", "-p", "-C", "-I", "-n", "-P", "-s", "-S"]);
 
-/** A word that looks like a command name or path: the pieces of a quote-blind split do not. */
-const NAMEISH = /^[A-Za-z\/.~{[][A-Za-z0-9_.\/{}[\]*?,~-]*$/;
+/**
+ * A word that looks like a command name or path: the pieces of a quote-blind split do not.
+ * `!` and `^` negate a glob class (`s[!x]y`, `s[^x]y`), 8SO #303. A POSIX class (`[:alpha:]`)
+ * is folded first, so a bare `:` (a Python slice `h[0:2]`) still reads as not a name.
+ */
+const NAMEISH_CHARS = /^[A-Za-z\/.~{[][A-Za-z0-9_.\/{}[\]*?,~!^-]*$/;
+const NAMEISH = {
+	test: (w: string): boolean => NAMEISH_CHARS.test(w.replace(/\[([:=.])\w*\1\]/g, "a")),
+};
 
 const BELL = /\\(a|0?07|x0?7|u0{0,3}7|U0{0,7}7)/;
 
@@ -133,6 +140,9 @@ function globNamesAudio(path: string): boolean {
 		if (c === "*") re += ".*";
 		else if (c === "?") re += ".";
 		else if (c === "[") {
+			// sh reads a ] right after [, [! or [^ as a member ([]a] is "] or a"), and [: [= [.
+			// open POSIX classes: not converted, so treated as a match (8SO, #303).
+			if (/^[!^]?\]/.test(word.slice(i + 1)) || /\[[:=.]/.test(word.slice(i))) return true;
 			const end = word.indexOf("]", i + 2);
 			if (end < 0) return true;
 			re += `[${word
