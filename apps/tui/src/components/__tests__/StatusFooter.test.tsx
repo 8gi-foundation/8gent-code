@@ -136,9 +136,11 @@ describe("BottomBar renders one footer row, hints included (#3130, #3238)", () =
 		expect((await frame(160, 48, { adhd: false }))[0]).not.toContain("adhd");
 	});
 
-	test("durable turns are a segment only while on", async () => {
-		expect((await frame(160, 48, { durable: true }))[0]).toContain("durable on");
-		expect((await frame(160, 48, { durable: false }))[0]).not.toContain("durable");
+	test("durable turns are quiet while on (the default), and say so only when off", async () => {
+		// On is the expected state in the TUI (durable is on unless --no-durable or
+		// EIGHT_DURABLE=0), so it is not a segment: the same rule as adhd and ask.
+		expect((await frame(160, 48, { durable: true }))[0]).not.toContain("durable");
+		expect((await frame(160, 48, { durable: false }))[0]).toContain("durable off");
 	});
 
 	test("unknown values are not shown", async () => {
