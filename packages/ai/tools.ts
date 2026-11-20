@@ -1865,7 +1865,8 @@ async function runShellCommand(
 		// The kernel boundary (#4009, #3612): no write to ~/.8gent startup code, secrets or records.
 		const proc = spawnShell(wrapRunCommand(finalCommand, readScope), {
 			cwd,
-			stdio: ["pipe", "pipe", "pipe"],
+			// No stdin: a script that reads it sees end of file instead of holding the turn (#309).
+			stdio: ["ignore", "pipe", "pipe"],
 			processGroup: true,
 			env: judgedShellEnv(),
 		});
@@ -1879,10 +1880,10 @@ async function runShellCommand(
 			setTimeout(() => killProcessTree(proc.pid, "SIGKILL"), 3000);
 		};
 
-		proc.stdout.on("data", (data) => {
+		proc.stdout?.on("data", (data) => {
 			stdout += data.toString();
 		});
-		proc.stderr.on("data", (data) => {
+		proc.stderr?.on("data", (data) => {
 			stderr += data.toString();
 		});
 

@@ -4091,7 +4091,7 @@ export class ToolExecutor {
 				});
 
 				safeResolve(
-					`TIMEOUT after ${timeoutMs / 1000}s. Partial output:\n${stdout}\n${stderr}\nTIP: Try bun instead of npx, or add --yes flag.`,
+					`TIMEOUT after ${timeoutMs / 1000}s; the command was stopped (its whole process group). It may be waiting for input or looping: fix it and run it again. Partial output:\n${stdout}\n${stderr}`,
 				);
 			}, timeoutMs);
 
