@@ -154,6 +154,9 @@ function globNamesAudio(path: string): boolean {
 			const end = word.indexOf("}", i);
 			if (end < 0) return true;
 			const body = word.slice(i + 1, end);
+			// sh expands the brace first, then globs each part: a part holding a glob, a
+			// nested brace or an escape is not read here, so it counts as a match (8SO, #303).
+			if (/[{*?[\\]/.test(body)) return true;
 			if (body.includes("..")) re += ".*";
 			else
 				re += `(${body

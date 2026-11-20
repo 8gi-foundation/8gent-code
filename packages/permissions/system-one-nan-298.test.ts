@@ -120,6 +120,13 @@ describe("#298 a NaN score never blocks a read-only python3 -c silently", () => 
 		["code body, negated class !", `python3 -c 'import os; os.system("/usr/bin/s[!x]y hi")'`],
 		["code body, negated class ^", `python3 -c 'import os; os.system("/usr/bin/s[^x]y hi")'`],
 		["code body, posix class", `python3 -c 'import os; os.system("/usr/bin/s[[:alpha:]]y hi")'`],
+		// 8SO read at 3ff4f11: sh expands a brace first, then globs each part, so a part
+		// holding a glob or a nested brace can still name say.
+		["code body, brace part ?", `python3 -c 'import os; os.system("/usr/bin/s{?,x}y hi")'`],
+		["code body, brace part *", `python3 -c 'import os; os.system("/usr/bin/s{a*,x}y hi")'`],
+		["code body, nested brace", `python3 -c 'import os; os.system("/usr/bin/s{a,{b,c}}y hi")'`],
+		["node body, brace part ?", `node -e 'require("child_process").execSync("/usr/bin/s{?,x}y hi")'`],
+		["perl body, brace part class", `perl -e 'system("/usr/bin/s{[a],x}y hi")'`],
 	])("still refused: %s", (_name, command) => {
 		expect(isAudioCommand(command)).toBe(true);
 	});
