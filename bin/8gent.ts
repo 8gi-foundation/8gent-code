@@ -98,6 +98,8 @@ COMMANDS:
                               --image <path> attaches one png/jpg/gif/webp: max 20 MB, downscaled to fit 2560x2560,
                               must be inside the working directory (local vision model, text-tool path only)
   doctor                      Check system health (Ollama, models, tools, config)
+  check-offline               Run a short local session with the network blocked by the operating system and list the attempts
+                              (exit 0 = none, 1 = some, 2 = no local model, 3 = this machine cannot block the network)
   model-pin [model]           Accept the current digest and quantisation of a pinned local model
   deck render <spec.json> [out.mp4]  Render a JSON deck spec into an mp4: the same deterministic
                               renderer as the render_video_deck tool, paths inside the current directory
@@ -278,6 +280,7 @@ const DEPTH_EXEMPT_COMMANDS = new Set([
 	"symbol",
 	"search",
 	"doctor",
+	"check-offline",
 	"model-pin",
 	"deck",
 	"bug",
@@ -638,6 +641,11 @@ async function main() {
 		case "doctor":
 			await doctorCommand();
 			break;
+
+		case "check-offline": {
+			const { runCheckOffline } = await import("../packages/eight/check-offline.ts");
+			process.exit(await runCheckOffline());
+		}
 
 		case "durable-run": {
 			// Slice 1 of #4883, behind EIGHT_DURABLE_RUN=1: the scripted run the kill test drives.
