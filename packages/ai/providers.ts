@@ -99,6 +99,8 @@ export function createModel(config: ProviderConfig): LanguageModel {
 		// A hosted provider with no key gets no request at all (#3746): the
 		// refusal fires at send time, so a failover loop records it as this
 		// provider's error and nothing leaves the machine.
+		// modelFetchAsFetch is the gated exit: a cloud endpoint's requests are
+		// anonymized and verified, or refused (#273, #276). Local ones are not.
 		fetch: hostedWithoutKey(config.name, baseURL, apiKey)
 			? refuseWithoutKey(config.name, baseURL)
 			: guardedKeyedFetch(modelFetchAsFetch, apiKey),

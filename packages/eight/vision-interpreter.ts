@@ -13,6 +13,7 @@
  * The vision interpreter is a fire-and-forget sub-agent.
  */
 
+import { modelFetch } from "../ai/model-fetch";
 import {
 	type VisionModel,
 	type VisionTaskType,
@@ -46,7 +47,10 @@ export function visionTimeoutMs(env: Record<string, string | undefined> = proces
 /** One line, control characters stripped, capped, for user-visible errors. */
 export function oneLineError(message: string, max = 200): string {
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping is the point
-	return message.replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, max);
+	return message
+		.replace(/[\u0000-\u001f\u007f]+/g, " ")
+		.trim()
+		.slice(0, max);
 }
 
 /**
@@ -96,24 +100,30 @@ export async function callVisionModel(
 		headers["X-Title"] = "8gent-vision";
 	}
 
-	const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-		method: "POST",
-		headers,
-		signal: AbortSignal.timeout(30000),
-		body: JSON.stringify({
-			model: model.model,
-			messages: [
-				{
-					role: "user",
-					content: [
-						{ type: "text", text: prompt },
-						{ type: "image_url", image_url: { url: imageUrl } },
-					],
-				},
-			],
-			max_tokens: 1024,
-		}),
-	});
+	// modelFetch is the gated exit (#276). An image cannot be proven clean, so a
+	// hosted call with one is refused before it leaves: cloud vision stays off
+	// until a local check can clear an image.
+	const res = await modelFetch(
+		"https://openrouter.ai/api/v1/chat/completions",
+		{
+			method: "POST",
+			headers,
+			body: JSON.stringify({
+				model: model.model,
+				messages: [
+					{
+						role: "user",
+						content: [
+							{ type: "text", text: prompt },
+							{ type: "image_url", image_url: { url: imageUrl } },
+						],
+					},
+				],
+				max_tokens: 1024,
+			}),
+		},
+		{ timeoutMs: 30000, label: "openrouter/vision" },
+	);
 
 	if (!res.ok) throw new Error(`OpenRouter vision error: ${res.statusText}`);
 	const data = await res.json();
