@@ -82,7 +82,7 @@
  *                              spawn_agent (runtime "shell")
  */
 
-import { askOneYes } from "../core/one-yes";
+import { askOneYes, forcedUnattended } from "../core/one-yes";
 import { activeShellKind } from "../core/shell";
 import type { BashGuardOptions, BashGuardResult } from "../decide/guard";
 import type { Decider } from "../decide/index";
@@ -92,7 +92,11 @@ import type { RmOwnDir } from "./s1-rm-own-dir";
 import type { RunOwnScript } from "./s1-run-own-script";
 import { posixRulesApply } from "./shell-tools";
 import { logSystemOneJudge } from "./system-one-log";
-import { hasTuiApprovalHandler, requestTuiApproval } from "./tui-approval-channel";
+import {
+	UNATTENDED_REFUSAL,
+	hasTuiApprovalHandler,
+	requestTuiApproval,
+} from "./tui-approval-channel";
 
 export const SYSTEM_ONE_FLAG = "EIGHT_SYSTEM_ONE";
 export const SYSTEM_ONE_BLOCK_MARKER = "[SYSTEM ONE BLOCKED]";
@@ -525,7 +529,7 @@ function blockMessage(
 export const defaultAskHuman: AskHuman = async (request) => {
 	const tui = await requestTuiApproval(request);
 	if (tui !== null) return tui;
-	if (!process.stdin.isTTY || process.env.EIGHT_HEADLESS) return null;
+	if (!process.stdin.isTTY || process.env.EIGHT_HEADLESS || forcedUnattended()) return null;
 	return askOneYes(
 		`\n\x1b[33m[SYSTEM ONE ESCALATION]\x1b[0m\n${request.details}\nCommand: \x1b[36m${request.command}\x1b[0m\n\nRun it? [y/N]:`,
 		{ label: "system-one-escalation" },
@@ -1236,7 +1240,9 @@ async function decide(
 	const base =
 		humanApproved === false
 			? "escalated and the user declined"
-			: "escalated but no approval channel is available, so escalate is treated as block, failing closed";
+			: forcedUnattended()
+				? `escalated: it ${UNATTENDED_REFUSAL}, so no card was shown and escalate is treated as block, failing closed`
+				: "escalated but no approval channel is available, so escalate is treated as block, failing closed";
 	const why =
 		floored || (guard.backend === RULES_ONLY && guard.reason) ? `${base} (${guard.reason})` : base;
 	return {
