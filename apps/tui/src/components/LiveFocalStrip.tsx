@@ -3,7 +3,8 @@
  * always answers "what is happening NOW?"
  *
  * One canonical pulse: state + active step on the left, route + token
- * count on the right. The context meter is the footer's, drawn once (#9).
+ * count on the right. The context meter shows here only when the footer
+ * row does not draw it (`meter`, #9): one reading, never two.
  * Border is teal by default and flips
  * to orange when an approval is pending so the eye lands on it without
  * a second glance.
@@ -63,13 +64,17 @@ interface LiveFocalStripProps {
 	 *  Shown dim after the route as "(asked ...)" (#3102). */
 	routeAsked?: string;
 	tokens: string;
-	/** Share of the model's real window in use. Not drawn here: the footer
-	 *  carries the ctx meter, once (#9). Kept so callers need no change, as
-	 *  with `mode` (#3123). */
+	/** Share of the model's real window in use. Null when there is no
+	 *  percent to show: see `contextState` (#3321). */
 	contextPct: number | null;
-	/** Where the window came from. Not drawn here (#9): the footer shows the
-	 *  ctx value and says what to do when it is unknown. */
+	/** Why there is no percent, or where the window came from. `server`
+	 *  marks the bar with ~ (reported by the local server, not provider
+	 *  metadata); `unknown` shows "? unknown"; `fresh` shows "--" until the
+	 *  first reply is measured. */
 	contextState?: "provider" | "server" | "override" | "unknown" | "fresh";
+	/** Draw the ctx meter. True only when the footer row does not draw it:
+	 *  the footer is its home wherever it fits there (#9). */
+	meter?: boolean;
 	approvalPending?: boolean;
 	/** The agent runs unattended (Infinite): no card can wait on the person,
 	 *  so the border never turns orange. The word is not repeated here: the
@@ -125,6 +130,9 @@ export function LiveFocalStrip({
 	route,
 	routeAsked,
 	tokens,
+	contextPct,
+	contextState = "provider",
+	meter = false,
 	approvalPending = false,
 	autonomous = false,
 	isProcessing = false,
@@ -179,6 +187,7 @@ export function LiveFocalStrip({
 					middle,
 					route: shownRoute === "-" ? "" : shownRoute,
 					asked: shownRoute && shownRoute !== "-" && routeAsked ? askedNote(routeAsked) : "",
+					meter: meter && blocked?.state !== "none",
 				}
 			: fitNowStrip({
 					width,
@@ -188,7 +197,7 @@ export function LiveFocalStrip({
 					middleShort: showApprovalBorder ? "waiting" : finished ? "finished" : undefined,
 					route: shownRoute,
 					asked: routeAsked,
-					meter: false,
+					meter,
 					tokens,
 				});
 	return (
@@ -229,6 +238,12 @@ export function LiveFocalStrip({
 			<Box flexShrink={0} justifyContent="flex-end">
 				{fit.route ? <Text color={t.steel}>{fit.route}</Text> : null}
 				{fit.asked ? <Text color={t.textTertiary}> {fit.asked}</Text> : null}
+				{fit.meter ? (
+					<>
+						<Text color={t.textTertiary}>{fit.route ? " ctx " : "ctx "}</Text>
+						<Text color={t.steel}>{contextMeterText(contextPct, contextState)}</Text>
+					</>
+				) : null}
 				{tokens && blocked?.state !== "none" ? <Text color={t.textTertiary}> {tokens}</Text> : null}
 			</Box>
 		</Box>

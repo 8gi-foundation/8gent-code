@@ -1158,6 +1158,8 @@ export function App({
 	// Background task pool (Ctrl+G to background current, Ctrl+J to open panel)
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [bgPanelOpen, setBgPanelOpen] = useState(false);
+	// Does the footer row draw the ctx meter? The NOW strip draws it only when not (#9).
+	const [footerCtxShown, setFooterCtxShown] = useState(true);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [bgTasks, setBgTasks] = useState<bgPool.BgTask[]>(() => bgPool.list());
@@ -9364,6 +9366,7 @@ export function App({
 									tokens={tokenStr}
 									contextPct={contextPct}
 									contextState={contextState}
+									meter={!footerCtxShown}
 									approvalPending={isApprovalPending}
 									autonomous={infiniteModeActive}
 									isProcessing={isProcessing}
@@ -9541,6 +9544,7 @@ export function App({
 					traceHint={traceRowUp ? (traceOpen ? "fold" : "open") : undefined}
 					djKeys={djKeys}
 					onDjKeysDone={endDjKeys}
+					onFooterCtx={setFooterCtxShown}
 				/>
 			</FixedFrame>
 		</ADHDModeContext.Provider>

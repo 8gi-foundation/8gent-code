@@ -251,8 +251,8 @@ describe("LiveFocalStrip keys-up (compact, #4967)", () => {
 	});
 });
 
-describe("the context meter is drawn once, in the footer (#9)", () => {
-	const draw = (width: number) =>
+describe("the strip draws the context meter only when the footer does not (#9)", () => {
+	const draw = (width: number, meter?: boolean) =>
 		renderToString(
 			<LiveFocalStrip
 				mode="Planning"
@@ -266,6 +266,7 @@ describe("the context meter is drawn once, in the footer (#9)", () => {
 				lastTurnSuccess={true}
 				animate={false}
 				width={width}
+				meter={meter}
 			/>,
 			{ columns: width },
 		);
@@ -277,5 +278,12 @@ describe("the context meter is drawn once, in the footer (#9)", () => {
 		expect(out).toContain("71K tok");
 		expect(out).not.toContain("ctx");
 		expect(out).not.toContain("█");
+	});
+
+	test("told the footer has no room for it, the strip draws the meter", () => {
+		const out = draw(110, true);
+		expect(out).toContain("ctx");
+		expect(out).toContain("█");
+		expect(out).toContain("71K tok");
 	});
 });

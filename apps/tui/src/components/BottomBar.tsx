@@ -71,6 +71,8 @@ interface BottomBarProps {
 	turnCalls?: number;
 	/** The folded trace's status row is up (#5170). */
 	traceHint?: "open" | "fold";
+	/** Told whether the footer row draws the ctx meter, so the NOW strip draws it only when not (#9). */
+	onFooterCtx?: (shown: boolean) => void;
 }
 
 /** The signed-in display name (#2366). The OS login is not shown: it is the
@@ -99,6 +101,7 @@ export function BottomBar(props: BottomBarProps) {
 						notice={props.notice}
 						// ^D only does something with a track loaded; its cap shows then.
 						dj={hasTrack}
+						onCtxShown={props.onFooterCtx}
 						data={{
 							mode: props.mode,
 							tokensPerSecond: props.tokensPerSecond,

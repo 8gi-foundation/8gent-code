@@ -24,7 +24,7 @@
  */
 
 import { Box, Text } from "ink";
-import React, { useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import {
 	type PermissionMode,
 	isPermissionMode,
@@ -642,6 +642,22 @@ export function fitFooterRow(
 	return rows[rows.length - 1] as { segments: FooterSegment[]; hints: string[] };
 }
 
+/**
+ * Does the steady footer row draw the ctx meter (#9)? The same fit as the drawn
+ * row; toasts and notices are passing, so they do not count. The NOW strip draws
+ * the meter only when this is false: one reading, never two.
+ */
+export function footerDrawsCtx(
+	data: FooterData,
+	width: number,
+	leading = false,
+	dj = false,
+): boolean {
+	return fitFooterRow(buildFooterSegments(data), width, leading, dj).segments.some(
+		(s) => s.key === "ctx",
+	);
+}
+
 /** A permission switch the footer is announcing (#3174). */
 export interface FooterToast {
 	mode: PermissionMode;
@@ -744,6 +760,7 @@ export function StatusSegments({
 	leading = false,
 	notice,
 	dj = false,
+	onCtxShown,
 }: {
 	data: FooterData;
 	width: number;
@@ -754,6 +771,8 @@ export function StatusSegments({
 	notice?: string | null;
 	/** A DJ track is loaded, so ^D does something and its cap shows. */
 	dj?: boolean;
+	/** Told whether the steady row draws the ctx meter, when that changes (#9). */
+	onCtxShown?: (shown: boolean) => void;
 }) {
 	const all = buildFooterSegments(data);
 	const toastFit = toast ? fitFooterToast(all, width, toast, leading) : null;
@@ -762,6 +781,13 @@ export function StatusSegments({
 	const noticeFit = !toastFit && notice ? fitFooterNotice(all, width, notice, leading) : null;
 	const segments = toastFit ? toastFit.segments : noticeFit ? noticeFit.segments : row.segments;
 	const hints = toastFit || notice ? [] : row.hints;
+	const ctxShown = row.segments.some((s) => s.key === "ctx");
+	const reported = useRef<boolean | null>(null);
+	useEffect(() => {
+		if (reported.current === ctxShown) return;
+		reported.current = ctxShown;
+		onCtxShown?.(ctxShown);
+	});
 	const segRef = useRef(null);
 	const hintRef = useRef(null);
 	const spans = footerClickSpans(segments, hints, leading);
