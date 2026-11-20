@@ -66,6 +66,8 @@ export interface FooterSegment {
 	color: string;
 	/** 0 is kept longest. Higher numbers drop first when space runs out. */
 	priority: number;
+	/** The priority below FOOTER_METER_COLS columns of row width, when it is lower than `priority`. */
+	narrowPriority?: number;
 }
 
 /** The System One judge's warm-up. Undefined: System One is off. */
@@ -129,6 +131,15 @@ export interface FooterData {
 
 /** Tool calls after which the stop key shows even on a crowded phone-width row (#4982). */
 export const STOP_HINT_CALLS = 8;
+
+/** From this many columns the context meter never leaves the footer row (#9). */
+export const FOOTER_METER_COLS = 48;
+
+/** Segments as they rank at this row width: the meter yields to the cap on a very narrow row. */
+function atWidth(all: FooterSegment[], width: number): FooterSegment[] {
+	if (width >= FOOTER_METER_COLS) return all;
+	return all.map((s) => (s.narrowPriority != null ? { ...s, priority: s.narrowPriority } : s));
+}
 
 /** A value the app passes when it does not know the real one. */
 function known(value: string | undefined): value is string {
@@ -196,8 +207,14 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 						? theme.color.orangeAlt
 						: ui.muted,
 			bold: ctx.level === "danger",
-			// A window that is nearly full outranks the standing facts beside it.
-			priority: ctx.level === "danger" || ctx.level === "warn" ? 1 : 2,
+			// The one home of the context meter (#9): the NOW strip no longer draws it, so
+			// a person must never lose sight of how full the window is. From
+			// FOOTER_METER_COLS of row width up, priority 0 keeps it at every width;
+			// the local chip, standing facts and key hints give way first. Below that
+			// the row cannot hold the mode, the meter and the [^P] palette cap
+			// together, and the cap (the only way into the commands) wins, as before.
+			priority: 0,
+			narrowPriority: ctx.level === "danger" || ctx.level === "warn" ? 1 : 2,
 		});
 	}
 	if (d.tokensPerSecond && d.tokensPerSecond > 0) {
@@ -444,7 +461,52 @@ function fitRow(
 	return withChip.hints.length < plain.hints.length ? plain : withChip;
 }
 
+/** The meter's shortest form: "75%" for "75% 24.7k/32.8k", "?" for "?/32.8k". */
+function compactCtx(value: string): string {
+	return value.startsWith("?") ? "?" : (value.split(" ")[0] ?? value);
+}
+
+/**
+ * The meter never leaves the row (#9). When the full row costs the [^P] cap or a
+ * segment that must stay (stop, sandbox, judge), the row gives ground in this
+ * order: the meter shortens to its percent, then the mode and perm labels go,
+ * then both. The local chip and the key hints beyond the cap are already gone
+ * by then, so they always yield before the meter's numbers do.
+ */
 function fitRowMeter(
+	all: FooterSegment[],
+	width: number,
+	leading: boolean,
+	dj: boolean,
+): { segments: FooterSegment[]; hints: string[] } {
+	const full = fitRowSettings(all, width, leading, dj);
+	const ctx = all.find((s) => s.key === "ctx");
+	if (!ctx || typeof ctx.value !== "string") return full;
+	const short = compactCtx(ctx.value);
+	const holdsCap = (r: { hints: string[] }) => r.hints[0] === PALETTE_HINT;
+	const musts = (r: { segments: FooterSegment[] }) =>
+		r.segments.filter((s) => s.key !== "ctx" && s.priority <= 1).length;
+	let best = full;
+	for (const [compact, bare] of [
+		[true, false],
+		[false, true],
+		[true, true],
+	] as const) {
+		if (
+			holdsCap(best) &&
+			musts(best) === all.filter((s) => s.priority <= 1 && s.key !== "ctx").length
+		)
+			break;
+		let list = all.map((s) => (compact && s === ctx ? { ...s, value: short } : s));
+		if (bare) list = list.map(unlabelled);
+		const row = fitRowSettings(list, width, leading, dj);
+		const better = holdsCap(row) !== holdsCap(best) ? holdsCap(row) : musts(row) > musts(best);
+		if (better) best = row;
+	}
+	return best;
+}
+
+function fitRowSettings(
 	all: FooterSegment[],
 	width: number,
 	leading: boolean,
@@ -483,11 +545,13 @@ function fitRowOnce(
 	const sandbox = all.find((s) => s.key === "sandbox");
 	const without = sandbox ? all.filter((s) => s !== sandbox) : all;
 	let base = fit(without);
-	// Phone: when the meter does not fit under "mode Planning", drop that label before the meter.
+	// Phone: when the meter or the [^P] palette cap does not fit under "mode Planning",
+	// drop that label first (the meter itself never goes, #9).
 	if (width < FOOTER_NARROW_COLS && without.some((s) => s.key === "ctx")) {
-		if (!base.some((s) => s.key === "ctx")) {
+		const holdsCap = (l: FooterSegment[]) => hintsFor(l)[0] === PALETTE_HINT;
+		if (!base.some((s) => s.key === "ctx") || !holdsCap(base)) {
 			const short = fit(without.map(unlabelled));
-			if (short.some((s) => s.key === "ctx")) base = short;
+			if (short.some((s) => s.key === "ctx") && (holdsCap(short) || !holdsCap(base))) base = short;
 		}
 	}
 	const baseHints = hintsFor(base);
@@ -501,25 +565,19 @@ function fitRowOnce(
 		(l) => l,
 		(l) => l.map(unlabelled),
 	];
-	// What the row would hold with neither the sandbox nor the meter: from 60
-	// columns up the sandbox never costs a hint against it (#4013).
-	const meter = all.find((s) => s.key === "ctx");
-	const plainHints = hintsFor(fit(without.filter((s) => s.key !== "ctx")));
+	// What the row would hold without the sandbox: from 60 columns up the sandbox
+	// never costs a hint against it (#4013). The meter is in both rows, always.
+	const plainHints = baseHints;
 	// The sandbox state is never dropped, at any width (8SO, #4953). It sheds its
 	// reason, then its word ("sbx off"), before anything else gives. The meter
-	// stays while it can; when it cannot, it goes before the sandbox does. From
+	// never leaves (it is the one place the window is shown). From
 	// 60 columns up a form that would cost a hint is passed over for a shorter
 	// one; low-priority segments (session, providers) then give way too.
-	// Lower-priority segments (rate, user, providers, session) give way before the
-	// meter does: keep priority up to 9, then 5, 4, 3, 2 (the meter), and only then
-	// lose the meter itself, then everything above the sandbox.
+	// Lower-priority segments (rate, user, providers, session) give way first: keep
+	// priority up to 9, then 5, 4, 3, 2, then only 1 and above. The meter is
+	// priority 0, so every step keeps it.
 	const keepUpTo = (p: number) => (l: FooterSegment[]) => l.filter((x) => x.priority <= p);
-	const sheds: Array<(list: FooterSegment[]) => FooterSegment[]> = [
-		...[9, 5, 4, 3, 2].map(keepUpTo),
-		(l) => l.filter((x) => x.key !== "ctx"),
-		(l) => l.filter((x) => x.key !== "ctx" && x.priority <= 1),
-	];
-	const meterSheds = 5;
+	const sheds: Array<(list: FooterSegment[]) => FooterSegment[]> = [9, 5, 4, 3, 2, 1].map(keepUpTo);
 	// From 60 columns up the reason is worth more than the user name and the
 	// rate, then providers and session time: try the full reason with those given up
 	// before the reason is the thing that goes.
@@ -528,22 +586,18 @@ function fitRowOnce(
 			const candidate = shed(all);
 			const segments = fit(candidate);
 			if (!segments.includes(sandbox)) continue;
-			if (meter && !segments.some((x) => x.key === "ctx")) continue;
 			const hints = hintsFor(segments);
 			if (hints.length < plainHints.length) continue;
 			return { segments, hints };
 		}
 	}
-	for (const [shedIndex, shed] of sheds.entries()) {
-		if (!meter && shedIndex < meterSheds) continue;
+	for (const shed of sheds) {
 		for (const shape of shapes) {
 			for (const seg of forms) {
 				const candidate = shape(shed(all.map((x) => (x === sandbox ? seg : x))));
 				const kept = candidate.find((x) => x.key === "sandbox");
 				const segments = fit(candidate);
 				if (!kept || !segments.includes(kept)) continue;
-				// The first pass is the one that keeps the meter: a form that loses it yields to the next.
-				if (meter && shedIndex < meterSheds && !segments.some((x) => x.key === "ctx")) continue;
 				const hints = hintsFor(segments);
 				if (width >= FOOTER_NARROW_COLS && hints.length < plainHints.length) continue;
 				return { segments, hints };
@@ -555,7 +609,7 @@ function fitRowOnce(
 	const last = forms[2] as FooterSegment;
 	const kept = fit(
 		all
-			.filter((x) => x.key !== "ctx" && (width >= FOOTER_NARROW_COLS || x.key !== "perm"))
+			.filter((x) => width >= FOOTER_NARROW_COLS || x.key !== "perm")
 			.map((x) => (x === sandbox ? last : unlabelled(x))),
 	);
 	const segments = kept.some((x) => x.key === "sandbox") ? kept : [...kept, last];
@@ -603,6 +657,7 @@ export function fitFooterRow(
 	leading = false,
 	dj = false,
 ): { segments: FooterSegment[]; hints: string[] } {
+	all = atWidth(all, width);
 	const flag = all.find((s) => s.key === "verification");
 	const plain = fitRow(all, width, leading, dj);
 	if (!flag) return plain;
@@ -661,6 +716,7 @@ export function fitFooterToast(
 	toast: FooterToast,
 	leading = false,
 ): { text: string; segments: FooterSegment[] } | null {
+	all = atWidth(all, width);
 	const forms = permToastForms(toast.mode, toast.held);
 	const plain = fitFooterSegments(all, width, leading);
 	const mustKeep = (s: FooterSegment[], max: number) =>
@@ -692,6 +748,7 @@ export function fitFooterNotice(
 	notice: string,
 	leading = false,
 ): { text: string; segments: FooterSegment[] } {
+	all = atWidth(all, width);
 	const text =
 		notice.length > width - 1 ? `${notice.slice(0, Math.max(0, width - 2))}\u2026` : notice;
 	const room = width - text.length - HINTS_MARGIN;
