@@ -90,7 +90,8 @@ export type SlashCommand =
 	| "tree"
 	| "import"
 	| "thinking"
-	| "scoped-models";
+	| "scoped-models"
+	| "changelog";
 
 export interface BuiltInSlashCommandDef {
 	name: SlashCommand;
@@ -640,6 +641,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["scoped", "scope"],
 		description: "The few models Alt+M cycles between",
 		usage: "/scoped-models [model|part of a name ...|clear]",
+	},
+	{
+		name: "changelog",
+		aliases: [],
+		description: "Show what changed in this version",
+		usage: "/changelog [version|all]",
 	},
 ];
 

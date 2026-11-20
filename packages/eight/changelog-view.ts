@@ -70,15 +70,51 @@ export function formatSections(sections: ChangelogSection[]): string {
 }
 
 /**
- * Read and parse the CHANGELOG shipped with this 8gent. `fromDir` is where the
- * upward search for the package root starts (default: this file's folder).
- * Returns [] when no changelog ships or it cannot be read; never throws.
+ * The CHANGELOG text shipped with this 8gent: embedded in the compiled binary
+ * when there is one, otherwise the CHANGELOG.md at the package root (see
+ * bundledChangelogPath). `fromDir` is where the upward search for the package
+ * root starts (default: this file's folder). Null when none ships or it cannot
+ * be read; never throws.
  */
-export function loadChangelog(fromDir: string = import.meta.dir): ChangelogSection[] {
+export function readBundledChangelog(fromDir: string = import.meta.dir): string | null {
 	try {
 		const p = bundledChangelogPath(fromDir);
-		return p ? parseChangelog(readFileSync(p, "utf8")) : [];
+		return p ? readFileSync(p, "utf8") : null;
 	} catch {
-		return [];
+		return null;
 	}
+}
+
+/** Read and parse the CHANGELOG shipped with this 8gent. [] when none ships; never throws. */
+export function loadChangelog(fromDir: string = import.meta.dir): ChangelogSection[] {
+	const text = readBundledChangelog(fromDir);
+	return text === null ? [] : parseChangelog(text);
+}
+
+/** `v0.20.45` and `0.20.45` are the same version. */
+function normalizeVersion(version: string): string {
+	return version.trim().replace(/^v/i, "");
+}
+
+/**
+ * What `/changelog [arg]` prints. `text` is the changelog text, or null when
+ * none ships. No argument means the installed version; `all` lists the version
+ * headings. Versions match exactly, so 0.20.4 never matches 0.20.45. Every line
+ * comes from the changelog except the two plain notices; control characters are
+ * removed.
+ */
+export function changelogOutput(text: string | null, arg: string | undefined, installed: string): string {
+	if (text === null) return "No changelog file found.";
+	const sections = parseChangelog(text);
+	const asked = arg?.trim() ?? "";
+	if (asked.toLowerCase() === "all") {
+		const headings = sections.map((s) => s.body.split("\n")[0]);
+		return sanitizeForDisplay(headings.length > 0 ? headings.join("\n") : "No version headings in the changelog.");
+	}
+	const version = normalizeVersion(asked === "" ? installed : asked);
+	const section = sections.find((s) => s.version === version);
+	if (!section) return `No changelog entry for v${sanitizeForDisplay(version)}.`;
+	const lines = section.body.split("\n");
+	while (lines.length > 1 && ["", "---"].includes(lines[lines.length - 1].trim())) lines.pop();
+	return sanitizeForDisplay(lines.join("\n"));
 }
