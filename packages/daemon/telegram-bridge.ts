@@ -1006,7 +1006,7 @@ export function approvalParts(
 	const command =
 		typeof f.command === "string" ? f.command : typeof input === "string" ? input : tool;
 	const why =
-		typeof f.reason === "string" && f.reason ? f.reason : `The agent wants to use ${tool}.`;
+		typeof f.reason === "string" && f.reason ? f.reason : `8gent wants to use ${tool}.`;
 	return {
 		command: visibleText(command),
 		why: visibleText(why),
