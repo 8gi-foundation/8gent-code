@@ -12,7 +12,16 @@ import {
 	recordCall,
 	updateCall,
 } from "./locality";
-import { LocalOnlyRefusal, type WireDeps, bodySize, guardFetch, usageFrom } from "./locality-wire";
+import {
+	LocalOnlyRefusal,
+	type WireDeps,
+	bodySize,
+	cloudReasonLine,
+	guardFetch,
+	setCloudReason,
+	usageFrom,
+	withCloudReasons,
+} from "./locality-wire";
 
 let dir: string;
 let ledger: string;
@@ -430,5 +439,106 @@ describe("ledger read is a tail", () => {
 		expect(got.length).toBeLessThan(n);
 		expect(got.at(-1)?.tokensIn).toBe(n);
 		expect(got.length).toBeGreaterThan(1000);
+	});
+});
+
+describe("the cloud notice states one reason (#179)", () => {
+	const url = "https://api.minimax.io/v1/chat/completions";
+
+	test("a provider the person picked for the tab says so, and nothing else", async () => {
+		const { f, notices } = rig("local-first");
+		await withCloudReasons(async () => {
+			setCloudReason("minimax", cloudReasonLine({ picked: true, localFailures: [] }));
+			await post(f, url);
+		});
+		expect(notices[0]).toContain("you picked it for this tab");
+		expect(notices[0]).not.toContain("no local provider");
+		expect(notices[0]).not.toContain(" or ");
+	});
+
+	test("a provider reached after local ones failed says why they could not serve it", async () => {
+		const { f, notices } = rig("local-first");
+		await withCloudReasons(async () => {
+			setCloudReason(
+				"minimax",
+				cloudReasonLine({
+					picked: false,
+					localFailures: [{ provider: "ollama", reason: "connection refused" }],
+				}),
+			);
+			await post(f, url);
+		});
+		expect(notices[0]).toContain("no local provider could serve this (ollama: connection refused)");
+		expect(notices[0]).not.toContain("you picked it");
+		expect(notices[0]).not.toContain(" or ");
+	});
+
+	test("two turns at once: each notice carries its own turn's reason, never the other's", async () => {
+		const failed = cloudReasonLine({
+			picked: false,
+			localFailures: [{ provider: "ollama", reason: "connection refused" }],
+		});
+		const a = rig("local-first");
+		const b = rig("local-first");
+		let release = () => {};
+		const gate = new Promise<void>((r) => {
+			release = r;
+		});
+		// Turn A records its reason, then waits while turn B sends; then A sends.
+		const turnA = withCloudReasons(async () => {
+			setCloudReason("minimax", failed);
+			await gate;
+			await post(a.f, url);
+		});
+		const turnB = withCloudReasons(async () => {
+			await post(b.f, url);
+			release();
+		});
+		await Promise.all([turnA, turnB]);
+		expect(a.notices[0]).toContain("no local provider could serve this (ollama: connection refused)");
+		expect(b.notices[0]).not.toContain("ollama: connection refused");
+		expect(b.notices[0]).toContain("no reason was recorded for this call");
+	});
+
+	test("an aborted turn leaves no reason behind, for a later turn or a request still in flight", async () => {
+		const failed = cloudReasonLine({
+			picked: false,
+			localFailures: [{ provider: "ollama", reason: "timed out" }],
+		});
+		let late: Promise<string> = Promise.resolve("");
+		let release = () => {};
+		const gate = new Promise<void>((r) => {
+			release = r;
+		});
+		const inFlight = rig("local-first");
+		await expect(
+			withCloudReasons(async () => {
+				setCloudReason("minimax", failed);
+				// A request the turn started but did not wait for: it sends after the abort.
+				late = gate.then(() => post(inFlight.f, url));
+				throw Object.assign(new Error("Stopped by user"), { name: "AbortError" });
+			}),
+		).rejects.toThrow("Stopped by user");
+		release();
+		await late;
+		expect(inFlight.notices[0]).not.toContain("timed out");
+		const later = rig("local-first");
+		await post(later.f, url);
+		expect(later.notices[0]).not.toContain("timed out");
+		expect(later.notices[0]).toContain("no reason was recorded for this call");
+	});
+
+	test("outside a turn a reason is not recorded at all", async () => {
+		setCloudReason("minimax", cloudReasonLine({ picked: true, localFailures: [] }));
+		const { f, notices } = rig("local-first");
+		await post(f, url);
+		expect(notices[0]).not.toContain("you picked it");
+	});
+
+	test("a call with no recorded reason never joins two causes", async () => {
+		const { f, notices } = rig("local-first");
+		await post(f, url);
+		expect(notices[0]).not.toContain(" or ");
+		expect(notices[0]).not.toContain("you picked it");
 	});
 });

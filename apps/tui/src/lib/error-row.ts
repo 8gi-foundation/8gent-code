@@ -25,6 +25,8 @@ export interface ErrorRow {
 	cause: string;
 	retry?: { n: number; of: number };
 	next?: string;
+	/** When every provider failed: one line per provider tried, in order, with its reason. */
+	detail?: string[];
 }
 
 const LABEL: Record<ErrorKind, string> = {
@@ -79,10 +81,19 @@ export function classifyError(text: string): ErrorRow {
 	const t = clean(text);
 	const exhausted = /^\s*(?:\[Error\]\s*)?All providers exhausted \((\d+) attempted\)/.exec(t);
 	if (exhausted) {
+		// The turn's message lists each provider and a `next:` line built from the reasons (#179).
+		const lines = clean(text)
+			.split("\n")
+			.map((l) => l.trim());
+		const detail = lines
+			.filter((l) => l.startsWith("- ") || l.startsWith("Nothing was sent"))
+			.map((l) => clip(l.replace(/^-\s+/, ""), CAUSE_MAX * 2));
+		const built = lines.find((l) => l.startsWith("next: "))?.slice("next: ".length).trim();
 		return {
 			kind: "provider",
 			cause: `all providers failed (${exhausted[1]} tried)`,
-			next: NEXT.provider,
+			next: built || NEXT.provider,
+			...(detail.length ? { detail } : {}),
 		};
 	}
 	let kind: ErrorKind = "error";
@@ -148,6 +159,7 @@ export function errorLines(row: ErrorRow, width: number): string[] {
 		out.push(clip(`✗ ${LABEL[row.kind]}: ${cause}`, width));
 		if (row.retry) out.push(clip(`  retry ${row.retry.n}/${row.retry.of}`, width));
 	}
+	for (const d of row.detail ?? []) out.push(clip(`  ${clean(d)}`, width));
 	if (row.next) out.push(clip(`  next: ${clean(row.next)}`, width));
 	return out;
 }
