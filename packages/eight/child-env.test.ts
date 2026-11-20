@@ -22,7 +22,9 @@ import {
 	ENV_PASS_HINT,
 	GH_ENV_NAMES,
 	GIT_ENV_NAMES,
+	GIT_NON_INTERACTIVE_ENV,
 	SECRETISH,
+	SPAWN_NON_INTERACTIVE_ENV,
 	buildChildEnv,
 	envPassList,
 	withheldAny,
@@ -326,5 +328,19 @@ describe("failure hint", () => {
 
 	test("no hint on success", async () => {
 		expect(await run("true")).not.toContain("EIGHT_SHELL_ENV_PASS");
+	});
+});
+
+describe("git ssh host key policy", () => {
+	test("never prompts, never accepts a changed host key", () => {
+		const cmd = GIT_NON_INTERACTIVE_ENV.GIT_SSH_COMMAND;
+		expect(cmd).toBe("ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new");
+		expect(cmd).not.toContain("StrictHostKeyChecking=no");
+	});
+
+	test("spawned shells inherit the same policy", () => {
+		expect(SPAWN_NON_INTERACTIVE_ENV.GIT_SSH_COMMAND).toBe(
+			GIT_NON_INTERACTIVE_ENV.GIT_SSH_COMMAND,
+		);
 	});
 });

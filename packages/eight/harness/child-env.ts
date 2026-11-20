@@ -156,7 +156,7 @@ export const GIT_NON_INTERACTIVE_ENV = {
 	GIT_ASKPASS: "/usr/bin/true",
 	SSH_ASKPASS: "/usr/bin/true",
 	SSH_ASKPASS_REQUIRE: "force",
-	GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o StrictHostKeyChecking=no",
+	GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
 };
 
 /** Installers and git never wait for a keypress in a run_command shell. */
