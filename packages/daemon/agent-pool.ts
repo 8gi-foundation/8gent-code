@@ -12,6 +12,7 @@ import type { AgentConfig, AgentEventCallbacks } from "../eight/types";
 import { currentProviderPin } from "../orchestration/provider-pin";
 import { getProviderManager } from "../providers";
 import { discoverModelsAt } from "../providers/declared";
+import { TENANT_ZERO, spend } from "../credits/ledger";
 import { getUsageMonitor } from "../providers/usage-monitor";
 import { type ApprovalTurn, withChannelApprovals } from "./channel-approvals";
 import {
@@ -741,9 +742,28 @@ export class AgentPool {
 				? withChannelApprovals(sessionId, turn, entry.agent.getWorkingDirectory(), modelCall)
 				: modelCall());
 
-			// Track token usage (estimate: ~4 chars/token).
-			const promptTokens = Math.ceil(text.length / 4);
-			const completionTokens = Math.ceil(response.length / 4);
+			// Real endpoint-reported totals for the turn. When the endpoint reported
+			// none, the chars/4 estimate feeds the BUDGET GATE only: the ledger is
+			// never debited from an estimate.
+			const real = entry.agent.getLastUsage?.();
+			const reported = (real?.totalTokens ?? 0) > 0;
+			const promptTokens = reported ? real!.promptTokens : Math.ceil(text.length / 4);
+			const completionTokens = reported ? real!.completionTokens : Math.ceil(response.length / 4);
+			// Credit ledger (epic #3): debit tenant zero once per turn, keyed by
+			// a job id so a re-report is a no-op. Never fails the turn.
+			// Opt-in (EIGHT_CREDITS=1, off by default): a public install never opens
+			// or creates the ledger db. 8GI's own daemon sets the flag.
+			if (process.env.EIGHT_CREDITS !== "1") {
+				// ledger off: nothing to record
+			} else if (reported) {
+				try {
+					spend(TENANT_ZERO, real!.totalTokens, `${sessionId}:${startMs}:${entry.messageCount}`, entry.agent.getModel());
+				} catch (err) {
+					console.warn(`[agent-pool] credit ledger spend failed: ${err instanceof Error ? err.message : err}`);
+				}
+			} else {
+				console.warn(`[agent-pool] no real usage reported for ${sessionId}; ledger not debited (estimate feeds the budget gate only)`);
+			}
 			// Wave 4 GATE: per-tenant attribution. Mirrors local budget AND
 			// emits an `llm` event for off-box shipping via Vector + Loki.
 			//
