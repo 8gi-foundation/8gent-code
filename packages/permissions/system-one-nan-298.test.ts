@@ -87,6 +87,26 @@ describe("#298 a NaN score never blocks a read-only python3 -c silently", () => 
 		expect(isAudioCommand(`python3 -c 'import os; os.system("say hi")'`)).toBe(true);
 		expect(isAudioCommand(`bash -c 'true; s[a]y hi'`)).toBe(true);
 		expect(isAudioCommand("s[a]y hi")).toBe(true);
+		expect(isAudioCommand(`python3 -c 'print(d["train"])'`)).toBe(false);
+	});
+
+	// 8SO review of PR #303: each of these bypassed the first fix and must stay refused.
+	test.each([
+		// 1. $'...' takes backslash escapes: \' does not close it.
+		["ansi-c quote, variable", `python3 -c $'\\'' ; $CMD hi ; echo ''`],
+		["ansi-c quote, glob", `python3 -c $'\\'' ; /usr/bin/sa[y] hi ; echo ''`],
+		// 2. A quote inside an unquoted # comment opens nothing.
+		["comment quote, variable", `python3 -c 'pass' #'\n$CMD hi\n#'`],
+		["comment quote, glob", `python3 -c 'pass' #'\n/usr/bin/s?y hi\n#'`],
+		// 3. The code body can hand a shell string to the shell.
+		["python os.system glob", `python3 -c 'import os; os.system("/usr/bin/sa? hi")'`],
+		["node execSync glob", `node -e 'require("child_process").execSync("/usr/bin/sa? hi")'`],
+		["perl system glob", `perl -e 'system("/usr/bin/s[a]y hi")'`],
+		// 4. A quoted argument to a script is not a -c/-e body.
+		["script argument", `python3 script.py 'x; /usr/bin/sa? hi'`],
+		["script argument variable", `python3 script.py 'x; $Y'`],
+	])("still refused: %s", (_name, command) => {
+		expect(isAudioCommand(command)).toBe(true);
 	});
 
 	test("default mode: no usable score falls to the rules-only path and runs", async () => {

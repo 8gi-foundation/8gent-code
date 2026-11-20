@@ -83,9 +83,11 @@ const base = (w: string): string => bare(w).replace(/^.*\//, "");
 const CODE_INTERPRETERS = new Set(["python", "node", "bun", "deno", "ruby", "perl"]);
 
 /**
- * Spans of each plain '...' string handed to a code interpreter (`python3 -c '...'`). The shell
- * never expands inside it and the interpreter is not a shell, so `d["train"]` there is a Python
+ * Spans of each plain '...' string given as the `-c`/`-e` body of a code interpreter
+ * (`python3 -c '...'`). The shell never expands inside it, so `d["train"]` there is a Python
  * subscript, not a glob command word (#298). A shell body (`bash -c '...'`) is never a span.
+ * Fails closed (no spans) on a line with ANSI-C `$'...'` quoting or an unquoted `#` comment,
+ * where this quote scan could pair the wrong quotes (8SO, #303).
  */
 function codeBodies(command: string): Array<[number, number]> {
 	const spans: Array<[number, number]> = [];
@@ -96,6 +98,10 @@ function codeBodies(command: string): Array<[number, number]> {
 			i++;
 		} else if (ch === '"') {
 			for (i++; i < command.length && command[i] !== '"'; i++) if (command[i] === "\\") i++;
+		} else if (ch === "$" && command[i + 1] === "'") {
+			return [];
+		} else if (ch === "#" && (i === 0 || /[\s;&|(]/.test(command[i - 1] ?? ""))) {
+			return [];
 		} else if (ch === "'") {
 			const end = command.indexOf("'", i + 1);
 			if (end < 0) break;
@@ -103,13 +109,57 @@ function codeBodies(command: string): Array<[number, number]> {
 			let k = 0;
 			while (k < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[k] ?? "")) k++;
 			const prog = base(words[k] ?? "").replace(/[\d.]+$/, "");
-			if (command[i - 1] !== "$" && CODE_INTERPRETERS.has(prog)) spans.push([i, end]);
+			const flag = words.length > k + 1 ? (words[words.length - 1] ?? "") : "";
+			if (CODE_INTERPRETERS.has(prog) && /^-[A-Za-z]*[ce]$/.test(flag)) spans.push([i, end]);
 			i = end;
 		} else if (/[;&|\n(]/.test(ch ?? "")) {
 			segStart = i + 1;
 		}
 	}
 	return spans;
+}
+
+/**
+ * True when a glob or brace word could expand to an audio program's name. Used inside a code
+ * body, whose shell strings (os.system, execSync, system) can still reach a shell (8SO, #303).
+ * A word this cannot read is treated as a match.
+ */
+function globNamesAudio(path: string): boolean {
+	// The program is the last path component; a glob only in the folder part names that program.
+	const word = path.replace(/^.*\//, "");
+	let re = "";
+	for (let i = 0; i < word.length; i++) {
+		const c = word[i] ?? "";
+		if (c === "*") re += ".*";
+		else if (c === "?") re += ".";
+		else if (c === "[") {
+			const end = word.indexOf("]", i + 2);
+			if (end < 0) return true;
+			re += `[${word
+				.slice(i + 1, end)
+				.replace(/^!/, "^")
+				.replace(/\\/g, "\\\\")}]`;
+			i = end;
+		} else if (c === "{") {
+			const end = word.indexOf("}", i);
+			if (end < 0) return true;
+			const body = word.slice(i + 1, end);
+			if (body.includes("..")) re += ".*";
+			else
+				re += `(${body
+					.split(",")
+					.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+					.join("|")})`;
+			i = end;
+		} else re += c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	}
+	let rx: RegExp;
+	try {
+		rx = new RegExp(`^${re}$`);
+	} catch {
+		return true;
+	}
+	return [...AUDIO_PROGRAMS].some((name) => rx.test(name));
 }
 
 /** True when this one simple command, after unwrapping env/sudo/xargs and the like, makes sound. */
@@ -136,19 +186,19 @@ function segmentIsAudio(segment: string, command: string, inCode = false): boole
 	// must not be an audio program, and must not still build its name from a variable.
 	const word = unquoteWord(words[i] ?? "");
 	// A command word that is a glob, a brace expansion or the head of a $( ) cannot be read.
-	// Inside a code interpreter's quoted body there is no shell command word, so it does not
-	// apply there; audio program names are still checked below and by the bare-name backstop.
+	// Inside a code interpreter's quoted body (`d["train"]`) a glob counts only when it could
+	// name an audio program, since the code can still hand a shell string to a shell (#298, #303).
 	if (
-		!inCode &&
-		(word === "$" ||
-			/^[A-Za-z0-9_./-]+\$$/.test(word) ||
-			(word !== "[" &&
-				word !== "[[" &&
-				NAMEISH.test(word) &&
-				/[*?]|\[.+\]|\{[^}]*(,|\.\.)[^}]*\}/.test(word)))
+		word === "$" ||
+		/^[A-Za-z0-9_./-]+\$$/.test(word) ||
+		(word !== "[" &&
+			word !== "[[" &&
+			NAMEISH.test(word) &&
+			/[*?]|\[.+\]|\{[^}]*(,|\.\.)[^}]*\}/.test(word) &&
+			(!inCode || globNamesAudio(word)))
 	)
 		return true;
-	if (!inCode && /\$[A-Za-z_{(]/.test(word)) return true;
+	if (/\$[A-Za-z_{(]/.test(word)) return true;
 	const prog = base(word);
 	if (AUDIO_PROGRAMS.has(prog)) return true;
 	if (prog === "osascript") {
