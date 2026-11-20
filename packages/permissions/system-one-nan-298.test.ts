@@ -1,10 +1,13 @@
 /**
  * #298: a read-only `cd <dir> && python3 -c '...json.load...'` was refused as
  * `verdict=block pYes=NaN backend=allowlist` with the audio lane's note
- * ("Audio is off for this session...") as the only reason. The audio lane's
- * quote-blind split read the Python subscript `d["train"]` as a glob command
- * word. The command now reaches the gate's defined path (rules-only in
- * default mode, a person in strict mode), and a block names the rule that fired.
+ * ("Audio is off for this session...") as the only reason.
+ *
+ * What this file holds: a NaN score from the judge is a failed judge, never a block or an
+ * allow by itself (default mode falls to the fixed rules, strict mode asks a person), and an
+ * audio block names the rule that fired. The pilot command itself stays refused by the audio
+ * lane: an exemption for code bodies was tried in #303, failed four 8SO reads, and was removed.
+ * How code bodies should be judged is the open design question #314.
  */
 
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
@@ -59,6 +62,9 @@ class AnswersNaN implements DecideBackend {
 	}
 }
 
+/** A read-only python3 -c with no glob or brace word, so it reaches the judge. */
+const READ_ONLY_PYTHON = `cd /tmp/arc-work && python3 -c 'import json; print(len(json.load(open("task.json"))))'`;
+
 let asked: string[] = [];
 let home = "";
 
@@ -80,14 +86,16 @@ afterAll(() => {
 	cleanupTempDirs();
 });
 
-describe("#298 a NaN score never blocks a read-only python3 -c silently", () => {
-	test("the audio lane does not read Python code inside python3 -c as shell words", () => {
-		expect(isAudioCommand(PILOT_COMMAND)).toBe(false);
-		// Still caught: a real audio program inside the code, and a glob a shell body would run.
+describe("#298 a NaN score never blocks or allows by itself", () => {
+	test("known block: the pilot command stays refused by the audio lane (design question #314)", () => {
+		// The Python subscript d["train"] reads as a glob command word. Refused on main and here,
+		// until #314 decides how a code body is judged. No exemption ships in this PR.
+		expect(isAudioCommand(PILOT_COMMAND)).toBe(true);
+		expect(isAudioCommand(`python3 -c 'print(d["train"])'`)).toBe(true);
 		expect(isAudioCommand(`python3 -c 'import os; os.system("say hi")'`)).toBe(true);
 		expect(isAudioCommand(`bash -c 'true; s[a]y hi'`)).toBe(true);
 		expect(isAudioCommand("s[a]y hi")).toBe(true);
-		expect(isAudioCommand(`python3 -c 'print(d["train"])'`)).toBe(false);
+		expect(isAudioCommand(READ_ONLY_PYTHON)).toBe(false);
 	});
 
 	// 8SO review of PR #303: each of these bypassed the first fix and must stay refused.
@@ -127,19 +135,33 @@ describe("#298 a NaN score never blocks a read-only python3 -c silently", () => 
 		["code body, nested brace", `python3 -c 'import os; os.system("/usr/bin/s{a,{b,c}}y hi")'`],
 		["node body, brace part ?", `node -e 'require("child_process").execSync("/usr/bin/s{?,x}y hi")'`],
 		["perl body, brace part class", `perl -e 'system("/usr/bin/s{[a],x}y hi")'`],
+		// 8SO read at 9e72ea0: code punctuation glued to the word, and host escapes (\n, \x0a)
+		// that become a shell separator. Refused on main; must stay refused.
+		["python subprocess sa{y,}", `python3 -c 'import subprocess; subprocess.run("sa{y,}", shell=True)'`],
+		["python subprocess s{a,b}y", `python3 -c 'import subprocess; subprocess.run("s{a,b}y", shell=True)'`],
+		["python subprocess s{a,x}?", `python3 -c 'import subprocess; subprocess.run("s{a,x}?", shell=True)'`],
+		["python subprocess s{a,x}*", `python3 -c 'import subprocess; subprocess.run("s{a,x}*", shell=True)'`],
+		["bun spawnSync s{a,b}y", `bun -e 'Bun.spawnSync(["sh","-c","s{a,b}y"])'`],
+		["bun spawnSync s[a]y", `bun -e 'Bun.spawnSync(["sh","-c","s[a]y"])'`],
+		["bun spawnSync s{a,b}[y]", `bun -e 'Bun.spawnSync(["sh","-c","s{a,b}[y]"])'`],
+		["python newline escape", `python3 -c 'import os; os.system("true\\ns{a,b}y hi")'`],
+		["python \\x0a escape", `python3 -c 'import os; os.system("true\\x0as{a,b}y hi")'`],
+		["node newline escape", `node -e 'require("child_process").execSync("true\\ns{a,b}y hi")'`],
+		["perl newline escape", `perl -e 'system("true\\ns{a,b}y hi")'`],
+		["ruby newline escape", `ruby -e 'system("true\\ns{a,b}y hi")'`],
 	])("still refused: %s", (_name, command) => {
 		expect(isAudioCommand(command)).toBe(true);
 	});
 
 	test("default mode: no usable score falls to the rules-only path and runs", async () => {
-		const r = await systemOneGate(PILOT_COMMAND, { HOME: home });
+		const r = await systemOneGate(READ_ONLY_PYTHON, { HOME: home });
 		expect(r.guard?.verdict).not.toBe("block");
 		expect(r.guard?.backend).toBe("rules-only");
 		expect(r.run).toBe(true);
 	});
 
 	test("strict mode: a NaN score goes to a person, never a silent block", async () => {
-		const r = await systemOneGate(PILOT_COMMAND, { HOME: home, [SYSTEM_ONE_FLAG]: "1" });
+		const r = await systemOneGate(READ_ONLY_PYTHON, { HOME: home, [SYSTEM_ONE_FLAG]: "1" });
 		expect(r.guard?.verdict).not.toBe("block");
 		expect(asked.length).toBe(1);
 		expect(r.run).toBe(true);

@@ -61,7 +61,7 @@ const FLAG_WITH_VALUE = new Set(["-u", "-g", "-h", "-p", "-C", "-I", "-n", "-P",
 /**
  * A word that looks like a command name or path: the pieces of a quote-blind split do not.
  * `!` and `^` negate a glob class (`s[!x]y`, `s[^x]y`), 8SO #303. A POSIX class (`[:alpha:]`)
- * is folded first, so a bare `:` (a Python slice `h[0:2]`) still reads as not a name.
+ * is folded first. Used only to refuse, so a wider match refuses more, never less.
  */
 const NAMEISH_CHARS = /^[A-Za-z\/.~{[][A-Za-z0-9_.\/{}[\]*?,~!^-]*$/;
 const NAMEISH = {
@@ -86,97 +86,8 @@ function unquoteWord(w: string): string {
 const bare = (w: string): string => w.replace(/^["'`$(]+|["'`)]+$/g, "");
 const base = (w: string): string => bare(w).replace(/^.*\//, "");
 
-/** Interpreters whose quoted `-c`/`-e` body is that language's code, not shell words (#298). */
-const CODE_INTERPRETERS = new Set(["python", "node", "bun", "deno", "ruby", "perl"]);
-
-/**
- * Spans of each plain '...' string given as the `-c`/`-e` body of a code interpreter
- * (`python3 -c '...'`). The shell never expands inside it, so `d["train"]` there is a Python
- * subscript, not a glob command word (#298). A shell body (`bash -c '...'`) is never a span.
- * Fails closed (no spans) on a line with ANSI-C `$'...'` quoting or an unquoted `#` comment,
- * where this quote scan could pair the wrong quotes (8SO, #303).
- */
-function codeBodies(command: string): Array<[number, number]> {
-	const spans: Array<[number, number]> = [];
-	let segStart = 0;
-	for (let i = 0; i < command.length; i++) {
-		const ch = command[i];
-		if (ch === "\\") {
-			i++;
-		} else if (ch === '"') {
-			for (i++; i < command.length && command[i] !== '"'; i++) if (command[i] === "\\") i++;
-		} else if (ch === "$" && command[i + 1] === "'") {
-			return [];
-		} else if (ch === "#" && (i === 0 || /[\s;&|(]/.test(command[i - 1] ?? ""))) {
-			return [];
-		} else if (ch === "'") {
-			const end = command.indexOf("'", i + 1);
-			if (end < 0) break;
-			const words = command.slice(segStart, i).trim().split(/\s+/);
-			let k = 0;
-			while (k < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[k] ?? "")) k++;
-			const prog = base(words[k] ?? "").replace(/[\d.]+$/, "");
-			const flag = words.length > k + 1 ? (words[words.length - 1] ?? "") : "";
-			if (CODE_INTERPRETERS.has(prog) && /^-[A-Za-z]*[ce]$/.test(flag)) spans.push([i, end]);
-			i = end;
-		} else if (/[;&|\n(]/.test(ch ?? "")) {
-			segStart = i + 1;
-		}
-	}
-	return spans;
-}
-
-/**
- * True when a glob or brace word could expand to an audio program's name. Used inside a code
- * body, whose shell strings (os.system, execSync, system) can still reach a shell (8SO, #303).
- * A word this cannot read is treated as a match.
- */
-function globNamesAudio(path: string): boolean {
-	// The program is the last path component; a glob only in the folder part names that program.
-	const word = path.replace(/^.*\//, "");
-	let re = "";
-	for (let i = 0; i < word.length; i++) {
-		const c = word[i] ?? "";
-		if (c === "*") re += ".*";
-		else if (c === "?") re += ".";
-		else if (c === "[") {
-			// sh reads a ] right after [, [! or [^ as a member ([]a] is "] or a"), and [: [= [.
-			// open POSIX classes: not converted, so treated as a match (8SO, #303).
-			if (/^[!^]?\]/.test(word.slice(i + 1)) || /\[[:=.]/.test(word.slice(i))) return true;
-			const end = word.indexOf("]", i + 2);
-			if (end < 0) return true;
-			re += `[${word
-				.slice(i + 1, end)
-				.replace(/^!/, "^")
-				.replace(/\\/g, "\\\\")}]`;
-			i = end;
-		} else if (c === "{") {
-			const end = word.indexOf("}", i);
-			if (end < 0) return true;
-			const body = word.slice(i + 1, end);
-			// sh expands the brace first, then globs each part: a part holding a glob, a
-			// nested brace or an escape is not read here, so it counts as a match (8SO, #303).
-			if (/[{*?[\\]/.test(body)) return true;
-			if (body.includes("..")) re += ".*";
-			else
-				re += `(${body
-					.split(",")
-					.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-					.join("|")})`;
-			i = end;
-		} else re += c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-	}
-	let rx: RegExp;
-	try {
-		rx = new RegExp(`^${re}$`);
-	} catch {
-		return true;
-	}
-	return [...AUDIO_PROGRAMS].some((name) => rx.test(name));
-}
-
 /** True when this one simple command, after unwrapping env/sudo/xargs and the like, makes sound. */
-function segmentIsAudio(segment: string, command: string, inCode = false): boolean {
+function segmentIsAudio(segment: string, command: string): boolean {
 	const words = segment.trim().split(/\s+/).filter(Boolean);
 	let i = 0;
 	for (;;) {
@@ -199,16 +110,13 @@ function segmentIsAudio(segment: string, command: string, inCode = false): boole
 	// must not be an audio program, and must not still build its name from a variable.
 	const word = unquoteWord(words[i] ?? "");
 	// A command word that is a glob, a brace expansion or the head of a $( ) cannot be read.
-	// Inside a code interpreter's quoted body (`d["train"]`) a glob counts only when it could
-	// name an audio program, since the code can still hand a shell string to a shell (#298, #303).
 	if (
 		word === "$" ||
 		/^[A-Za-z0-9_./-]+\$$/.test(word) ||
 		(word !== "[" &&
 			word !== "[[" &&
 			NAMEISH.test(word) &&
-			/[*?]|\[.+\]|\{[^}]*(,|\.\.)[^}]*\}/.test(word) &&
-			(!inCode || globNamesAudio(word)))
+			/[*?]|\[.+\]|\{[^}]*(,|\.\.)[^}]*\}/.test(word))
 	)
 		return true;
 	if (/\$[A-Za-z_{(]/.test(word)) return true;
@@ -256,13 +164,8 @@ export function isAudioCommand(command: string): boolean {
 		)
 	)
 		return true;
-	const spans = codeBodies(command);
-	let at = 0;
 	for (const segment of command.split(/&&|\|\||[;|&\n`()]/)) {
-		const start = command.indexOf(segment, at);
-		at = start + segment.length;
-		const inCode = spans.some(([s, e]) => start > s && start < e);
-		if (segmentIsAudio(segment, command, inCode)) return true;
+		if (segmentIsAudio(segment, command)) return true;
 	}
 	// A line that names an audio program and hands text to a shell (`echo say hi | sh`).
 	if (BARE_NAME.test(command) && SHELL_WORD.test(command)) return true;
