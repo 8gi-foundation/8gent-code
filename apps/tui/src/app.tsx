@@ -199,6 +199,8 @@ import {
 } from "../../../packages/eight/auto-provider.js";
 import { runBugCommand } from "../../../packages/eight/bug-command.js";
 import { safeSpawn } from "../../../packages/eight/safe-spawn.js";
+import { noticeMayReach, openAndAnnounce } from "../../../packages/eight/term-session-list.js";
+import { openOwnedSession } from "../../../packages/eight/term-tools.js";
 import {
 	dotenvKeyIsAllowed,
 	onRunCommandUnsandboxed,
@@ -228,6 +230,7 @@ import { getTaskManager } from "../../../packages/tasks/index.js";
 // react-doctor-disable-next-line react-doctor/no-barrel-import
 import {
 	checkNodePty,
+	isTmuxAvailable,
 	ptyFixLine,
 	resolveTermCommand,
 	spawnInWindow,
@@ -3350,7 +3353,9 @@ export function App({
 			`The last turn in this session was cut off, so this tab resumed in ${permissionModeLabel(start.mode)}. You will be asked once to go back.`,
 		);
 	}, [activeSessionId, addSystemMessage, permHolderFor, setTabPermMode]);
-	const submitRef = useRef<((text: string) => Promise<void>) | null>(null);
+	const submitRef = useRef<
+		((text: string, tabId?: string, mode?: "steer" | "followUp") => Promise<void>) | null
+	>(null);
 
 	// Android (#4706): spoken replies via termux-tts-speak; a missing tool says so in the chat, not on stderr.
 	useEffect(() => {
@@ -7729,36 +7734,85 @@ export function App({
 						}
 
 						if (resolved.mode === "window") {
-							// Plan B: spawn a real Terminal.app window via osascript and
-							// open the tab as a status / control panel.
-							spawnInWindow({
-								command: resolved.command,
-								args: resolved.args,
-								label: resolved.label,
-								cwd: projectCwd,
-							})
-								.then((handle) => {
-									workspaceTabs.addTab("terminal", resolved.label, {
-										mode: "window",
-										sessionId: handle.sessionId,
-										pid: handle.pid,
-										command: handle.command,
-										args: handle.args,
-										label: handle.label,
-										startedAt: handle.startedAt,
-										source: resolved.source,
-									});
-									addSystemMessage(
-										`Opened ${resolved.label} in a new Terminal.app window (session ${handle.sessionId}, pid ${handle.pid}).`,
-									);
-								})
-								.catch((err) => {
-									addSystemMessage(
-										`Failed to spawn ${resolved.label} in a window: ${
-											err && err.message ? err.message : err
-										}`,
-									);
+							// A tmux session the model can read and type to (#180), shown in a
+							// Terminal.app window. Without tmux: the plain window, which the model
+							// cannot reach, and the line says so.
+							const tab = (h: {
+								sessionId: string;
+								pid: number;
+								command: string;
+								args: string[];
+								label: string;
+								startedAt: string;
+							}) =>
+								workspaceTabs.addTab("terminal", resolved.label, {
+									mode: "window",
+									sessionId: h.sessionId,
+									pid: h.pid,
+									command: h.command,
+									args: h.args,
+									label: h.label,
+									startedAt: h.startedAt,
+									source: resolved.source,
 								});
+							const chatTab = activeTabIdRef.current;
+							// The notice goes to this machine's model turn only: never to a shared-session
+							// daemon or Telegram, never as the answer to a question the person is in. A
+							// running turn gets it queued behind it, not steered.
+							const tellModel = (text: string) => {
+								const mayReach = noticeMayReach({
+									telegram: telegramTab.owns(chatTab),
+									daemonLinked: Boolean(daemonLinkRef.current?.client.sessionId),
+									questionPending:
+										Boolean(djInstallAnswerRef.current) || nameQuestionOpen || showOnboarding,
+								});
+								if (mayReach) void submitRef.current?.(text, chatTab, "followUp");
+							};
+							// The new tab takes the screen, so the line goes to the chat it came from.
+							const say = (content: string) =>
+								appendToTabLatest.current(chatTab, {
+									id: messageId("system"),
+									role: "system" as const,
+									content,
+									timestamp: new Date(),
+								});
+							if (isTmuxAvailable()) {
+								void openAndAnnounce(
+									() =>
+										openOwnedSession({
+											command: resolved.command,
+											args: resolved.args,
+											label: resolved.label,
+											cwd: projectCwd,
+										}),
+									resolved.label,
+									{
+										addTab: (s) => tab({ ...s, sessionId: s.target, startedAt: s.createdAt }),
+										say,
+										tellModel,
+									},
+								);
+							} else {
+								spawnInWindow({
+									command: resolved.command,
+									args: resolved.args,
+									label: resolved.label,
+									cwd: projectCwd,
+								})
+									.then((handle) => {
+										tab(handle);
+										addSystemMessage(
+											`Opened ${resolved.label} in a new Terminal.app window (session ${handle.sessionId}, pid ${handle.pid}). tmux was not found, so I cannot read it or type into it.`,
+										);
+									})
+									.catch((err) => {
+										addSystemMessage(
+											`Failed to spawn ${resolved.label} in a window: ${
+												err && err.message ? err.message : err
+											}`,
+										);
+									});
+							}
 						} else if (!checkNodePty(projectCwd).ok) {
 							// No node-pty (Termux installs skip it): a herdr pane needs none, so
 							// open the preset or shell beside 8gent; anything else gets the fix.
