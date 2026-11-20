@@ -270,8 +270,10 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 	if (d.adhd) {
 		out.push({ key: "adhd", label: "adhd", value: "on", color: ui.teal, priority: 3 });
 	}
-	if (d.durable) {
-		out.push({ key: "durable", label: "durable", value: "on", color: ui.teal, priority: 3 });
+	// Durable is on by default in the TUI, so "on" is the quiet expected state and
+	// draws nothing (#3130). Only "off" is news: a killed turn will not resume.
+	if (d.durable === false) {
+		out.push({ key: "durable", label: "durable", value: "off", color: ui.orange, priority: 1 });
 	}
 	if (known(d.user)) {
 		out.push({ key: "user", label: "user", value: d.user, color: ui.cream, priority: 7 });
