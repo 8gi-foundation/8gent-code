@@ -26,6 +26,7 @@ import { dropOllamaCloudNames } from "../../../packages/core/ollama-cloud.js";
 import { answerFromLine } from "../../../packages/eight/android-setup.js";
 import { sanitizeForDisplay } from "../../../packages/eight/changelog-view.js";
 import { killLiveShells } from "../../../packages/eight/live-shells.js";
+import { markOpen } from "../../../packages/eight/open-sessions.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
 import { chatMessages } from "../../../packages/eight/session-messages.js";
 import {
@@ -1571,6 +1572,10 @@ export function App({
 	/** One no per session: after it, /dj play stops asking and shows the command as before. */
 	const djInstallDeclinedRef = useRef(false);
 	const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+	// The next start offers to bring back whatever session was open here (#196).
+	useEffect(() => {
+		if (activeSessionId) markOpen(activeSessionId);
+	}, [activeSessionId]);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [historyConversations, setHistoryConversations] = useState<ConversationEntry[]>([]);
