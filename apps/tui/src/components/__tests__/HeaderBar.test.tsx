@@ -292,6 +292,22 @@ describe("HeaderBar braille mark geometry", () => {
 		for (const width of [40, MIN_COLS - 1]) expect(planHeader({ ...short, width, mark: true }).mark).toBe(false);
 	});
 
+	test("an unpushed branch carries no 'no upstream' note in the header (#295, #297)", () => {
+		const props = { ...live, branch: "main", syncStatus: "no upstream", width: 140 };
+		const plan = planHeader(props);
+		expect(plan.middle.branch).toBe("main");
+		expect(plan.middle.sync).toBe("");
+		const out = stripVTControlCharacters(renderToString(<HeaderBar {...props} />, { columns: 140 }));
+		expect(out).not.toContain("no upstream");
+	});
+
+	test("a real sync state still shows beside the branch (ahead, behind)", () => {
+		for (const syncStatus of ["ahead 1", "behind 2", "up to date"]) {
+			const plan = planHeader({ ...live, branch: "main", syncStatus, width: 140 });
+			expect(plan.middle.sync).toBe(syncStatus);
+		}
+	});
+
 	test("the mark never costs the branch, the sync state or the tagline", () => {
 		for (const props of [live, base, { ...live, branch: "main" }]) {
 			for (let width = 40; width <= 240; width++) {
