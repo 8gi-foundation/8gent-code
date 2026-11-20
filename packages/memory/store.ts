@@ -432,7 +432,10 @@ export class MemoryStore {
 		let vectorResults: SearchResult[] = [];
 		if (this.embeddingProvider?.available && query) {
 			try {
-				const queryEmbedding = await this.embeddingProvider.generate(query);
+				const queryEmbedding = await (this.embeddingProvider.generateQuery ?? this.embeddingProvider.generate).call(
+					this.embeddingProvider,
+					query,
+				);
 				vectorResults = this._vectorSearch(queryEmbedding, options);
 			} catch {
 				// Fall back to FTS-only on embedding failure
@@ -921,12 +924,15 @@ export class MemoryStore {
              m.importance AS importance
       FROM memories_vec v
       JOIN memories m ON m.id = v.memory_id
+      JOIN embeddings e ON e.memory_id = v.memory_id AND e.model = ?
       WHERE v.embedding MATCH ?
         AND k = ?
         AND v.distance <= ?
         AND m.deleted_at IS NULL
     `;
+		// Only vectors from the active model: another model's vectors live in a different space.
 		const params: import("bun:sqlite").SQLQueryBindings[] = [
+			this.embeddingProvider?.model ?? "",
 			encodeVector(queryEmbedding),
 			knnK,
 			maxDistance,
@@ -986,9 +992,9 @@ export class MemoryStore {
       SELECT e.memory_id, e.vector, m.data, m.importance, m.type, m.scope
       FROM embeddings e
       JOIN memories m ON m.id = e.memory_id
-      WHERE m.deleted_at IS NULL
+      WHERE m.deleted_at IS NULL AND e.model = ?
     `;
-		const params: import("bun:sqlite").SQLQueryBindings[] = [];
+		const params: import("bun:sqlite").SQLQueryBindings[] = [this.embeddingProvider?.model ?? ""];
 
 		if (options.types && options.types.length > 0) {
 			sql += ` AND m.type IN (${options.types.map(() => "?").join(",")})`;
@@ -1079,6 +1085,34 @@ export class MemoryStore {
 			}))
 			.sort((a, b) => b.score - a.score)
 			.slice(0, limit);
+	}
+
+	/** Live memories with no vector from the active embedder (new model, or never embedded). */
+	countNeedsReembed(): number {
+		if (!this.embeddingProvider || this.embeddingProvider.dimensions === 0) return 0;
+		return (
+			this.db
+				.prepare(
+					`SELECT COUNT(*) AS c FROM memories m
+           LEFT JOIN embeddings e ON e.memory_id = m.id AND e.model = ?
+           WHERE m.deleted_at IS NULL AND e.memory_id IS NULL`,
+				)
+				.get(this.embeddingProvider.model) as { c: number }
+		).c;
+	}
+
+	/** Embed every memory that lacks a vector from the active embedder. Returns how many were done. */
+	async reembedStale(): Promise<number> {
+		if (!this.embeddingProvider?.available) return 0;
+		const rows = this.db
+			.prepare(
+				`SELECT m.id AS id, m.content_text AS text FROM memories m
+         LEFT JOIN embeddings e ON e.memory_id = m.id AND e.model = ?
+         WHERE m.deleted_at IS NULL AND e.memory_id IS NULL`,
+			)
+			.all(this.embeddingProvider.model) as Array<{ id: string; text: string }>;
+		for (const row of rows) await this._embedAsync(row.id, row.text);
+		return rows.length;
 	}
 
 	// ── Private: Async Embedding ──────────────────────────────────────
