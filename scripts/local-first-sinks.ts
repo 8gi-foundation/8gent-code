@@ -293,8 +293,8 @@ export const SINKS: Sink[] = [
 		files: ["packages/tools/web.ts", "packages/tools/browser/web-search.ts"],
 		waiver: {
 			ref: "#4912",
-			expires: "2026-11-07",
-			why: "Decision needed from 8PO and James: web_search on by default, or behind a one-time yes that names DuckDuckGo. Tracked in docs/security/off-device-data.md.",
+			expires: "2026-11-24",
+			why: "Renewed 14 days under #188, still a real default-path sink. Decision needed from 8PO and James: web_search on by default, or behind a one-time yes that names DuckDuckGo. Tracked in docs/security/off-device-data.md.",
 		},
 	},
 
@@ -540,8 +540,8 @@ export interface InstallSite {
 
 const INSTALL_WAIVER: Waiver = {
 	ref: "#4915",
-	expires: "2026-11-07",
-	why: "Core must work after one install. Each entry goes when its install or install text is gone from the default path.",
+	expires: "2026-11-24",
+	why: "Renewed 14 days under #188, the install text is still on default paths. Core must work after one install. Each entry goes when its install or install text is gone from the default path.",
 };
 
 export const INSTALL_SITES: InstallSite[] = [
@@ -575,15 +575,8 @@ export const INSTALL_SITES: InstallSite[] = [
 		waiver: INSTALL_WAIVER,
 	},
 	{
-		file: "packages/eight/index.ts",
-		max: 1,
-		mode: "default",
-		why: "the runtime-unreachable error tells the person to run ollama serve",
-		waiver: INSTALL_WAIVER,
-	},
-	{
 		file: "packages/eight/repl.ts",
-		max: 3,
+		max: 2,
 		mode: "default",
 		why: "the Ollama-not-running warning tells the person to run ollama serve",
 		waiver: INSTALL_WAIVER,
@@ -597,7 +590,7 @@ export const INSTALL_SITES: InstallSite[] = [
 	},
 	{
 		file: "packages/self-autonomy/onboarding.ts",
-		max: 4,
+		max: 3,
 		mode: "default",
 		why: "onboarding tells the person to brew install ollama and ollama pull",
 		waiver: INSTALL_WAIVER,
