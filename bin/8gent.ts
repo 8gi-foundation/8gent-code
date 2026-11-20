@@ -281,6 +281,7 @@ const DEPTH_EXEMPT_COMMANDS = new Set([
 	"model-pin",
 	"deck",
 	"bug",
+	"learned",
 ]);
 
 function depthExempt(args: string[]): boolean {
@@ -690,6 +691,13 @@ async function main() {
 			const r = runBugCommand(restArgs, { version: VERSION });
 			(r.code === 0 ? console.log : console.error)(r.text);
 			process.exitCode = r.code;
+			break;
+		}
+
+		case "learned": {
+			// #232: `8gent learned` prints ~/.8gent/learned.jsonl in plain words. Local, read-only.
+			const { printLearned } = await import("../packages/eight/learned-audit.ts");
+			for (const line of printLearned()) console.log(line);
 			break;
 		}
 
