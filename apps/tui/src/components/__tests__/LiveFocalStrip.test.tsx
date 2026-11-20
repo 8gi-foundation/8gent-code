@@ -250,3 +250,32 @@ describe("LiveFocalStrip keys-up (compact, #4967)", () => {
 		expect(out.split("\n").filter((l) => l.trim() !== "").length).toBe(1);
 	});
 });
+
+describe("the context meter is drawn once, in the footer (#9)", () => {
+	const draw = (width: number) =>
+		renderToString(
+			<LiveFocalStrip
+				mode="Planning"
+				activeStep=""
+				route="qwen3.5:9b-32k"
+				tokens="71K tok"
+				contextPct={75}
+				contextState="server"
+				isProcessing={false}
+				lastTurnEndedAt={Date.now() - 60_000}
+				lastTurnSuccess={true}
+				animate={false}
+				width={width}
+			/>,
+			{ columns: width },
+		);
+
+	test("a finished turn's strip keeps the route and token count but draws no ctx meter", () => {
+		const out = draw(110);
+		expect(out).toContain("DONE");
+		expect(out).toContain("qwen3.5:9b-32k");
+		expect(out).toContain("71K tok");
+		expect(out).not.toContain("ctx");
+		expect(out).not.toContain("█");
+	});
+});

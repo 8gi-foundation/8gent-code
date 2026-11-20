@@ -2,8 +2,9 @@
  * LiveFocalStrip - single horizontal strip above the message list that
  * always answers "what is happening NOW?"
  *
- * One canonical pulse: state + active step on the left, route + context
- * meter + token count on the right. Border is teal by default and flips
+ * One canonical pulse: state + active step on the left, route + token
+ * count on the right. The context meter is the footer's, drawn once (#9).
+ * Border is teal by default and flips
  * to orange when an approval is pending so the eye lands on it without
  * a second glance.
  *
@@ -62,13 +63,12 @@ interface LiveFocalStripProps {
 	 *  Shown dim after the route as "(asked ...)" (#3102). */
 	routeAsked?: string;
 	tokens: string;
-	/** Share of the model's real window in use. Null when there is no
-	 *  percent to show: see `contextState` (#3321). */
+	/** Share of the model's real window in use. Not drawn here: the footer
+	 *  carries the ctx meter, once (#9). Kept so callers need no change, as
+	 *  with `mode` (#3123). */
 	contextPct: number | null;
-	/** Why there is no percent, or where the window came from. `server`
-	 *  marks the bar with ~ (reported by the local server, not provider
-	 *  metadata); `unknown` shows "? unknown"; `fresh` shows "--" until the
-	 *  first reply is measured. */
+	/** Where the window came from. Not drawn here (#9): the footer shows the
+	 *  ctx value and says what to do when it is unknown. */
 	contextState?: "provider" | "server" | "override" | "unknown" | "fresh";
 	approvalPending?: boolean;
 	/** The agent runs unattended (Infinite): no card can wait on the person,
@@ -84,8 +84,8 @@ interface LiveFocalStripProps {
 	lastTurnSuccess?: boolean | null;
 	/** False (Ctrl+A) stills the spinner and skips the settle beat. */
 	animate?: boolean;
-	/** Columns the strip takes, borders included. When known, the route and
-	 *  meter give way before the state text is ever cut (audit #9). */
+	/** Columns the strip takes, borders included. When known, the route gives
+	 *  way before the state text is ever cut (audit #9). */
 	width?: number;
 	/** Can the active tab run a turn (lib/readiness.ts, #3290)? When not,
 	 *  the state word is NO MODEL (or CHECK while the first probe or build is
@@ -125,8 +125,6 @@ export function LiveFocalStrip({
 	route,
 	routeAsked,
 	tokens,
-	contextPct,
-	contextState = "provider",
 	approvalPending = false,
 	autonomous = false,
 	isProcessing = false,
@@ -181,7 +179,6 @@ export function LiveFocalStrip({
 					middle,
 					route: shownRoute === "-" ? "" : shownRoute,
 					asked: shownRoute && shownRoute !== "-" && routeAsked ? askedNote(routeAsked) : "",
-					meter: blocked?.state !== "none",
 				}
 			: fitNowStrip({
 					width,
@@ -191,6 +188,7 @@ export function LiveFocalStrip({
 					middleShort: showApprovalBorder ? "waiting" : finished ? "finished" : undefined,
 					route: shownRoute,
 					asked: routeAsked,
+					meter: false,
 					tokens,
 				});
 	return (
@@ -231,12 +229,6 @@ export function LiveFocalStrip({
 			<Box flexShrink={0} justifyContent="flex-end">
 				{fit.route ? <Text color={t.steel}>{fit.route}</Text> : null}
 				{fit.asked ? <Text color={t.textTertiary}> {fit.asked}</Text> : null}
-				{fit.meter ? (
-					<>
-						<Text color={t.textTertiary}>{fit.route ? " ctx " : "ctx "}</Text>
-						<Text color={t.steel}>{contextMeterText(contextPct, contextState)}</Text>
-					</>
-				) : null}
 				{tokens && blocked?.state !== "none" ? <Text color={t.textTertiary}> {tokens}</Text> : null}
 			</Box>
 		</Box>
