@@ -3,26 +3,32 @@ import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { getHookManager } from "../hooks";
 import {
 	HEAD_BYTES,
 	TAIL_BYTES,
 	formatCommandOutput,
 	loopbackFormHint,
 	redirectNote,
+	signalExitCode,
 	writtenFiles,
 } from "./command-output";
+import { CommitGate } from "./commit-gate";
+import { readCheck } from "./done-gate";
+import { isQuietSuccess } from "./tool-loop-detector";
+import { ToolExecutor } from "./tools";
 
 describe("formatCommandOutput (#3373)", () => {
 	test("exit 0 with both streams keeps stderr and labels it", () => {
 		expect(formatCommandOutput(0, "bun test v1.4.2\n", "5 pass\n 0 fail\n")).toBe(
-			"bun test v1.4.2\n[stderr]\n5 pass\n 0 fail",
+			"bun test v1.4.2\n[stderr]\n5 pass\n 0 fail\nExit code 0",
 		);
 	});
 	test("200 KB of output still shows the summary at the end, under the artifact threshold", () => {
 		const noise = `${"x".repeat(99)}\n`;
 		const err = `${noise.repeat(2000)} 5 pass\n 0 fail\n`;
 		const out = formatCommandOutput(0, "bun test v1.4.2\n", err);
-		expect(out).toMatch(/5 pass\n 0 fail$/);
+		expect(out).toMatch(/5 pass\n 0 fail\nExit code 0$/);
 		expect(out).toMatch(/\[\d+ bytes omitted\]/);
 		expect(out.startsWith("bun test v1.4.2\n[stderr]\n")).toBe(true);
 		expect(Buffer.byteLength(out)).toBeLessThan(50_000);
@@ -44,11 +50,11 @@ describe("formatCommandOutput (#3373)", () => {
 		}
 	});
 	test("exit 0 with one stream returns that stream", () => {
-		expect(formatCommandOutput(0, "hello\n", "")).toBe("hello");
-		expect(formatCommandOutput(0, "", "warning only\n")).toBe("warning only");
+		expect(formatCommandOutput(0, "hello\n", "")).toBe("hello\nExit code 0");
+		expect(formatCommandOutput(0, "", "warning only\n")).toBe("warning only\nExit code 0");
 	});
 	test("exit 0 with no output says so", () => {
-		expect(formatCommandOutput(0, "", "")).toBe("Command completed successfully.");
+		expect(formatCommandOutput(0, "", "")).toBe("Command completed successfully.\nExit code 0");
 	});
 	test("non-zero exit is unchanged", () => {
 		expect(formatCommandOutput(1, "out", "err")).toBe("Exit code 1:\nout\nerr");
@@ -159,11 +165,11 @@ describe("silent success names the file it wrote (browser_operation pilot)", () 
 	});
 	test("no file, no note change", () => {
 		expect(formatCommandOutput(0, "", "", "mkdir -p .tmp", cwd)).toBe(
-			"Command completed successfully.",
+			"Command completed successfully.\nExit code 0",
 		);
 	});
 	test("real output is never touched", () => {
-		expect(formatCommandOutput(0, "hi\n", "", "curl -o a.txt x", cwd)).toBe("hi");
+		expect(formatCommandOutput(0, "hi\n", "", "curl -o a.txt x", cwd)).toBe("hi\nExit code 0");
 	});
 });
 
@@ -180,7 +186,7 @@ describe("login-line copy names its file and the next step (#4303)", () => {
 
 	test("the w-flag note keeps its exact sentence", () => {
 		expect(formatCommandOutput(0, "", "", copy, "/work")).toBe(
-			"Command completed successfully. It printed nothing. It copied the value into .tmp/login and did not show it: do not read or retype it, do not repeat this command. Post it with curl -d @.tmp/login and no -L (add -d for the other fields).",
+			"Command completed successfully. It printed nothing. It copied the value into .tmp/login and did not show it: do not read or retype it, do not repeat this command. Post it with curl -d @.tmp/login and no -L (add -d for the other fields).\nExit code 0",
 		);
 	});
 
@@ -238,7 +244,7 @@ describe("login-line copy names its file and the next step (#4303)", () => {
 
 	test("other sed commands are unchanged", () => {
 		expect(formatCommandOutput(0, "", "", "sed -i 's/a/b/' f.txt", "/work")).toBe(
-			"Command completed successfully.",
+			"Command completed successfully.\nExit code 0",
 		);
 	});
 });
@@ -379,4 +385,110 @@ describe("loopback form hint is shown up front (#4326)", () => {
 		const w = "sed -n 's/^Password: */password=/w .tmp/login' TASK.txt";
 		expect(formatCommandOutput(0, "", "", w, "/work")).not.toContain("If this page has a form");
 	});
+});
+
+describe("every shell result states how the command ended (#162)", () => {
+	const statusLines = (t: string) => t.split("\n").filter((l) => /^Exit code\b/.test(l));
+
+	test("exit 0 with output ends with the status line", () => {
+		const out = formatCommandOutput(0, "hello\n", "");
+		expect(out.endsWith("\nExit code 0")).toBe(true);
+		expect(statusLines(out)).toEqual(["Exit code 0"]);
+	});
+	test("exit 0 with no output still ends with it", () => {
+		const out = formatCommandOutput(0, "", "");
+		expect(out.endsWith("\nExit code 0")).toBe(true);
+		expect(statusLines(out)).toHaveLength(1);
+	});
+	test("a capped success keeps the status line after the cut", () => {
+		const out = formatCommandOutput(0, "x\n".repeat(50_000), "");
+		expect(out).toMatch(/\[\d+ bytes omitted\]/);
+		expect(out.endsWith("\nExit code 0")).toBe(true);
+	});
+	test("a non-zero exit keeps its one status line, not two", () => {
+		const out = formatCommandOutput(2, "out", "err");
+		expect(out).toBe("Exit code 2:\nout\nerr");
+		expect(statusLines(out)).toHaveLength(1);
+	});
+	test("a signal kill names the signal and never prints null", () => {
+		const out = formatCommandOutput(null, "partial", "", "sleep 9", "/w", "/w", "SIGTERM");
+		expect(out).toContain("Killed by signal SIGTERM");
+		expect(out).not.toContain("null");
+		expect(statusLines(out)).toHaveLength(1);
+		expect(formatCommandOutput(null, "", "")).not.toContain("null");
+	});
+	test("the shell code for a signal is 128 plus its number, 1 when unknown", () => {
+		expect(signalExitCode("SIGTERM")).toBe(143);
+		expect(signalExitCode("SIGKILL")).toBe(137);
+		expect(signalExitCode(null)).toBe(1);
+		expect(signalExitCode("SIGNOPE" as NodeJS.Signals)).toBe(1);
+	});
+});
+
+describe("readers of the status text still classify correctly (#162)", () => {
+	const ok = formatCommandOutput(0, "12 pass\n", "");
+	const silent = formatCommandOutput(0, "", "");
+	const failed = formatCommandOutput(1, "(fail) adds", "");
+	const killed = formatCommandOutput(null, "", "", undefined, undefined, undefined, "SIGKILL");
+
+	test("done gate", () => {
+		expect(readCheck(ok, 300).kind).toBe("pass");
+		expect(readCheck(silent, 300).kind).toBe("pass");
+		expect(readCheck(failed, 300).kind).toBe("fail");
+		expect(readCheck(killed, 300).kind).toBe("fail");
+	});
+	test("commit gate", async () => {
+		const verdict = async (output: string) => {
+			const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cmd-gate-"));
+			try {
+				spawnSync("git", ["init", "-q"], { cwd: dir });
+				fs.writeFileSync(
+					path.join(dir, "package.json"),
+					JSON.stringify({ name: "t", private: true, scripts: { test: "x" } }),
+				);
+				fs.writeFileSync(path.join(dir, "bun.lock"), "");
+				spawnSync("git", ["add", "."], { cwd: dir });
+				return await new CommitGate(dir, async () => output).check();
+			} finally {
+				fs.rmSync(dir, { recursive: true, force: true });
+			}
+		};
+		expect((await verdict(ok)).commit).toBe(true);
+		expect((await verdict(failed)).commit).toBe(false);
+		const k = await verdict(killed);
+		expect(k.commit).toBe(false);
+		if (!k.commit) expect(k.message).toContain("was killed before it finished");
+	});
+	test("the quiet-success nudge treats a silent exit 0 as quiet and a failure as not", () => {
+		expect(isQuietSuccess("run_command", silent)).toBe(true);
+		expect(isQuietSuccess("run_command", ok)).toBe(false);
+		expect(isQuietSuccess("run_command", failed)).toBe(false);
+		expect(isQuietSuccess("run_command", killed)).toBe(false);
+	});
+});
+
+describe("the hook code on a signal kill (#162)", () => {
+	test("afterCommand gets a non-zero code, 143 for a SIGTERM", async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cmd-hook-"));
+		const approve = process.env.EIGHT_HEADLESS_APPROVE;
+		process.env.EIGHT_HEADLESS_APPROVE = "1";
+		const hm = getHookManager();
+		const original = hm.executeHooks.bind(hm);
+		const seen: unknown[] = [];
+		hm.executeHooks = (async (type: string, ctx: Record<string, unknown> = {}) => {
+			if (type === "afterCommand") seen.push(ctx.exitCode);
+			return original(type as never, ctx as never);
+		}) as typeof hm.executeHooks;
+		try {
+			const out = await new ToolExecutor(dir).runCommand("kill -TERM $$");
+			expect(seen).toEqual([143]);
+			expect(out).toContain("Killed by signal SIGTERM");
+			expect(out).not.toContain("null");
+		} finally {
+			hm.executeHooks = original;
+			if (approve === undefined) delete process.env.EIGHT_HEADLESS_APPROVE;
+			else process.env.EIGHT_HEADLESS_APPROVE = approve;
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
 });
