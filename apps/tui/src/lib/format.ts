@@ -24,6 +24,17 @@ export function hudTokens(total: number): string {
 	return `${Math.round(total)} tok`;
 }
 
+/**
+ * The NOW strip's token readout: what the last request held, the same reading
+ * the footer's ctx meter shows. It sits beside that meter, so a running sum of
+ * every step's usage (each step re-sends the history) read as a second,
+ * larger context size: "78K tok" in the strip against "16.7k" in the footer.
+ * "" while nothing is measured.
+ */
+export function hudContextTokens(contextUsed: number | null | undefined): string {
+	return hudTokens(contextUsed ?? 0);
+}
+
 /** Format a duration in milliseconds to a human-readable string. */
 export function formatDuration(ms: number): string {
 	if (ms < 0) ms = 0;

@@ -117,7 +117,29 @@ describe("state.db is git-ignored (#3302)", () => {
 			.split("\n")
 			.map((l) => l.trim())
 			.filter((l) => l && !l.startsWith("#"));
-		expect(rules).toEqual(["state.db*"]);
+		expect(rules).toEqual(["state.db*", ".gitignore"]);
+	});
+
+	it("in a real git repo, opening the DB alone leaves .8gent/ out of git status", () => {
+		git(tmpRoot, "init", "-q");
+		fs.writeFileSync(path.join(tmpRoot, "README.md"), "hello\n");
+		const db = new WorkspaceDb(tmpRoot);
+		db.kvSet("k", { v: 1 });
+		const status = git(tmpRoot, "status", "--porcelain", "--untracked-files=all");
+		db.close();
+		expect(status).not.toContain(".8gent");
+	});
+
+	it("upgrades the .gitignore an earlier version wrote, and only that one", () => {
+		const dotDir = path.join(tmpRoot, ".8gent");
+		fs.mkdirSync(dotDir, { recursive: true });
+		const ignore = path.join(dotDir, ".gitignore");
+		fs.writeFileSync(
+			ignore,
+			"# Written by 8gent: the workspace state DB and its WAL/SHM files are local.\nstate.db*\n",
+		);
+		resolveWorkspaceDbPath(tmpRoot);
+		expect(fs.readFileSync(ignore, "utf8")).toContain("\n.gitignore\n");
 	});
 
 	it("in a real git repo, opening the DB leaves no state.db files in git status", () => {
@@ -137,9 +159,9 @@ describe("state.db is git-ignored (#3302)", () => {
 		db.close();
 
 		expect(status).not.toContain("state.db");
-		// config.json stays committable, and so does the .gitignore itself.
+		// config.json stays committable; the .gitignore ignores itself.
 		expect(status).toContain(".8gent/config.json");
-		expect(status).toContain(".8gent/.gitignore");
+		expect(status).not.toContain(".8gent/.gitignore");
 		expect(staged).not.toContain("state.db");
 		expect(staged).toContain(".8gent/config.json");
 	});
