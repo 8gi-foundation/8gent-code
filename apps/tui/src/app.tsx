@@ -1158,7 +1158,8 @@ export function App({
 	// Background task pool (Ctrl+G to background current, Ctrl+J to open panel)
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [bgPanelOpen, setBgPanelOpen] = useState(false);
-	// Does the footer row draw the ctx meter? The NOW strip draws it only when not (#9).
+	// Is the footer the ctx meter's home (decided from the mid-turn row, so it never
+	// moves when a turn starts)? The NOW strip draws the meter only when not (#9).
 	const [footerCtxShown, setFooterCtxShown] = useState(true);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers

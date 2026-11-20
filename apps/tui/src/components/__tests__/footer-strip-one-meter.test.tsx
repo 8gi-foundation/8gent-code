@@ -19,7 +19,11 @@ import {
 	StatusSegments,
 	fmSegmentWidth,
 	footerDrawsCtx,
+	footerHoldsCtx,
 } from "../StatusFooter.js";
+
+/** A fixed finish time: "finished 9:51 AM" is as wide on every run, whatever the clock says. */
+const ENDED_AT = new Date(2026, 10, 20, 9, 51).getTime();
 
 const WINDOWS = {
 	known: { ctx: { used: 24700, window: 32768, stale: false }, pct: 75, state: "server" },
@@ -97,6 +101,83 @@ const MAIN_FAILS: Record<string, Record<string, string>> = {
 	},
 };
 
+/**
+ * The price of a meter that never moves (#308, option A): an idle row whose footer
+ * has room for ctx, while its running row does not, draws it in both the footer and
+ * the strip, as main did. Every case, recorded at this head. None is mid-turn.
+ */
+const IDLE_TWICE: Record<string, string> = {
+	"bare full": "60-67",
+	"bare full station": "57-59,65-80",
+	"bare known": "60-66",
+	"bare known station": "57-59,64-79",
+	"bare stale station": "57-66,71",
+	"bare unknown": "66-76",
+	"bare unknown station": "57-59,79-89",
+	"flagged full": "73-79,103-113",
+	"flagged full station": "57-59,86-89,92,116-119,128-138",
+	"flagged known": "72-79,102-112",
+	"flagged known station": "57-59,85-89,92,115-119,127-137",
+	"flagged stale": "141-144,148-151,156-158",
+	"flagged stale station": "166-169,173-176,181-183",
+	"flagged unknown": "166-176",
+	"flagged unknown station": "191-200",
+	"held full": "86-89,92-96",
+	"held full station": "99-109,121-131",
+	"held known": "85-89,92-95",
+	"held known station": "98-108,120-130",
+	"held stale": "134-137,141-144,149-151",
+	"held stale station": "159-162,166-169,174-176",
+	"held unknown": "159-169",
+	"held unknown station": "184-194",
+	"judgeFailed full": "94-104",
+	"judgeFailed full station": "107-117,120-129",
+	"judgeFailed known": "93-103",
+	"judgeFailed known station": "106-116,120-128",
+	"judgeFailed stale": "132-135,139-142,147-149",
+	"judgeFailed stale station": "157-160,164-167,172-174",
+	"judgeFailed unknown": "157-167",
+	"judgeFailed unknown station": "182-192",
+	"judgeLoading full": "95-105",
+	"judgeLoading full station": "108-118,120-130",
+	"judgeLoading known": "94-104",
+	"judgeLoading known station": "107-117,120-129",
+	"judgeLoading stale": "133-136,140-143,148-150",
+	"judgeLoading stale station": "158-161,165-168,173-175",
+	"judgeLoading unknown": "158-168",
+	"judgeLoading unknown station": "183-193",
+	"rich full": "57-59,79-89",
+	"rich full station": "92-102",
+	"rich known": "57-59,78-88",
+	"rich known station": "92-101",
+	"rich stale": "117-120,124-127,132-134",
+	"rich stale station": "142-145,149-152,157-159",
+	"rich unknown": "142-152",
+	"rich unknown station": "167-177",
+	"sandbox full": "79-84,96-100",
+	"sandbox full station": "92-97,109-113,121-125",
+	"sandbox known": "78-84,96-99",
+	"sandbox known station": "92-97,109-112,121-124",
+	"sandbox stale": "120,127-130,132-137",
+	"sandbox stale station": "145,152-155,157-162",
+	"sandbox unknown": "143-153",
+	"sandbox unknown station": "168-178",
+};
+
+/** Check 8: where only the strip's own room decides whether it draws the meter. */
+const STRIP_ROOM: Record<string, string> = {
+	"rich full": "50-56",
+	"rich known": "50-56",
+	"rich stale": "50-56,90-91",
+	"rich station": "50-56,90-91",
+	"rich unknown": "50-56,90-91",
+	"sandbox full": "50-56",
+	"sandbox known": "50-56",
+	"sandbox stale": "50-56,90-91",
+	"sandbox station": "50-56,90-91",
+	"sandbox unknown": "50-56,90-91",
+};
+
 const plain = (s: string) => stripVTControlCharacters(s);
 
 interface Case {
@@ -107,6 +188,8 @@ interface Case {
 	footer: string;
 	strip: string;
 	drawsCtx: boolean;
+	/** The footer is the meter's home (decided from the mid-turn row), as app.tsx wires it. */
+	home: boolean;
 }
 
 const stripCache = new Map<string, string>();
@@ -126,7 +209,7 @@ function drawStrip(columns: number, w: keyof typeof WINDOWS, running: boolean, m
 				contextState={WINDOWS[w].state}
 				meter={meter}
 				isProcessing={running}
-				lastTurnEndedAt={running ? null : Date.now() - 60_000}
+				lastTurnEndedAt={running ? null : ENDED_AT}
 				lastTurnSuccess={running ? null : true}
 				animate={false}
 				width={width}
@@ -154,6 +237,7 @@ for (let columns = 30; columns <= 200; columns++) {
 					),
 				).trimEnd();
 				const drawsCtx = footerDrawsCtx(data, width, station, station);
+				const home = footerHoldsCtx(data, width, station, station);
 				const running = Boolean(extra.turnRunning);
 				cases.push({
 					name: `w${columns} ${row} ${w}${station ? " station" : ""}`,
@@ -161,8 +245,9 @@ for (let columns = 30; columns <= 200; columns++) {
 					columns,
 					width,
 					footer,
-					strip: drawStrip(columns, w, running, !drawsCtx),
+					strip: drawStrip(columns, w, running, !home),
 					drawsCtx,
+					home,
 				});
 			}
 		}
@@ -246,10 +331,45 @@ describe("footer and NOW strip draw the context reading once (#9)", () => {
 	test("6. the meter is drawn at most once, and exactly once wherever main drew it", () => {
 		expect(failing((c) => c.drawsCtx === /\bctx\b/.test(c.footer))).toEqual({});
 		const drawn = (c: Case) => ctxCount(c.footer) + ctxCount(c.strip);
-		expect(failing((c) => drawn(c) <= 1)).toEqual({});
+		// Twice only where the strip is the home because a running row cannot hold ctx,
+		// and an idle footer still has room: the price of a meter that never moves (#308,
+		// option A). Main drew it twice there too. Never twice mid-turn.
+		const idleDup = (c: Case) => c.drawsCtx && !c.home && !/running|Running/.test(c.row);
+		expect(failing((c) => drawn(c) <= 1 || idleDup(c))).toEqual({});
+		expect(failing((c) => drawn(c) <= 1)).toEqual(IDLE_TWICE);
 		// Where main drew it nowhere (no room in footer or strip; 30-56 and 90-91 columns
 		// in most rows), it is drawn nowhere still: that set's digest, recorded on main.
-		expect(sha(JSON.stringify(failing((c) => drawn(c) === 1)))).toBe("0da21550daf205d3");
+		expect(sha(JSON.stringify(failing((c) => drawn(c) >= 1)))).toBe("0da21550daf205d3");
+	});
+
+	test("8. the meter keeps its place when a turn starts and ends", () => {
+		// Same width, window and station; only the turn differs. The strip draws the
+		// meter in both or in neither, so it never hops between the strip and the footer.
+		const pairs = [
+			["rich", "running"],
+			["sandbox", "sandboxRunning"],
+		] as const;
+		const by = new Map(cases.map((c) => [c.name, c]));
+		const twin = (c: Case) => {
+			const pair = pairs.find(([idle]) => idle === c.row);
+			return pair ? by.get(c.name.replace(` ${pair[0]} `, ` ${pair[1]} `)) : undefined;
+		};
+		const strip = (c: Case) => /\bctx\b/.test(c.strip);
+		// The home never changes with the turn, at any width.
+		expect(failing((c) => c.home === (twin(c)?.home ?? c.home))).toEqual({});
+		// The strip draws it in one state only where the strip itself has no room for
+		// it in the other ("finished 9:51 AM" against "read_file"), as on main.
+		expect(failing((c) => !twin(c) || strip(c) === strip(twin(c) as Case))).toEqual(STRIP_ROOM);
+		const footerCtx = (c: Case) => /\bctx\b/.test(c.footer);
+		expect(
+			failing((c) => {
+				const t = twin(c);
+				return !t || strip(c) === strip(t) || (!footerCtx(c) && !footerCtx(t));
+			}),
+			// Three single widths where the strip, the home, has no room idle ("finished
+			// 9:51 AM"), so the idle footer carries it and the running strip takes it back.
+			// Main moves it at the same widths.
+		).toEqual({ "rich known": "56", "rich known station": "91", "sandbox known station": "91" });
 	});
 
 	test("7. the drawn footer row equals main's in every case", () => {
