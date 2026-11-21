@@ -169,6 +169,11 @@ MEMORY COMMANDS:
   memory stats                Show memory statistics
   memory serve                Serve memory read-only over stdio for other tools
 
+TRACE COMMANDS:
+  trace show [run-id]         Print a run as a tree: model calls, tool calls,
+                              tokens and est. cost. No id: the latest run.
+                              Runs are kept locally in ~/.8gent/traces.
+
 CRON COMMANDS:
   cron list                   List scheduled jobs
   cron add <name> <schedule> <command>  Add a cron job
@@ -508,6 +513,12 @@ async function main() {
 			const { runRunCommand } = await import("../packages/eight/run.ts");
 			const code = await runRunCommand(restArgs);
 			process.exit(code);
+			break;
+		}
+
+		case "trace": {
+			const { traceCommand } = await import("../packages/telemetry/run-trace.ts");
+			process.exit(traceCommand(restArgs));
 			break;
 		}
 
