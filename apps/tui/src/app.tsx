@@ -379,6 +379,7 @@ import {
 	isAndroidEnv,
 } from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
+import { STEERING_LINE, liveSteerLines } from "./lib/steer-line.js";
 import { effectiveWindow, loadOverrides, saveOverride } from "./lib/tab-context-window.js";
 import { approvalTab, nextUnread } from "./lib/tab-lamps.js";
 import { resolveTabWindow } from "./lib/tab-window-resolve.js";
@@ -8189,7 +8190,7 @@ export function App({
 						pending.push(bubbleContent);
 						pendingSteersRef.current.set(tabId, pending);
 					}
-					addSystemMessage("Steering: it reaches the model after the current tool call.");
+					addSystemMessage(STEERING_LINE);
 					return;
 				}
 			}
@@ -9385,7 +9386,7 @@ export function App({
 							>
 								{tabBody ?? (
 									<MessageList
-										messages={visibleMessages(messages, showThinking)}
+										messages={visibleMessages(liveSteerLines(messages, isProcessing), showThinking)}
 										turnRunning={isProcessing}
 										foldTrace={!stepsShown}
 										traceOpen={traceOpen}
