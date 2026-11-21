@@ -56,6 +56,8 @@ export interface NowStripInput {
 	/** The configured model when a reroute ran the turn on `route` instead. */
 	asked?: string;
 	tokens: string;
+	/** False when the strip draws no ctx meter: the footer carries it, once (#9). */
+	meter?: boolean;
 }
 
 export interface NowStripFit {
@@ -87,34 +89,78 @@ export function fitNowStrip(input: NowStripInput): NowStripFit {
 	const need = Math.max(middleMin, 0);
 	const want = cellWidth(middle);
 
-	const fits = (r: string, m: boolean, mid: number) => rightWidth(r, m, tokens) + mid <= room;
+	// The meter is only ever reserved when the strip draws one.
+	const withMeter = input.meter !== false;
+	const meterOn = (m: boolean) => m && withMeter;
+	const meters = withMeter ? [true, false] : [false];
+	const fits = (r: string, m: boolean, mid: number) =>
+		rightWidth(r, meterOn(m), tokens) + mid <= room;
 	const asked = route && input.asked ? askedNote(input.asked) : "";
 
 	// 1. Everything whole, the asked note included.
-	if (asked && rightWidth(route, true, tokens, asked) + want <= room) {
-		return { middle, route, asked, meter: true, rightWidth: rightWidth(route, true, tokens, asked) };
+	if (asked && rightWidth(route, meterOn(true), tokens, asked) + want <= room) {
+		return {
+			middle,
+			route,
+			asked,
+			meter: meterOn(true),
+			rightWidth: rightWidth(route, meterOn(true), tokens, asked),
+		};
 	}
 	// 1b. The asked note goes first; from here on the route is the model that ran.
-	if (fits(route, true, want)) return { middle, route, asked: "", meter: true, rightWidth: rightWidth(route, true, tokens) };
+	if (fits(route, true, want)) {
+		return {
+			middle,
+			route,
+			asked: "",
+			meter: meterOn(true),
+			rightWidth: rightWidth(route, meterOn(true), tokens),
+		};
+	}
 	// 2. The route cut in the middle so the full middle text fits.
 	if (route) {
-		const routeRoom = room - want - rightWidth("", true, tokens);
+		const routeRoom = room - want - rightWidth("", meterOn(true), tokens);
 		if (routeRoom >= ROUTE_MIN) {
 			const r = truncateMiddle(route, routeRoom);
-			return { middle, route: r, asked: "", meter: true, rightWidth: rightWidth(r, true, tokens) };
+			return {
+				middle,
+				route: r,
+				asked: "",
+				meter: meterOn(true),
+				rightWidth: rightWidth(r, meterOn(true), tokens),
+			};
 		}
 	}
 	// 3. No route, then no meter either, the full middle text kept.
-	for (const meter of [true, false]) {
-		if (fits("", meter, want)) return { middle, route: "", asked: "", meter, rightWidth: rightWidth("", meter, tokens) };
+	for (const meter of meters) {
+		if (fits("", meter, want))
+			return {
+				middle,
+				route: "",
+				asked: "",
+				meter: meterOn(meter),
+				rightWidth: rightWidth("", meterOn(meter), tokens),
+			};
 	}
 	// 4. The middle cut down to its protected head (a long active step).
-	for (const meter of [true, false]) {
+	for (const meter of meters) {
 		if (need < want && fits("", meter, need)) {
-			return { middle, route: "", asked: "", meter, rightWidth: rightWidth("", meter, tokens) };
+			return {
+				middle,
+				route: "",
+				asked: "",
+				meter: meterOn(meter),
+				rightWidth: rightWidth("", meterOn(meter), tokens),
+			};
 		}
 	}
 	// 5. Too narrow for the clock: drop it, keep the word.
 	const short = middleShort ?? middle;
-	return { middle: short, route: "", asked: "", meter: false, rightWidth: rightWidth("", false, tokens) };
+	return {
+		middle: short,
+		route: "",
+		asked: "",
+		meter: false,
+		rightWidth: rightWidth("", false, tokens),
+	};
 }
