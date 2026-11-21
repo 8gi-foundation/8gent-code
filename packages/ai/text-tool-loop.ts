@@ -82,6 +82,7 @@
  * `run` functions do; this module itself stays glue-only.
  */
 
+import { forcedUnattended } from "../core/one-yes";
 import { REFUSED_TWICE_LINE } from "../permissions/cd-prefix";
 import { browserWithheldNote } from "../tools/eight-browser";
 import {
@@ -335,11 +336,23 @@ export const COMPLETION_CHECK_MESSAGE = [
 /**
  * Is this no-tool-call reply a question to the user? Structural: its last
  * non-space character is "?". A question is a legitimate reason to end the turn
- * (FOLLOW_UP_INSTRUCTION reserves prose for it), so it is never checked.
+ * (FOLLOW_UP_INSTRUCTION reserves prose for it), so it is never checked. The one
+ * exception is an unattended session, where it is sent back once (#326).
  */
 export function isQuestionToUser(content: string): boolean {
 	return content.trim().endsWith("?");
 }
+
+/**
+ * Sent back once when a turn ends on a question and nobody is present to answer it (#326).
+ * Plain words: the model either finishes with what it has or stops and says what is unverified.
+ */
+export const NO_ONE_HERE_MESSAGE = [
+	"No one is here to answer: this session is unattended, so your question will not be read.",
+	"Do not ask again. Finish the task with the tools you have, deciding for yourself",
+	"whatever you were going to ask. If you cannot finish, stop and state plainly what",
+	`was not done and what was not verified. Start your final reply with "${DONE_MARKER}".`,
+].join("\n");
 
 /**
  * Strip a leading DONE_MARKER (tolerating markdown bold around it, e.g.
@@ -783,6 +796,8 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 	let planCheckSent = false;
 	// The caller's final check (#3550) fires at most once per turn.
 	let finalCheckSent = false;
+	// The no-one-is-here line (#326) is sent at most once per turn.
+	let noOneHereSent = false;
 	// Steps cut at the output cap and retried this turn.
 	let outputCapRetries = 0;
 	// The user's request this turn: the last user message the caller sent.
@@ -897,6 +912,26 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 		}
 
 		if (turn.toolCalls.length === 0) {
+			// Nobody is present (#326): a question to the person would end the turn
+			// unanswered, so it is sent back once. A second question ends the turn.
+			// Attended, a question is still a legitimate end and is left alone.
+			if (
+				!noOneHereSent &&
+				round < maxRounds &&
+				isQuestionToUser(replyText) &&
+				forcedUnattended()
+			) {
+				noOneHereSent = true;
+				awaitingCheckAnswer = false;
+				prevRoundHadSuccess = false;
+				prevRoundAllRefused = false;
+				messages = [
+					...messages,
+					{ role: "assistant", content: replyText },
+					{ role: "user", content: NO_ONE_HERE_MESSAGE },
+				];
+				continue;
+			}
 			// A reply that was mostly repeated junk is a stall whatever came
 			// before it: ask once more for a tool call or a DONE summary, inside
 			// the same budget as the completion check.

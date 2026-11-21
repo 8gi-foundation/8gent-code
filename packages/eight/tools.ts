@@ -998,6 +998,13 @@ export const OFFICE_SPEC_PARAMETERS: Record<OfficeToolName, Record<string, unkno
 
 export { REFUSAL_LEAD, REFUSAL_NOTE, refusalLead };
 
+/**
+ * Closes a refusal given because nobody is present to approve (#326). The refusal stands;
+ * this only says what to do next, so the turn does not end on a question no one will read.
+ */
+const UNATTENDED_CARRY_ON =
+	"Carry on with the tools you have and finish the task. Do not ask the person, no one is here; in your final reply state what was not verified.";
+
 export class ToolExecutor {
 	private workingDirectory: string;
 	private permissionManager: PermissionManager;
@@ -4004,7 +4011,7 @@ export class ToolExecutor {
 				return (
 					channelDenialMessage(command) ??
 					(forcedUnattended()
-						? `[BLOCKED] This command needs the person's approval and there is no one to ask in this session, so the answer is no. The command was not run. Do not retry this call. Command: ${command}`
+						? `[BLOCKED] This command needs the person's approval and there is no one to ask in this session, so the answer is no. The command was not run. Do not retry this call. ${UNATTENDED_CARRY_ON} Command: ${command}`
 						: `[PERMISSION DENIED] User declined to execute: ${command}`)
 				);
 			}
@@ -5217,7 +5224,7 @@ export class ToolExecutor {
 			card?.details ??
 			`${why} Tool: ${toolName} ${JSON.stringify(browser ? redactBrowserArgs(args) : redactDesktopArgs(args))}`;
 		const shown = card?.card ?? `${toolName}: ${details}`;
-		const noOne = `[BLOCKED] ${toolName} needs the person's approval and there is no one to ask in this session. Nothing was done. Do not retry this call.`;
+		const noOne = `[BLOCKED] ${toolName} needs the person's approval and there is no one to ask in this session. Nothing was done. Do not retry this call. ${UNATTENDED_CARRY_ON}`;
 		let approved: boolean;
 		if (hasTuiApprovalHandler()) {
 			// `full`: the card is laid out whole or answered "unfit", never cut.
