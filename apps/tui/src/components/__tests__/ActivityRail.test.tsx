@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { Text } from "ink";
+import { Text, renderToString } from "ink";
 import React from "react";
 import { getProviderManager } from "../../../../../packages/providers/index.js";
 import { bodyPartForToolName, detectDefaultBodyPartsState } from "../../hooks/useBodyParts.js";
@@ -19,6 +19,7 @@ import {
 	type ProviderState,
 	type ToolState,
 	providerDisplay,
+	railSpareRows,
 	taskLabelLines,
 } from "../ActivityRail";
 
@@ -200,6 +201,47 @@ describe("ActivityRail", () => {
 			expect(el.props.overflow).toBeUndefined();
 			expect(el.props.overflowY).toBeUndefined();
 		}
+	});
+
+	describe("BODY section says something or is not drawn", () => {
+		const draw = (bodyParts: ActivityRailProps["bodyParts"]) =>
+			renderToString(<ActivityRail {...baseProps} bodyParts={bodyParts} />, { columns: 34 });
+		const ready = { hands: "idle", eyes: "idle", handeyes: "idle" } as const;
+
+		test("all three parts ready: no BODY heading and no part rows", () => {
+			const out = draw(ready);
+			expect(out).not.toContain("BODY");
+			for (const label of ["hands", "eyes"]) expect(out).not.toContain(label);
+			// The sections either side are still there.
+			expect(out).toContain("8GENTS");
+			expect(out).toContain("PROVIDERS");
+		});
+
+		test("a part in use brings the section back with all three rows", () => {
+			const out = draw({ ...ready, eyes: "inFlight" });
+			expect(out).toContain("BODY");
+			expect(out).toContain("◉ eyes");
+			expect(out).toContain("● hands");
+			expect(out).toContain("● handeyes");
+		});
+
+		test("a part that is off is still shown as off", () => {
+			for (const part of ["hands", "eyes", "handeyes"] as const) {
+				const out = draw({ ...ready, [part]: "disabled" });
+				expect(out).toContain("BODY");
+				expect(out).toContain(`○ ${part}`);
+			}
+		});
+
+		test("the rows a hidden BODY frees are counted as spare", () => {
+			const p = { ...baseProps };
+			const none = railSpareRows(40, p);
+			expect(railSpareRows(40, { ...p, bodyParts: ready })).toBe(none);
+			expect(railSpareRows(40, { ...p, bodyParts: { ...ready, hands: "inFlight" } })).toBe(
+				none - 5,
+			);
+			expect(railSpareRows(40, { ...p, bodyParts: { ...ready, eyes: "disabled" } })).toBe(none - 5);
+		});
 	});
 
 	test("section headings and data rows are separate blocks", () => {

@@ -121,7 +121,10 @@ Three different things are named "computer". Do not mix them up:
 - A running tool lights its part by name prefix (`bodyPartForToolName`):
   `desktop_*` is hands, `eyes_*` is eyes, `handeyes_*` is handeyes.
   `run_computer_task`, `browser_*` and `computer`-route traffic light nothing.
-- The `BODY` section is rendered in `apps/tui/src/components/ActivityRail.tsx`.
+- The `BODY` section is rendered in `apps/tui/src/components/ActivityRail.tsx`,
+  and only when a part has something to say: one is in use, or one is off
+  (`bodyHasNews`). With all three ready the section is not drawn and its rows
+  go to the sections around it.
   `/hands`, `/eyes`, `/handeyes` toggle a part (`apps/tui/src/app.tsx`).
 - It is a visual indicator only. Toggling off does not stop the tools.
 

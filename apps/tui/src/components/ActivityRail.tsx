@@ -167,9 +167,9 @@ interface ActivityRailProps {
 	isProcessing?: boolean;
 	activeTool?: string | null;
 	toolsCompleted?: number;
-	/** Body-parts indicators: hands, eyes, handeyes. Optional - rail still
-	 *  renders without the BODY section when undefined, preserving callers
-	 *  that have not yet wired the useBodyParts hook. */
+	/** Body-parts indicators: hands, eyes, handeyes. The BODY section is
+	 *  drawn only when a part is in use or off (see bodyHasNews); undefined
+	 *  or all three ready draws nothing. */
 	bodyParts?: BodyPartsRow;
 	/** The terminal's row count. When given, the LOOPS block takes whatever
 	 *  rows the sections above leave free; absent means no LOOPS block. */
@@ -206,7 +206,7 @@ export function railSpareRows(
 		(2 + p.providers.length + asked) +
 		memory +
 		(2 + p.agents.length) +
-		(p.bodyParts ? 2 + 3 : 0);
+		(bodyHasNews(p.bodyParts) ? 2 + 3 : 0);
 	return height - RAIL_CHROME_ROWS - used;
 }
 
@@ -304,6 +304,16 @@ const BODY_PART_LABELS: ReadonlyArray<{ key: keyof BodyPartsRow; label: string }
 	{ key: "eyes", label: "eyes" },
 	{ key: "handeyes", label: "handeyes" },
 ];
+
+/**
+ * The BODY section is drawn only when a part has something to say: it is in
+ * use, or it is off. Three parts sitting ready is the resting state, and three
+ * unchanging dots tell a person nothing, so the section leaves the rail.
+ */
+export function bodyHasNews(bodyParts: BodyPartsRow | undefined): bodyParts is BodyPartsRow {
+	if (!bodyParts) return false;
+	return BODY_PART_LABELS.some(({ key }) => bodyParts[key] !== "idle");
+}
 
 function hasMemoryRows(memory: MemoryStats | undefined): memory is MemoryStats {
 	if (!memory) return false;
@@ -474,7 +484,7 @@ export function ActivityRail({
 				))}
 			</RailSection>
 
-			{bodyParts ? (
+			{bodyHasNews(bodyParts) ? (
 				<RailSection title="BODY">
 					{BODY_PART_LABELS.map(({ key, label }) => {
 						const state = bodyParts[key];
