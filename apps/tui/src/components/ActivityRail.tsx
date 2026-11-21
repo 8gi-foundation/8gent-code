@@ -186,13 +186,11 @@ export function railSpareRows(
 	height: number,
 	p: Pick<ActivityRailProps, "tasks" | "providers" | "agents" | "memory" | "bodyParts">,
 ): number {
-	const tasks =
-		p.tasks.length === 0
-			? 1
-			: p.tasks.reduce(
-					(n, x) => n + taskLabelLines(x.label).length + (typeof x.progress === "number" ? 1 : 0),
-					0,
-				);
+	// An empty TASKS section is not drawn (see ActivityRail), so it reserves no rows.
+	const tasks = p.tasks.reduce(
+		(n, x) => n + taskLabelLines(x.label).length + (typeof x.progress === "number" ? 1 : 0),
+		0,
+	);
 	const asked = p.providers.filter((x) => x.asked).length;
 	const memory = hasMemoryRows(p.memory)
 		? 2 +
@@ -201,7 +199,7 @@ export function railSpareRows(
 		: 0;
 	const used =
 		2 + // top padding and heading
-		(2 + tasks) +
+		(p.tasks.length === 0 ? 0 : 2 + tasks) +
 		(2 + 3) +
 		(2 + p.providers.length + asked) +
 		memory +
@@ -373,13 +371,10 @@ export function ActivityRail({
 				</Text>
 			</Box>
 
-			<RailSection title="TASKS">
-				{tasks.length === 0 ? (
-					<Box flexShrink={0}>
-						<Text color={t.muted}>no tasks</Text>
-					</Box>
-				) : (
-					tasks.map((task) => (
+			{/* No running task, no section: an empty TASKS heading with "no tasks" under it is noise. */}
+			{tasks.length === 0 ? null : (
+				<RailSection title="TASKS">
+					{tasks.map((task) => (
 						<Box key={task.id} flexDirection="column" flexShrink={0}>
 							<Text
 								color={
@@ -402,9 +397,9 @@ export function ActivityRail({
 								</Box>
 							) : null}
 						</Box>
-					))
-				)}
-			</RailSection>
+					))}
+				</RailSection>
+			)}
 
 			<RailSection title="TOOLS">
 				{(() => {

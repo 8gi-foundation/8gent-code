@@ -19,6 +19,7 @@ import {
 	type ProviderState,
 	type ToolState,
 	providerDisplay,
+	railSpareRows,
 	taskLabelLines,
 } from "../ActivityRail";
 
@@ -121,6 +122,23 @@ describe("ActivityRail", () => {
 		expect(rendered).toBeDefined();
 	});
 
+	test("TASKS leaves the rail when no task runs: no heading, no 'no tasks' line, rows go back", () => {
+		const strings = (props: ActivityRailProps) =>
+			flatten(expand(render(props)))
+				.filter((el) => el.type === Text && typeof el.props.children === "string")
+				.map((el) => el.props.children as string);
+		const empty = strings({ ...baseProps, tasks: [] });
+		expect(empty).not.toContain("TASKS");
+		expect(empty).not.toContain("no tasks");
+		const one = [{ id: "x", label: "run typecheck" }];
+		expect(strings({ ...baseProps, tasks: one })).toContain("TASKS");
+		// A one-line task costs its heading (1 row of margin plus 1 heading) and its row: 3 rows.
+		const height = 40;
+		const withTask = railSpareRows(height, { ...baseProps, tasks: one });
+		const withoutTask = railSpareRows(height, { ...baseProps, tasks: [] });
+		expect(withoutTask - withTask).toBe(3);
+	});
+
 	test("each tool state renders without crashing", () => {
 		for (const state of TOOL_STATES) {
 			const rendered = render({
@@ -180,7 +198,8 @@ describe("ActivityRail", () => {
 				...props,
 				bodyParts: { hands: "idle", eyes: "idle", handeyes: "disabled" },
 			});
-			expect(blocks.length).toBeGreaterThanOrEqual(7);
+			// Seven blocks with a running task; six once the empty TASKS section leaves the rail.
+			expect(blocks.length).toBeGreaterThanOrEqual(props.tasks.length === 0 ? 6 : 7);
 			for (const block of blocks) {
 				expect(block.props.flexShrink).toBe(0);
 			}
@@ -203,7 +222,7 @@ describe("ActivityRail", () => {
 	});
 
 	test("section headings and data rows are separate blocks", () => {
-		const blocks = railColumn({ ...baseProps, tasks: [] });
+		const blocks = railColumn({ ...baseProps, tasks: [{ id: "x", label: "run typecheck" }] });
 		const tasks = blocks[1] as AnyElement;
 		expect(tasks.props.flexDirection).toBe("column");
 		const [heading, rows] = React.Children.toArray(
