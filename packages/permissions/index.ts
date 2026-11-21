@@ -1581,6 +1581,9 @@ export type { SeatbeltSpec } from "./seatbelt.js";
 export { onRunCommandUnsandboxed, runCommandSandboxStatus } from "./run-command-sandbox.js";
 export type { RunCommandSandbox } from "./run-command-sandbox.js";
 export { detectBestIsolation, runSandboxed } from "./sandbox.js";
+// Linux sandbox (8gi-governance#1108 lane 3): bubblewrap + seccomp, deny by default.
+export { buildBwrapArgs, bwrapStatus } from "./bwrap.js";
+export type { BwrapSpec, BwrapStatus } from "./bwrap.js";
 export type { IsolationLevel, SandboxOptions, SandboxResult } from "./sandbox-types.js";
 export type {
 	CapabilityRequest,

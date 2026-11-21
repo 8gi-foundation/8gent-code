@@ -10,14 +10,20 @@
  *   tempdir  — process + isolated temp dir, destroyed after run
  *   seatbelt — macOS sandbox-exec, kernel-enforced deny-by-default profile
  *              built from the tool's capability manifest (#2756 step 2)
+ *   bwrap    - Linux bubblewrap + seccomp, the same deny-by-default intent in
+ *              namespaces; no root, no KVM (8gi-governance#1108 lane 3)
  *   docker   — docker run --rm --network none, memory + CPU limits
- *   microvm  — reserved for future Unikraft/Firecracker integration
+ *   microvm  - not implemented; requesting it returns an unavailable result
+ *
+ * A requested layer that this host cannot enforce returns an unavailable
+ * result (exit 126, command not run). It never falls back to a weaker layer.
  */
 
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { killProcessTree, shellInvocation } from "../core/shell";
+import { buildBwrapArgv, bwrapStatus, seccompBytesForHost } from "./bwrap.js";
 import type { IsolationLevel, SandboxOptions, SandboxResult } from "./sandbox-types.js";
 import {
 	buildSeatbeltProfile,
@@ -65,10 +71,12 @@ async function hasBinary(bin: string): Promise<boolean> {
 /**
  * Detect the best available isolation level on this machine.
  * On macOS the seatbelt layer wins: it is kernel-enforced, path-scoped,
- * and needs no daemon. Elsewhere prefers docker, then tempdir.
+ * and needs no daemon. On Linux bwrap wins for the same reasons. Elsewhere
+ * prefers docker, then tempdir.
  */
 export async function detectBestIsolation(): Promise<IsolationLevel> {
 	if (isSeatbeltAvailable()) return "seatbelt";
+	if (bwrapStatus().available) return "bwrap";
 	if (await hasBinary("docker")) {
 		// Verify docker daemon is actually running (not just installed)
 		try {
@@ -223,7 +231,106 @@ async function runInSeatbelt(
 	};
 }
 
-/** Layer 3: Docker container isolation */
+/** The command was not run: the requested isolation cannot be enforced here. */
+function unavailableResult(isolation: IsolationLevel, reason: string): SandboxResult {
+	return {
+		stdout: "",
+		stderr: `8gent sandbox: ${isolation} isolation unavailable: ${reason}. Command not run.\n`,
+		exitCode: 126,
+		timedOut: false,
+		isolation,
+		durationMs: 0,
+		unavailable: reason,
+	};
+}
+
+/** Layer 3 (Linux): bubblewrap namespaces + seccomp filter */
+async function runInBwrap(
+	command: string,
+	opts: Required<Pick<SandboxOptions, "timeout" | "allowNetwork" | "env">> &
+		Pick<SandboxOptions, "readPaths" | "writePaths">,
+	workDir?: string,
+): Promise<SandboxResult> {
+	const status = bwrapStatus();
+	if (!status.available) return unavailableResult("bwrap", status.reason);
+	const seccomp = seccompBytesForHost();
+	if (!seccomp) return unavailableResult("bwrap", `no seccomp table for ${process.arch}`);
+
+	const useTmp = !workDir;
+	const runDir = fs.realpathSync(
+		useTmp ? fs.mkdtempSync(path.join(os.tmpdir(), "8gent-bwrap-")) : workDir!,
+	);
+	// The filter goes to bwrap on fd 3 from an unlinked file: nothing is left on disk.
+	const filterPath = path.join(os.tmpdir(), `8gent-seccomp-${process.pid}-${Date.now()}.bpf`);
+	fs.writeFileSync(filterPath, seccomp, { mode: 0o600 });
+	const filterFd = fs.openSync(filterPath, "r");
+	fs.rmSync(filterPath, { force: true });
+
+	const argv = buildBwrapArgv(
+		status.binary,
+		{
+			workDir: runDir,
+			readPaths: opts.readPaths,
+			writePaths: opts.writePaths,
+			allowNetwork: opts.allowNetwork,
+			env: safeEnv({ ...opts.env, HOME: runDir, TMPDIR: runDir }),
+			seccompFd: 3,
+		},
+		command,
+	);
+
+	const start = Date.now();
+	let timedOut = false;
+	let stdout = "";
+	let stderr = "";
+	let exitCode = 1;
+
+	try {
+		const proc = Bun.spawn(argv, {
+			cwd: runDir,
+			// biome-ignore lint/suspicious/noExplicitAny: Bun accepts extra fds after stdio[2]
+			stdio: ["ignore", "pipe", "pipe", filterFd] as any,
+			env: { PATH: "/usr/bin:/bin" },
+		});
+
+		const timer = setTimeout(() => {
+			timedOut = true;
+			// --die-with-parent takes the sandboxed tree down with bwrap.
+			proc.kill("SIGKILL");
+		}, opts.timeout);
+
+		const [out, err] = await Promise.all([
+			new Response(proc.stdout as unknown as ReadableStream).text(),
+			new Response(proc.stderr as unknown as ReadableStream).text(),
+		]);
+		await proc.exited;
+		clearTimeout(timer);
+
+		stdout = out;
+		stderr = err;
+		exitCode = timedOut ? 124 : (proc.exitCode ?? 1);
+	} finally {
+		fs.closeSync(filterFd);
+		if (useTmp) {
+			try {
+				fs.rmSync(runDir, { recursive: true, force: true });
+			} catch {
+				// best-effort cleanup
+			}
+		}
+	}
+
+	return {
+		stdout,
+		stderr,
+		exitCode,
+		timedOut,
+		isolation: "bwrap",
+		durationMs: Date.now() - start,
+	};
+}
+
+/** Layer 4: Docker container isolation */
 async function runInDocker(
 	command: string,
 	opts: Required<Pick<SandboxOptions, "timeout" | "allowNetwork" | "env">>,
@@ -333,16 +440,31 @@ export async function runSandboxed(
 	// with the session (destroySessionScratch), not after each command.
 	const workDir = opts.workDir ?? (opts.sessionId ? sessionScratchDir(opts.sessionId) : undefined);
 
+	if (opts.requireOsIsolation && isolation !== "seatbelt" && isolation !== "bwrap") {
+		return unavailableResult(
+			isolation,
+			"no kernel-enforced sandbox on this host (needs macOS seatbelt or Linux bubblewrap)",
+		);
+	}
+
+	const scopes = { readPaths: opts.readPaths, writePaths: opts.writePaths };
+
 	if (isolation === "seatbelt") {
-		if (isSeatbeltAvailable()) {
-			return runInSeatbelt(
-				command,
-				{ ...resolved, readPaths: opts.readPaths, writePaths: opts.writePaths },
-				workDir,
+		if (!isSeatbeltAvailable()) {
+			return unavailableResult(
+				"seatbelt",
+				`sandbox-exec is macOS only (this is ${process.platform})`,
 			);
 		}
-		// Requested but unavailable (non-macOS): fall back to tempdir.
-		return runInTempdir(command, resolved, workDir);
+		return runInSeatbelt(command, { ...resolved, ...scopes }, workDir);
+	}
+
+	if (isolation === "bwrap") {
+		return runInBwrap(command, { ...resolved, ...scopes }, workDir);
+	}
+
+	if (isolation === "microvm") {
+		return unavailableResult("microvm", "microVM isolation is not implemented");
 	}
 
 	if (isolation === "docker") {
@@ -354,6 +476,6 @@ export async function runSandboxed(
 		return runInTempdir(command, resolved, workDir ?? process.cwd());
 	}
 
-	// tempdir (default) or microvm fallback to tempdir until VMs are supported
+	// tempdir
 	return runInTempdir(command, resolved, workDir);
 }

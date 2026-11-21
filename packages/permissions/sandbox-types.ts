@@ -7,7 +7,7 @@
  */
 
 /** Isolation level, ordered from weakest to strongest */
-export type IsolationLevel = "process" | "tempdir" | "seatbelt" | "docker" | "microvm";
+export type IsolationLevel = "process" | "tempdir" | "seatbelt" | "bwrap" | "docker" | "microvm";
 
 /** Options for a sandboxed execution */
 export interface SandboxOptions {
@@ -31,6 +31,11 @@ export interface SandboxOptions {
 	readPaths?: string[];
 	/** Extra read/write paths (seatbelt layer; manifest write scopes). */
 	writePaths?: string[];
+	/**
+	 * Refuse the run unless the kernel enforces the sandbox (seatbelt or bwrap). For unattended
+	 * runs: auto-detect would otherwise settle for docker or a bare temp dir. Default: false.
+	 */
+	requireOsIsolation?: boolean;
 }
 
 /** Result from a sandboxed execution */
@@ -41,4 +46,9 @@ export interface SandboxResult {
 	timedOut: boolean;
 	isolation: IsolationLevel;
 	durationMs: number;
+	/**
+	 * Set when the requested isolation cannot be enforced on this host. The command was NOT
+	 * run; exitCode is 126 and stderr says why. Never a silent unsandboxed fallback.
+	 */
+	unavailable?: string;
 }
