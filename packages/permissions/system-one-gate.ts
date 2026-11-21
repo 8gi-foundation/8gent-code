@@ -82,7 +82,7 @@
  *                              spawn_agent (runtime "shell")
  */
 
-import { askOneYes } from "../core/one-yes";
+import { askOneYes, forcedUnattended, refuseIfUnattended } from "../core/one-yes";
 import { activeShellKind } from "../core/shell";
 import type { BashGuardOptions, BashGuardResult } from "../decide/guard";
 import type { Decider } from "../decide/index";
@@ -92,7 +92,11 @@ import type { RmOwnDir } from "./s1-rm-own-dir";
 import type { RunOwnScript } from "./s1-run-own-script";
 import { posixRulesApply } from "./shell-tools";
 import { logSystemOneJudge } from "./system-one-log";
-import { hasTuiApprovalHandler, requestTuiApproval } from "./tui-approval-channel";
+import {
+	UNATTENDED_REFUSAL,
+	hasTuiApprovalHandler,
+	requestTuiApproval,
+} from "./tui-approval-channel";
 
 export const SYSTEM_ONE_FLAG = "EIGHT_SYSTEM_ONE";
 export const SYSTEM_ONE_BLOCK_MARKER = "[SYSTEM ONE BLOCKED]";
@@ -520,7 +524,9 @@ function blockMessage(
 	// Plain words on why the single-file delete rule did not take it, and what
 	// it does allow (#3669), so the block is not a dead end.
 	const help = hint ? ` ${hint}` : "";
-	return `${SYSTEM_ONE_BLOCK_MARKER} ${fields}. Blocked by System One (on; ${SYSTEM_ONE_FLAG}=0 turns it off): ${why}. The command was not run.${final}${help} ${SYSTEM_ONE_NO_RETRY} Command: ${command}`;
+	// Unattended, the off switch is not offered: a refusal never names a way around the gate (#310).
+	const state = forcedUnattended() ? "on" : `on; ${SYSTEM_ONE_FLAG}=0 turns it off`;
+	return `${SYSTEM_ONE_BLOCK_MARKER} ${fields}. Blocked by System One (${state}): ${why}. The command was not run.${final}${help} ${SYSTEM_ONE_NO_RETRY} Command: ${command}`;
 }
 
 /** TUI approval card if a frontend registered one, else an interactive stdin prompt (default No), else null. */
@@ -528,6 +534,12 @@ export const defaultAskHuman: AskHuman = async (request) => {
 	const tui = await requestTuiApproval(request);
 	if (tui !== null) return tui;
 	if (!process.stdin.isTTY || process.env.EIGHT_HEADLESS) return null;
+	// Nobody is present: no question is put, and the refusal is written to the one-yes ledger
+	// with the same line askOneYes writes for it (reason unattended-env), so it leaves a record (#310).
+	if (forcedUnattended()) {
+		refuseIfUnattended("system-one-escalation");
+		return null;
+	}
 	return askOneYes(
 		`\n\x1b[33m[SYSTEM ONE ESCALATION]\x1b[0m\n${request.details}\nCommand: \x1b[36m${request.command}\x1b[0m\n\nRun it? [y/N]:`,
 		{ label: "system-one-escalation" },
@@ -1240,8 +1252,10 @@ async function decide(
 		humanApproved = null;
 	}
 	if (humanApproved === true) return { run: true, guard, thresholds: t, humanApproved, ...instead };
-	const base =
-		humanApproved === false
+	// Unattended first: nobody was asked, so the model is never told a person declined (#310).
+	const base = forcedUnattended()
+		? `escalated: it ${UNATTENDED_REFUSAL}, so no one is present to ask and the answer is no; no card was shown and escalate is treated as block, failing closed`
+		: humanApproved === false
 			? "escalated and the user declined"
 			: "escalated but no approval channel is available, so escalate is treated as block, failing closed";
 	const why =

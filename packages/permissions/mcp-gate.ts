@@ -21,6 +21,7 @@
  *     no approval card, no TTY  -> refused; nothing reaches the server
  */
 
+import { forcedUnattended } from "../core/one-yes";
 import { getPermissionManager } from "./index";
 import { ToolG8 } from "./toolg8";
 import { hasTuiApprovalHandler, requestTuiDecision } from "./tui-approval-channel";
@@ -114,7 +115,9 @@ async function askPerson(
 	} else {
 		return noOne;
 	}
-	return approved ? null : declined;
+	if (approved) return null;
+	// Nobody is present: the terminal prompt refused without asking anyone, so no one declined (#310).
+	return forcedUnattended() ? noOne : declined;
 }
 
 /**

@@ -90,6 +90,7 @@ import {
 } from "../computer/desktop-approval";
 import { DESKTOP_POLICY_ACTION, desktopPolicyContext } from "../computer/desktop-policy";
 import { desktopPreflight } from "../computer/preflight";
+import { forcedUnattended } from "../core/one-yes";
 import {
 	type ResolvedShell,
 	activeShellKind,
@@ -3999,9 +4000,12 @@ export class ToolExecutor {
 			);
 
 			if (!allowed) {
+				// Nobody is present: the prompt refused without asking anyone, so no one declined (#310).
 				return (
 					channelDenialMessage(command) ??
-					`[PERMISSION DENIED] User declined to execute: ${command}`
+					(forcedUnattended()
+						? `[BLOCKED] This command needs the person's approval and there is no one to ask in this session, so the answer is no. The command was not run. Do not retry this call. Command: ${command}`
+						: `[PERMISSION DENIED] User declined to execute: ${command}`)
 				);
 			}
 		}
@@ -5213,6 +5217,7 @@ export class ToolExecutor {
 			card?.details ??
 			`${why} Tool: ${toolName} ${JSON.stringify(browser ? redactBrowserArgs(args) : redactDesktopArgs(args))}`;
 		const shown = card?.card ?? `${toolName}: ${details}`;
+		const noOne = `[BLOCKED] ${toolName} needs the person's approval and there is no one to ask in this session. Nothing was done. Do not retry this call.`;
 		let approved: boolean;
 		if (hasTuiApprovalHandler()) {
 			// `full`: the card is laid out whole or answered "unfit", never cut.
@@ -5227,10 +5232,13 @@ export class ToolExecutor {
 				? await this.permissionManager.requestPermission("Browser control", details)
 				: await askOnTerminal(shown);
 		} else {
-			return `[BLOCKED] ${toolName} needs the person's approval and there is no one to ask in this session. Nothing was done. Do not retry this call.`;
+			return noOne;
 		}
 		if (!approved) {
-			return `[PERMISSION DENIED] The person declined ${toolName}. Nothing was done. Do not retry this call.`;
+			// Nobody is present: the terminal prompt refused without asking anyone, so no one declined (#310).
+			return forcedUnattended()
+				? noOne
+				: `[PERMISSION DENIED] The person declined ${toolName}. Nothing was done. Do not retry this call.`;
 		}
 		return null;
 	}

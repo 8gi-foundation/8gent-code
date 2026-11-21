@@ -19,6 +19,7 @@
  * just register their handler at boot.
  */
 
+import { forcedUnattended } from "../core/one-yes";
 import { noteApproval } from "../eight/friction";
 
 /** "unfit": a `full` request did not fit on screen and was not shown; yes/no callers read it as no. */
@@ -40,15 +41,21 @@ export function registerTuiApprovalHandler(fn: TuiApprovalHandler | null): void 
 	handler = fn;
 }
 
+/**
+ * True when a card can be raised and a person is there to answer it. Nobody is present
+ * with EIGHT_UNATTENDED set or inside an owned terminal session (one-yes.ts forcedUnattended),
+ * so a registered handler does not count: its card would wait forever (#310).
+ */
 export function hasTuiApprovalHandler(): boolean {
-	return handler != null;
+	return handler != null && !forcedUnattended();
 }
 
 /** The frontend's decision, or null when there is no handler or it failed. */
 export async function requestTuiDecision(
 	request: TuiApprovalRequest,
 ): Promise<TuiApprovalDecision | null> {
-	if (!handler) return null;
+	// Unattended means no: no card nobody can answer. Every caller reads null as "no one to ask".
+	if (!handler || forcedUnattended()) return null;
 	let decision: TuiApprovalDecision;
 	try {
 		decision = await handler(request);
@@ -71,3 +78,6 @@ export async function requestTuiApproval(request: TuiApprovalRequest): Promise<b
 export function _resetTuiApprovalChannel(): void {
 	handler = null;
 }
+
+/** What the model reads when a question needs a person and nobody is present (#310). */
+export const UNATTENDED_REFUSAL = "needs a person's yes; this run is unattended";
