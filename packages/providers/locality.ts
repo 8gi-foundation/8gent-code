@@ -499,7 +499,7 @@ export function sessionEntries(
 /** The status-bar chip. Null until a call has been measured today. */
 export function chipText(entries: LedgerEntry[], now: Date = new Date()): string | null {
 	const m = meterOf(todayEntries(entries, now));
-	return m.localPct === null ? null : `${m.localPct}% of model tokens on this machine`;
+	return m.localPct === null ? null : `${m.localPct}% local today`;
 }
 
 const fmtBytes = (b: number) => (b >= 1024 ? `${(b / 1024).toFixed(1)} KB` : `${b} B`);

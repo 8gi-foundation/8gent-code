@@ -309,7 +309,7 @@ describe("meter maths", () => {
 			entry({ ts: today, local: false, tokensIn: 8 }),
 			entry({ ts: old, local: false, tokensIn: 10000 }),
 		];
-		expect(chipText(rows, now)).toBe("92% of model tokens on this machine");
+		expect(chipText(rows, now)).toBe("92% local today");
 		expect(chipText([entry({ ts: old, tokensIn: 5 })], now)).toBeNull();
 	});
 
