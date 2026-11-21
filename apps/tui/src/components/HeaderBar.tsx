@@ -12,7 +12,7 @@
  * Every piece of text sits on the pill's text row, the middle of the three
  * rows. The row never wraps: the pill and the chips never shrink; the
  * middle is fitted by `fitHeaderMiddle`, branch before the tail of the
- * path. Tighter still, the pill drops its tagline, then the middle goes.
+ * path. The pill's tagline goes before any of that is cut; then the middle.
  *
  * Pure presentational. Theme tokens only. No inline hex.
  */
@@ -179,7 +179,8 @@ function planRow(props: HeaderBarProps, width: number): Omit<HeaderPlan, "mark">
 	// Below TAGLINE_MIN_COLS the tagline always steps aside (#3238): at 80
 	// columns the living 8 and the branch say more than the brand line, and
 	// a chip appearing must never be what pushes the 8 out.
-	for (const compactBrand of (props.width ?? DEFAULT_WIDTH) < TAGLINE_MIN_COLS ? [true] : [false, true]) {
+	const fullWidth = props.width ?? DEFAULT_WIDTH;
+	for (const compactBrand of fullWidth < TAGLINE_MIN_COLS ? [true] : [false, true]) {
 		const available =
 			width -
 			brandPillWidth(props.version, props.updateAvailable, compactBrand) -
@@ -189,6 +190,10 @@ function planRow(props: HeaderBarProps, width: number): Omit<HeaderPlan, "mark">
 		const floor = compactBrand ? MIDDLE_MIN : TAGLINE_MIDDLE_MIN;
 		if (available >= floor) {
 			const middle = fitHeaderMiddle(props.workspacePath, props.branch, props.syncStatus, available);
+			// The tagline is the last thing kept: it stays only while the path,
+			// the branch and the sync note all show whole beside it, with the
+			// 8's columns to spare, so it never costs the living 8 its place.
+			if (!compactBrand && !showsWhole(props, fullWidth - MARK_COLUMNS - (width - available))) continue;
 			if (middle.branch || middle.path || middle.sync) {
 				return { compactBrand, middle, middleAvailable: available };
 			}
@@ -200,6 +205,15 @@ function planRow(props: HeaderBarProps, width: number): Omit<HeaderPlan, "mark">
 		middleAvailable: 0,
 		middle: { path: "", branch: "", sync: "" },
 	};
+}
+
+/** The path, the branch and the sync note all fit `columns` with nothing cut or dropped. */
+function showsWhole(props: HeaderBarProps, columns: number): boolean {
+	const fit = (cols: number) =>
+		fitHeaderMiddle(props.workspacePath, props.branch, props.syncStatus, cols);
+	const whole = fit(Number.MAX_SAFE_INTEGER);
+	const got = fit(columns);
+	return got.path === whole.path && got.branch === whole.branch && got.sync === whole.sync;
 }
 
 export function HeaderBar(props: HeaderBarProps) {
