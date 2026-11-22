@@ -84,6 +84,7 @@
 
 import { forcedUnattended } from "../core/one-yes";
 import { REFUSED_TWICE_LINE } from "../permissions/cd-prefix";
+import type { TurnGateRecord } from "../specifications/session/index";
 import { browserWithheldNote } from "../tools/eight-browser";
 import {
 	checkClaims,
@@ -185,7 +186,39 @@ export interface TextToolAgentOptions {
 	 * owns the queue; returning [] leaves the round unchanged.
 	 */
 	steer?: () => string[];
+	/**
+	 * Turn gate record (#331): called once per harness send-back and once when the
+	 * turn ends, with a fixed gate id, the round and the counters that bound it.
+	 * The Agent writes it to the session file. A sink that throws is ignored.
+	 */
+	onGate?: (record: TurnGateRecord) => void;
 }
+
+/** Gate ids for a send-back (TurnGateRecord.event "send_back"). */
+export type SendBackGate =
+	| "question"
+	| "next_step"
+	| "completion"
+	| "completion_blocked"
+	| "degenerate"
+	| "plan"
+	| "output"
+	| "final"
+	| "claim"
+	| "cut_off"
+	| "output_cap"
+	| "chat_only_retry"
+	| "useless_streak"
+	| "silent_calls";
+
+/** Exit ids for a turn end (TurnGateRecord.event "turn_end"). */
+export type TurnEndGate =
+	| "answer"
+	| "answer_only"
+	| "aborted"
+	| "turn_limit"
+	| "round_cap"
+	| "error";
 
 export interface TextToolAgentResult {
 	/** The answer to show the user, with any "[harness] Not verified" lines appended. */
@@ -859,6 +892,35 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 	const request = [...opts.messages].reverse().find((m) => m.role === "user")?.content ?? "";
 	const claimsAgainstLog = (answer: string) =>
 		toolLog.length > 0 ? checkClaims({ request, answer, toolLog }) : [];
+	// Turn gate records (#331): ids and counters only, never reply text.
+	const gateRecord = (
+		event: TurnGateRecord["event"],
+		gate: SendBackGate | TurnEndGate,
+		round: number,
+		reply?: TurnGateRecord["reply"],
+	): void => {
+		if (!opts.onGate) return;
+		try {
+			opts.onGate({
+				event,
+				gate,
+				round,
+				maxRounds,
+				checksSent,
+				checksWithoutProgress,
+				noOneHereSent,
+				planCheckSent,
+				finalCheckSent,
+				claimFollowUpSent,
+				outputCapRetries,
+				...(reply ? { reply } : {}),
+			});
+		} catch {
+			// The record is never a reason to change or fail a turn.
+		}
+	};
+	const sentBack = (gate: SendBackGate, round: number) => gateRecord("send_back", gate, round);
+	const ended = (gate: TurnEndGate, round: number) => gateRecord("turn_end", gate, round);
 	// Every exit goes through here: whatever the log still contradicts is
 	// appended as a factual note, never passed through silently.
 	const finish = (raw: string, rounds: number): TextToolAgentResult => {
@@ -884,6 +946,7 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 		// Stop before starting another round if the caller aborted (turn timeout,
 		// circuit breaker, user ESC). Return whatever prose the last round yielded.
 		if (opts.signal?.aborted) {
+			ended("aborted", round - 1);
 			return finish(finalContent(lastContent), round - 1);
 		}
 		// Steering (D1): a message the person sent while the last round's tools
@@ -915,8 +978,10 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 				prevRoundHadSuccess = false;
 				prevRoundAllRefused = false;
 				messages = [...messages, { role: "user", content: outputCapRetryMessage() }];
+				sentBack("output_cap", round);
 				continue;
 			}
+			ended("error", round);
 			throw err;
 		}
 		// Strip repetition degeneration before the reply is judged, fed back to
@@ -930,13 +995,17 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 		if (chatOnlyRound) {
 			chatOnlyRound = false;
 			if (turn.toolCalls.length > 0 || turn.cutOffToolCall) {
+				sentBack("chat_only_retry", round);
 				round--;
 				continue;
 			}
 		}
 		// Answer-only turn (#3613): whatever it said is the answer. A tool call
 		// in it is not run; the tools were withheld on purpose.
-		if (answerOnly) return finish(finalContent(replyText), round);
+		if (answerOnly) {
+			ended("answer_only", round);
+			return finish(finalContent(replyText), round);
+		}
 
 		// A reply that stopped inside a tool_call block (output token limit) is
 		// neither a final answer nor a runnable call. Tell the model exactly what
@@ -962,6 +1031,7 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 					{ role: "assistant", content: replyText },
 					{ role: "user", content: cutOffNote },
 				];
+				sentBack("cut_off", round);
 				continue;
 			}
 		}
@@ -985,6 +1055,7 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 					{ role: "assistant", content: replyText },
 					{ role: "user", content: NO_ONE_HERE_MESSAGE },
 				];
+				sentBack("question", round);
 				continue;
 			}
 			// A reply that was mostly repeated junk is a stall whatever came
@@ -1008,6 +1079,7 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 					{ role: "assistant", content: replyText },
 					{ role: "user", content: DEGENERATE_REPLY_MESSAGE },
 				];
+				sentBack("degenerate", round);
 				continue;
 			}
 			// Bounded completion check: straight after a successful tool round, a
@@ -1036,10 +1108,10 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 				checksSent < MAX_COMPLETION_CHECKS &&
 				round < maxRounds
 			) {
-				const checkMessage =
-					freshStall && prevRoundAllRefused && prevRoundBlockReasons.length > 0
-						? blockedCheckMessage(prevRoundBlockReasons)
-						: COMPLETION_CHECK_MESSAGE;
+				const blockedCheck = freshStall && prevRoundAllRefused && prevRoundBlockReasons.length > 0;
+				const checkMessage = blockedCheck
+					? blockedCheckMessage(prevRoundBlockReasons)
+					: COMPLETION_CHECK_MESSAGE;
 				checksSent++;
 				checksWithoutProgress++;
 				awaitingCheckAnswer = true;
@@ -1051,6 +1123,7 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 					{ role: "assistant", content: replyText },
 					{ role: "user", content: checkMessage },
 				];
+				sentBack(blockedCheck ? "completion_blocked" : "completion", round);
 				continue;
 			}
 			// Nobody is present (#331): a reply that only announces a next step would end
@@ -1072,6 +1145,7 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 					{ role: "assistant", content: replyText },
 					{ role: "user", content: NEXT_STEP_NOT_TAKEN_MESSAGE },
 				];
+				sentBack("next_step", round);
 				continue;
 			}
 			// A stall the budget no longer lets us check, with blocks since the
@@ -1097,6 +1171,7 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 						{ role: "assistant", content: replyText },
 						{ role: "user", content: planCheckMessage(open) },
 					];
+					sentBack("plan", round);
 					continue;
 				}
 			}
@@ -1113,6 +1188,7 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 						{ role: "assistant", content: replyText },
 						{ role: "user", content: check },
 					];
+					sentBack("output", round);
 					continue;
 				}
 			}
@@ -1137,6 +1213,7 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 						{ role: "assistant", content: replyText },
 						{ role: "user", content: check },
 					];
+					sentBack("final", round);
 					continue;
 				}
 			}
@@ -1152,6 +1229,7 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 						{ role: "assistant", content: replyText },
 						{ role: "user", content: claimFollowUpMessage(unfulfilled) },
 					];
+					sentBack("claim", round);
 					continue;
 				}
 			}
@@ -1160,6 +1238,16 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 						.filter(Boolean)
 						.join("\n\n")
 				: answer;
+			if (opts.onGate) {
+				gateRecord("turn_end", "answer", round, {
+					done: hasDoneMarker(replyText),
+					question: isQuestionToUser(replyText),
+					nextStep: isNextStepOnly(replyText),
+					stalled,
+					degenerate: degen.degenerate,
+					unattended: forcedUnattended(),
+				});
+			}
 			return finish(noted, round);
 		}
 
@@ -1279,6 +1367,7 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 			for (const tc of calls.slice(abortedAt)) {
 				toolLog.push({ name: tc.name, args: tc.arguments, result });
 			}
+			ended("aborted", round);
 			return finish(finalContent(lastContent), round);
 		}
 
@@ -1291,16 +1380,21 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 		if (turnGuard) {
 			turnGuard.round({ calls: roundGuardCalls });
 			const stopLine = turnGuard.stop();
-			if (stopLine) return finish(stopLine, round);
+			if (stopLine) {
+				ended("turn_limit", round);
+				return finish(stopLine, round);
+			}
 		}
 		silent.round(replyText, roundWorkCalls);
 		if (opts.silentProgress && silent.tripped()) opts.silentProgress(silent.takeProgress());
 		if (streak.tripped() && round < maxRounds) {
 			answerOnly = true;
 			answerOnlyNote = streak.note();
+			sentBack("useless_streak", round);
 		} else if (!opts.silentProgress && silent.tripped() && round < maxRounds) {
 			answerOnly = true;
 			answerOnlyNote = silent.note();
+			sentBack("silent_calls", round);
 		}
 		messages = [
 			...messages,
@@ -1316,5 +1410,6 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 	}
 
 	// Round cap hit with the model still calling tools: return the last prose.
+	ended("round_cap", maxRounds);
 	return finish(finalContent(lastContent), maxRounds);
 }

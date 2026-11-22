@@ -30,6 +30,7 @@ import type {
 	SessionSummary,
 	TokenUsage,
 	ToolCall,
+	TurnGateRecord,
 } from "./index.js";
 
 // Resolved at call time: Bun's os.homedir() ignores a runtime HOME change (#3678).
@@ -249,6 +250,11 @@ export class SessionWriter {
 			round: this.modelRounds++,
 			...r,
 		});
+	}
+
+	/** Turn gate (#331): a harness send-back or the turn's exit, ids and counters only. */
+	writeTurnGate(r: TurnGateRecord): void {
+		this.write({ type: "turn_gate", timestamp: this.now(), sequenceNumber: this.nextSeq(), ...r });
 	}
 
 	/** Write rich assistant content with typed parts (v2) */
