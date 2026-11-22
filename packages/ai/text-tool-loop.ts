@@ -209,7 +209,8 @@ export type SendBackGate =
 	| "output_cap"
 	| "chat_only_retry"
 	| "useless_streak"
-	| "silent_calls";
+	| "silent_calls"
+	| "answer_only_final";
 
 /** Exit ids for a turn end (TurnGateRecord.event "turn_end"). */
 export type TurnEndGate =
@@ -440,6 +441,21 @@ export const NEXT_STEP_NOT_TAKEN_MESSAGE = [
 	"Do that step now: reply with only the tool_call block(s).",
 	"Or, if you cannot, finish with what you have. In your final reply state what was not done and",
 	`what was not verified. Start your final reply with "${DONE_MARKER}".`,
+].join("\n");
+
+/**
+ * Sent back once when an answer-only reply (tools withheld) is a question or only announces a
+ * next step and nobody is present (#331, run 2026-11-22_045649). It shares the once-per-turn
+ * bound with NO_ONE_HERE_MESSAGE and NEXT_STEP_NOT_TAKEN_MESSAGE. Tools stay off, so it asks
+ * for the final answer only, never a tool call.
+ */
+export const ANSWER_ONLY_UNATTENDED_MESSAGE = [
+	"No one is here, and your last reply asked a question or said what you will do next.",
+	"Tools are not available for this reply: it is your final answer.",
+	"If a step was refused or needs a person's yes, do not take it and do not get its effect another way; say it was not done.",
+	"Do not ask a question and do not say what you will do next. Reply with your final summary of",
+	"what was done and what was not done, and what was not verified.",
+	`Start it with "${DONE_MARKER}".`,
 ].join("\n");
 
 /**
@@ -1003,6 +1019,24 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 		// Answer-only turn (#3613): whatever it said is the answer. A tool call
 		// in it is not run; the tools were withheld on purpose.
 		if (answerOnly) {
+			// Nobody is present (#331): a question or an announced next step here would
+			// end the turn with no answer. One send-back, sharing #326's bound, asking for
+			// the final answer only; tools stay off, and the next reply ends the turn.
+			if (
+				!noOneHereSent &&
+				round < maxRounds &&
+				(isQuestionToUser(replyText) || isNextStepOnly(replyText)) &&
+				forcedUnattended()
+			) {
+				noOneHereSent = true;
+				sentBack("answer_only_final", round);
+				messages = [
+					...messages,
+					{ role: "assistant", content: replyText },
+					{ role: "user", content: ANSWER_ONLY_UNATTENDED_MESSAGE },
+				];
+				continue;
+			}
 			ended("answer_only", round);
 			return finish(finalContent(replyText), round);
 		}
