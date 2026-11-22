@@ -403,6 +403,7 @@ export function isNextStepOnly(content: string): boolean {
  */
 export const NEXT_STEP_NOT_TAKEN_MESSAGE = [
 	"No one is here, and your last reply only said what you will do next: saying a step is not doing it.",
+	"If that step was refused or needs a person's yes, do not take it and do not get its effect another way; say it was not done.",
 	"Do that step now: reply with only the tool_call block(s).",
 	"Or, if you cannot, finish with what you have. In your final reply state what was not done and",
 	`what was not verified. Start your final reply with "${DONE_MARKER}".`,

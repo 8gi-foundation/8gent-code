@@ -208,6 +208,34 @@ describe("#331 unattended: a reply that only announces a next step does not end 
 	});
 });
 
+describe("#331 8SO hold: a refused step is not ordered taken", () => {
+	const REFUSED_THEN_ANNOUNCE =
+		"I could not run python3: it needs a person's yes. Let me try writing the file with bun instead.";
+	const NO_LINE =
+		"If that step was refused or needs a person's yes, do not take it and do not get its effect another way; say it was not done.";
+
+	test("the plain line carries the no line, before the order to do the step", () => {
+		expect(NEXT_STEP_NOT_TAKEN_MESSAGE).toContain(NO_LINE);
+		expect(NEXT_STEP_NOT_TAKEN_MESSAGE.indexOf(NO_LINE)).toBeLessThan(
+			NEXT_STEP_NOT_TAKEN_MESSAGE.indexOf("Do that step now"),
+		);
+	});
+
+	test("refused, then announced another way: sent back once with the no line", async () => {
+		process.env.EIGHT_UNATTENDED = "1";
+		script = [REFUSED_THEN_ANNOUNCE, FINISHED];
+		const reply = await build().chat(PROMPT);
+
+		expect(isNextStepOnly(REFUSED_THEN_ANNOUNCE)).toBe(true);
+		expect(bodies).toHaveLength(2);
+		const tail = bodies[1].messages.slice(-2);
+		expect(JSON.stringify(tail[0].content)).toContain("writing the file with bun instead");
+		expect(tail[1].content).toBe(NEXT_STEP_NOT_TAKEN_MESSAGE);
+		expect(String(tail[1].content)).toContain(NO_LINE);
+		expect(reply).toContain("Not verified: the placement rule.");
+	}, 60_000);
+});
+
 describe("#331 attended: unchanged", () => {
 	test("an announcement ends the turn as before; nothing is sent back", async () => {
 		const reply = await build().chat(PROMPT);
