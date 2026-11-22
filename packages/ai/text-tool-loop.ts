@@ -357,6 +357,58 @@ export const NO_ONE_HERE_MESSAGE = [
 ].join("\n");
 
 /**
+ * A sentence that opens by announcing a next step (#331): "Let me ...", "I will now ...",
+ * "Next, I'll ...", "Now I need to ...". "Let me know", "let me summarize" and the like are
+ * how real answers close or open, so they are not announcements. Bare "I will" and
+ * "I need to" are not either: only with "now" or a leading "Now"/"Next".
+ */
+const NEXT_STEP_OPENER = new RegExp(
+	[
+		"^(?:(?:ok|okay|alright|so|first|then),?\\s+)?",
+		"(?:",
+		"(?:now|next),?\\s+(?:i(?:'ll| will| need to| am going to|'m going to)|let me(?!\\s+(?:know|summari[sz]e|recap|explain|be clear)\\b))\\b",
+		"|let me\\b(?!\\s+(?:know|summari[sz]e|recap|explain|be clear)\\b)",
+		"|i(?:'ll| will| am going to|'m going to)\\s+now\\b",
+		")",
+	].join(""),
+);
+
+/**
+ * Does this no-tool-call reply only announce a next step, with no answer delivered (#331)?
+ * Narrow on purpose: its last sentence opens with an announcement, or it is one line that
+ * opens with one. A DONE-marked reply or a question is never an announcement.
+ */
+export function isNextStepOnly(content: string): boolean {
+	const text = content.trim();
+	if (text === "" || hasDoneMarker(text) || isQuestionToUser(text)) return false;
+	const sentences = text
+		.split(/(?<=[.!:;])\s+|\n+/)
+		.map((s) =>
+			s
+				.replace(/[*_`]/g, "")
+				.replace(/^[\s>#-]+/, "")
+				.replace(/’/g, "'")
+				.trim()
+				.toLowerCase(),
+		)
+		.filter(Boolean);
+	if (sentences.length === 0) return false;
+	if (NEXT_STEP_OPENER.test(sentences[sentences.length - 1])) return true;
+	return !text.includes("\n") && NEXT_STEP_OPENER.test(sentences[0]);
+}
+
+/**
+ * Sent back when a turn ends on an announced next step and nobody is present (#331). It shares
+ * the once-per-turn bound with NO_ONE_HERE_MESSAGE.
+ */
+export const NEXT_STEP_NOT_TAKEN_MESSAGE = [
+	"No one is here, and your last reply only said what you will do next: saying a step is not doing it.",
+	"Do that step now: reply with only the tool_call block(s).",
+	"Or, if you cannot, finish with what you have. In your final reply state what was not done and",
+	`what was not verified. Start your final reply with "${DONE_MARKER}".`,
+].join("\n");
+
+/**
  * Strip a leading DONE_MARKER (tolerating markdown bold around it, e.g.
  * "**DONE:**") so the marker never reaches the user. Content without the
  * marker is returned unchanged.
@@ -798,7 +850,7 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 	let planCheckSent = false;
 	// The caller's final check (#3550) fires at most once per turn.
 	let finalCheckSent = false;
-	// The no-one-is-here line (#326) is sent at most once per turn.
+	// The no-one-is-here lines (#326 question, #331 next step) share one send-back per turn.
 	let noOneHereSent = false;
 	// Steps cut at the output cap and retried this turn.
 	let outputCapRetries = 0;
@@ -997,6 +1049,27 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 					...messages,
 					{ role: "assistant", content: replyText },
 					{ role: "user", content: checkMessage },
+				];
+				continue;
+			}
+			// Nobody is present (#331): a reply that only announces a next step would end
+			// the turn with the step not taken. It is sent back once, sharing #326's bound.
+			// The reply after it must be a tool call or DONE-marked, so a second
+			// announcement gets the completion check above, inside its own caps.
+			if (
+				!noOneHereSent &&
+				round < maxRounds &&
+				isNextStepOnly(replyText) &&
+				forcedUnattended()
+			) {
+				noOneHereSent = true;
+				awaitingCheckAnswer = true;
+				prevRoundHadSuccess = false;
+				prevRoundAllRefused = false;
+				messages = [
+					...messages,
+					{ role: "assistant", content: replyText },
+					{ role: "user", content: NEXT_STEP_NOT_TAKEN_MESSAGE },
 				];
 				continue;
 			}
