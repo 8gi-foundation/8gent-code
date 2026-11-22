@@ -2262,6 +2262,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				chatOnlyFirstRound: chatOnly,
 				// Steering (D1): delivered after the running tool calls; then the budget notice.
 				steer: () => [...this.drainSteers(), ...budgetDrain()],
+				// #331: each harness send-back and the turn's exit, ids and counters only.
+				onGate: (record) => this.sessionWriter.writeTurnGate(record),
 			});
 		};
 

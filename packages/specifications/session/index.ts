@@ -425,6 +425,42 @@ export interface ModelRoundEntry extends BaseEntry {
 	wallMs: number;
 }
 
+/**
+ * Turn gates (#331): one entry each time the text-tool loop sends a reply back
+ * instead of ending the turn, and one when the turn ends, naming the exit.
+ * Ids and counters only: never the model's reply or the message sent back.
+ */
+export interface TurnGateEntry extends BaseEntry {
+	type: "turn_gate";
+	/** "send_back": the harness sent the reply back; "turn_end": the turn ended. */
+	event: "send_back" | "turn_end";
+	/** Fixed short id: the gate that sent it back, or the exit that ended the turn. */
+	gate: string;
+	/** 1-based model round within this turn. */
+	round: number;
+	maxRounds: number;
+	/** The bounds, as they stand after this send-back. */
+	checksSent: number;
+	checksWithoutProgress: number;
+	noOneHereSent: boolean;
+	planCheckSent: boolean;
+	finalCheckSent: boolean;
+	claimFollowUpSent: boolean;
+	outputCapRetries: number;
+	/** turn_end "answer" only: what the loop saw in the last reply, as booleans. */
+	reply?: {
+		done: boolean;
+		question: boolean;
+		nextStep: boolean;
+		stalled: boolean;
+		degenerate: boolean;
+		unattended: boolean;
+	};
+}
+
+/** What the loop hands the writer: the entry without its envelope. */
+export type TurnGateRecord = Omit<TurnGateEntry, "type" | "timestamp" | "sequenceNumber">;
+
 export interface SessionEndEntry extends BaseEntry {
 	type: "session_end";
 	summary: SessionSummary;
@@ -466,6 +502,7 @@ export type SessionEntry =
 	| StepEndEntry
 	| ToolErrorEntry
 	| ModelRoundEntry
+	| TurnGateEntry
 	// v1 only (legacy, still parsed)
 	| AssistantMessageEntry
 	| TurnStartEntry
