@@ -9,6 +9,38 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.48] - 2026-11-22
+
+### Added
+- turn-gate: record each harness send-back and the turn's exit in the session file (#331) ([#333](https://github.com/8gi-foundation/8gent-code/pull/333))
+- eight: log first-reply wait for local runs (#229 step 1) ([#238](https://github.com/8gi-foundation/8gent-code/pull/238))
+- harness: harness protocol spec, conformance rubric and spawner adapter (flag off) ([#234](https://github.com/8gi-foundation/8gent-code/pull/234))
+- eight: opt-in KV cache type for the local server (EIGHT_KV_CACHE) ([#233](https://github.com/8gi-foundation/8gent-code/pull/233))
+
+### Changed
+- orchestration: restore the ../eight mock after child-finishes-own-note (#294) ([#299](https://github.com/8gi-foundation/8gent-code/pull/299))
+- voice: lower the live-loop tick floor to what a blocking spawn cannot reach (#294) ([#300](https://github.com/8gi-foundation/8gent-code/pull/300))
+- ci: give the packed-surface check an explicit 30 s timeout (#200) ([#202](https://github.com/8gi-foundation/8gent-code/pull/202))
+- release PR commits are authored by the maintainer ([#237](https://github.com/8gi-foundation/8gent-code/pull/237))
+- Per-session usage records, a stdin reader and a sorted list (slice 1 of #222) ([#223](https://github.com/8gi-foundation/8gent-code/pull/223))
+- rows 1, 5, 6, 7 of 177 stop depending on the machine (layout, symlinks, pid length) ([#207](https://github.com/8gi-foundation/8gent-code/pull/207))
+
+### Fixed
+- turn-gate: an unattended turn that ends on an announcement after its send-back is closed honestly (#331) ([#337](https://github.com/8gi-foundation/8gent-code/pull/337))
+- turn-gate: an unattended answer-only reply that asks or announces is sent back once (#331) ([#335](https://github.com/8gi-foundation/8gent-code/pull/335))
+- turn-gate: an unattended turn that ends on an announced next step is sent back once (#331) ([#332](https://github.com/8gi-foundation/8gent-code/pull/332))
+- turn-gate: an unattended turn that ends on a question is sent back once (#326) ([#327](https://github.com/8gi-foundation/8gent-code/pull/327))
+- permissions: an unattended turn gets a refusal, not a card nobody can answer ([#313](https://github.com/8gi-foundation/8gent-code/pull/313))
+- tui: the header shows the branch alone when it has no upstream ([#307](https://github.com/8gi-foundation/8gent-code/pull/307))
+- permissions: audio block names its rule, NaN score pinned; code-body exemption removed ([#303](https://github.com/8gi-foundation/8gent-code/pull/303))
+- tools: run_command stops a hung child and tells the model ([#311](https://github.com/8gi-foundation/8gent-code/pull/311))
+- compaction: one escaping serializer so a tool result cannot forge a turn (#226) ([#236](https://github.com/8gi-foundation/8gent-code/pull/236))
+- orchestration: spawnCLIAgent children lead their own process group ([#235](https://github.com/8gi-foundation/8gent-code/pull/235))
+- permissions: the workspace boundary expands variables from the command shell's own environment ([#209](https://github.com/8gi-foundation/8gent-code/pull/209))
+
+### Security
+- security: redact more token shapes and protect learned.jsonl (#243) ([#244](https://github.com/8gi-foundation/8gent-code/pull/244))
+
 ## [0.20.47] - 2026-11-11
 
 ### Fixed
