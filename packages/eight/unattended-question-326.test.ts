@@ -3,11 +3,13 @@
  *
  * 1. The turn gate. On the text-tool path (the local models' path, the one the pilot ran) a
  *    reply that is a question ends the turn. Unattended, that question is sent back to the
- *    model exactly once with a plain line: no one is here, finish with what you have or stop
- *    and state what was not verified. A second question ends the turn; it is never sent back
+ *    model exactly once with a plain line: no one is here, a question asking permission or
+ *    confirmation is answered no, do not take that step or get its effect another way, finish
+ *    only what needs no permission and state what was not done and not verified. A second question ends the turn; it is never sent back
  *    twice. An attended session is unchanged: the question ends the turn and reaches the person.
  * 2. The refusal words. A command refused for want of a person tells the model to carry on
- *    with the tools it has and finish, and still says the command was not run and not to retry.
+ *    with the steps that do not need it and not to get its effect another way, and still says
+ *    the command was not run and not to retry.
  *
  * Production call shape: Agent.chat() against a fake OpenAI-compatible endpoint (as in
  * done-gate-agent.test.ts) and ToolExecutor.execute for run_command (as in
@@ -168,6 +170,20 @@ describe("#326 unattended: a question to the absent person does not end the turn
 		expect(NO_ONE_HERE_MESSAGE).toMatch(/not verified/i);
 		expect(NO_ONE_HERE_MESSAGE).not.toMatch(/[–—]/);
 	});
+
+	test("unattended means no: a permission question is answered no, and its effect is not got another way", () => {
+		expect(NO_ONE_HERE_MESSAGE).toContain(
+			"A question asking permission or confirmation is answered no.",
+		);
+		expect(NO_ONE_HERE_MESSAGE).toContain(
+			"Do not take that step, and do not get its effect another way.",
+		);
+		expect(NO_ONE_HERE_MESSAGE).toContain("Say plainly it was not done.");
+		expect(NO_ONE_HERE_MESSAGE).toContain("Finish only what needs no permission.");
+		// The self-decide line 8SO held at 1fd0722 is gone.
+		expect(NO_ONE_HERE_MESSAGE).not.toMatch(/deciding for yourself/i);
+		expect(NO_ONE_HERE_MESSAGE).not.toMatch(/whatever you were going to ask/i);
+	});
 });
 
 describe("#326 attended: unchanged", () => {
@@ -180,7 +196,7 @@ describe("#326 attended: unchanged", () => {
 	}, 60_000);
 });
 
-describe("#326 the refusal for want of a person says to carry on and finish", () => {
+describe("#326 the refusal for want of a person says to carry on without it, not around it", () => {
 	beforeEach(() => {
 		// The pilot's pane: a terminal, not headless, nobody present.
 		Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
@@ -189,7 +205,7 @@ describe("#326 the refusal for want of a person says to carry on and finish", ()
 		process.env[SYSTEM_ONE_FLAG] = "0";
 	});
 
-	test("run_command: still refused, not run, no retry; and told to finish with the tools it has", async () => {
+	test("run_command: still refused, not run, no retry; and told not to get its effect another way", async () => {
 		// mkfifo is not on the allow list, so the generic approval asks a person.
 		const made = join(repo, "made-326");
 		const out = String(
@@ -202,7 +218,11 @@ describe("#326 the refusal for want of a person says to carry on and finish", ()
 		expect(out).toStartWith("[BLOCKED]");
 		expect(out).toContain("there is no one to ask in this session");
 		expect(out).toContain("The command was not run. Do not retry this call.");
-		expect(out).toMatch(/Carry on with the tools you have and finish the task/);
+		expect(out).toContain(
+			"Carry on with the steps that do not need this command, and do not get its effect another way.",
+		);
+		expect(out).not.toContain("Carry on with the tools you have");
+		expect(out).toMatch(/not done/i);
 		expect(out).toMatch(/not verified/i);
 		expect(out).toMatch(/Do not ask the person/);
 		// #310 still holds: nobody declined, and no way around the gate is named.
@@ -218,6 +238,9 @@ describe("#326 the refusal for want of a person says to carry on and finish", ()
 
 		expect(out).toStartWith("[BLOCKED]");
 		expect(out).toContain("Nothing was done. Do not retry this call.");
-		expect(out).toMatch(/Carry on with the tools you have and finish the task/);
+		expect(out).toContain(
+			"Carry on with the steps that do not need this command, and do not get its effect another way.",
+		);
+		expect(out).not.toContain("Carry on with the tools you have");
 	});
 });

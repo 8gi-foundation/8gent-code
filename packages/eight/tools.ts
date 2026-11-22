@@ -1003,7 +1003,7 @@ export { REFUSAL_LEAD, REFUSAL_NOTE, refusalLead };
  * this only says what to do next, so the turn does not end on a question no one will read.
  */
 const UNATTENDED_CARRY_ON =
-	"Carry on with the tools you have and finish the task. Do not ask the person, no one is here; in your final reply state what was not verified.";
+	"Carry on with the steps that do not need this command, and do not get its effect another way. Do not ask the person, no one is here; in your final reply state what was not done and what was not verified.";
 
 export class ToolExecutor {
 	private workingDirectory: string;

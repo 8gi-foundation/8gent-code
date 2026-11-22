@@ -345,13 +345,15 @@ export function isQuestionToUser(content: string): boolean {
 
 /**
  * Sent back once when a turn ends on a question and nobody is present to answer it (#326).
- * Plain words: the model either finishes with what it has or stops and says what is unverified.
+ * Plain words: unattended means no. A request for permission or confirmation is answered no,
+ * the step is not taken by another route, and the model finishes only what needs no permission.
  */
 export const NO_ONE_HERE_MESSAGE = [
 	"No one is here to answer: this session is unattended, so your question will not be read.",
-	"Do not ask again. Finish the task with the tools you have, deciding for yourself",
-	"whatever you were going to ask. If you cannot finish, stop and state plainly what",
-	`was not done and what was not verified. Start your final reply with "${DONE_MARKER}".`,
+	"Do not ask again. A question asking permission or confirmation is answered no.",
+	"Do not take that step, and do not get its effect another way. Say plainly it was not done.",
+	"Finish only what needs no permission. In your final reply state what was not done and",
+	`what was not verified. Start your final reply with "${DONE_MARKER}".`,
 ].join("\n");
 
 /**
