@@ -455,6 +455,8 @@ export interface TurnGateEntry extends BaseEntry {
 		stalled: boolean;
 		degenerate: boolean;
 		unattended: boolean;
+		/** The loop appended its "[harness] Turn ended unattended" note to the reply. */
+		closedHonestly: boolean;
 	};
 }
 

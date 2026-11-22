@@ -458,6 +458,45 @@ export const ANSWER_ONLY_UNATTENDED_MESSAGE = [
 	`Start it with "${DONE_MARKER}".`,
 ].join("\n");
 
+/** Longest quote of the model's own sentence an honest-close note carries. */
+const HONEST_CLOSE_QUOTE_MAX = 200;
+
+/**
+ * The note appended when an unattended turn ends on an announcement or a question after the
+ * once-per-turn send-back is spent (#331, run 2026-11-22_064409). Fixed text around one quoted
+ * sentence: the last one for a question; for an announcement, the sentence isNextStepOnly
+ * matched (the last, or the first of a one-line reply). No model call makes it.
+ */
+export function honestCloseNote(reply: string): string {
+	const question = isQuestionToUser(reply);
+	const sentences = reply
+		.trim()
+		.split(/(?<=[.!:;?])\s+|\n+/)
+		.map((s) =>
+			s
+				.replace(/[*_`]/g, "")
+				.replace(/^[\s>#-]+/, "")
+				.replace(/’/g, "'")
+				.trim(),
+		)
+		.filter(Boolean);
+	let quote = sentences[sentences.length - 1] ?? "";
+	if (!question && !NEXT_STEP_OPENER.test(quote.toLowerCase())) quote = sentences[0] ?? "";
+	if (quote.length > HONEST_CLOSE_QUOTE_MAX) {
+		quote = `${quote.slice(0, HONEST_CLOSE_QUOTE_MAX).trimEnd()}...`;
+	}
+	return question
+		? `[harness] Turn ended unattended on a question, not an answer. No one answered it. Not done: "${quote}". Nothing further ran.`
+		: `[harness] Turn ended unattended on an announced next step, not an answer. The step was not taken. Not done: "${quote}". Nothing further ran.`;
+}
+
+/** The fixed `unverified` line for an honest close: no reply text, so runs.jsonl carries none. */
+function honestCloseUnverified(reply: string): string {
+	return isQuestionToUser(reply)
+		? "turn ended unattended on a question, not an answer"
+		: "turn ended unattended on an announced next step, not an answer";
+}
+
 /**
  * Strip a leading DONE_MARKER (tolerating markdown bold around it, e.g.
  * "**DONE:**") so the marker never reaches the user. Content without the
@@ -939,7 +978,9 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 	const ended = (gate: TurnEndGate, round: number) => gateRecord("turn_end", gate, round);
 	// Every exit goes through here: whatever the log still contradicts is
 	// appended as a factual note, never passed through silently.
-	const finish = (raw: string, rounds: number): TextToolAgentResult => {
+	// `closedOn`: the reply an unattended turn ended on after its send-back was spent (#331);
+	// it gets the honest-close note and one fixed `unverified` line.
+	const finish = (raw: string, rounds: number, closedOn?: string): TextToolAgentResult => {
 		// Repeated junk never reaches the user, whichever exit this is.
 		const content = cleanDegenerateReply(raw).clean;
 		// No answer after tool work is not a finished turn (#3091): say so in
@@ -948,11 +989,13 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 		const unfulfilled = claimsAgainstLog(content);
 		const unverified = [
 			...(empty ? [emptyReplyStall(toolLog.length)] : []),
+			...(closedOn !== undefined ? [honestCloseUnverified(closedOn)] : []),
 			...unfulfilled.map((u) => u.note),
 		];
 		if (unverified.length === 0) return { content, rounds, toolLog, unverified: [] };
 		const notes = [
 			empty ? emptyReplyNote(toolLog.length, toolLog) : content.trimEnd(),
+			closedOn !== undefined ? honestCloseNote(closedOn) : "",
 			unfulfilled.length > 0 ? formatHarnessNote(unfulfilled) : "",
 		].filter((n) => n.trim() !== "");
 		return { content: notes.join("\n\n"), rounds, toolLog, unverified };
@@ -1272,6 +1315,14 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 						.filter(Boolean)
 						.join("\n\n")
 				: answer;
+			// Nobody is present and the one send-back is spent (#331, run 2026-11-22_064409): an
+			// announcement or a question is not passed through as the answer. The harness says
+			// plainly that the turn ended on it and that nothing further ran.
+			const closedHonestly =
+				noOneHereSent &&
+				!hasDoneMarker(replyText) &&
+				(isNextStepOnly(replyText) || isQuestionToUser(replyText)) &&
+				forcedUnattended();
 			if (opts.onGate) {
 				gateRecord("turn_end", "answer", round, {
 					done: hasDoneMarker(replyText),
@@ -1280,9 +1331,10 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 					stalled,
 					degenerate: degen.degenerate,
 					unattended: forcedUnattended(),
+					closedHonestly,
 				});
 			}
-			return finish(noted, round);
+			return finish(noted, round, closedHonestly ? replyText : undefined);
 		}
 
 		// Execute every requested tool and build a single labelled result block.
