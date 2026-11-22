@@ -109,8 +109,11 @@ const OBSERVED_MAX_BYTES = 5 * 1024 * 1024;
  * nothing, which is a failure mode this project has already paid for once.
  * Losing an observation is acceptable; losing the poll loop is not.
  *
- * Stores only what a reader needs to follow a conversation. No raw update
- * dump, so nothing incidental in the payload is persisted by accident.
+ * Stores the sender's numeric id, the time and a SHA-256 of the text, nothing
+ * else (8SO ruling, gov #1156 section 3; #339). A stranger's words, name and
+ * chat title are personal data we have no reason to hold, and untrusted input
+ * in a file other tools read. The hash still lets a reader count and match
+ * repeats without keeping the content.
  */
 export function observeUnauthorized(update: unknown): void {
 	try {
@@ -122,7 +125,7 @@ export function observeUnauthorized(update: unknown): void {
 				caption?: string;
 				message_id?: number;
 				chat?: { id?: number; title?: string; type?: string };
-				from?: { username?: string; first_name?: string; is_bot?: boolean };
+				from?: { id?: number };
 			};
 		};
 		const m = u.message;
@@ -136,20 +139,15 @@ export function observeUnauthorized(update: unknown): void {
 			mkdirSync(dirname(OBSERVED_LOG), { recursive: true, mode: 0o700 });
 		}
 
-		// Private by construction: the log holds other people's words.
+		// Private by construction: even ids and hashes are about other people.
 		if (!existsSync(OBSERVED_LOG)) writeFileSync(OBSERVED_LOG, "", { mode: 0o600 });
 		chmodSync(OBSERVED_LOG, 0o600);
 		appendFileSync(
 			OBSERVED_LOG,
 			`${JSON.stringify({
-				at: new Date((m.date ?? 0) * 1000).toISOString(),
-				update_id: u.update_id,
-				message_id: m.message_id,
-				chat_id: m.chat?.id,
-				chat_title: m.chat?.title,
-				from: m.from?.username ?? m.from?.first_name,
-				is_bot: m.from?.is_bot === true,
-				text,
+				id: m.from?.id,
+				ts: new Date((m.date ?? 0) * 1000).toISOString(),
+				sha256: createHash("sha256").update(text, "utf8").digest("hex"),
 			})}\n`,
 			"utf8",
 		);
@@ -1472,14 +1470,10 @@ class TelegramDaemonBridge {
 						// no message and are checked in handleCallbackQuery instead.
 						const incomingChatId = update.message?.chat?.id;
 						if (typeof incomingChatId === "number" && !this.isAuthorizedChat(incomingChatId)) {
-							// Record before dropping. The bot is an administrator of
-							// groups it does not answer in, so it already receives every
-							// message there, and Telegram gives bots no history API - once
-							// this update is discarded that content cannot be recovered.
-							// The bridge also holds the only getUpdates lease on the token,
-							// so a second poller would conflict with it rather than read
-							// alongside it. Appending here is the one place another process
-							// can learn what was said without contending for the lease.
+							// Record before dropping: the bot is an administrator of groups
+							// it does not answer in, so it receives every message there.
+							// Only sender id, time and a text hash are kept (8SO, gov #1156
+							// s3, #339): the words themselves are not ours to hold.
 							//
 							// Capture only. The allowlist keeps its exact meaning: this chat
 							// still gets no reply, no agent dispatch and no side effect.
