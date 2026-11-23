@@ -9507,6 +9507,7 @@ export function App({
 								toolsCompleted={toolCount}
 								bodyParts={bodyParts.state}
 								height={viewport.height}
+								planColumnShowsSteps={showPlanColumn && planSteps.length > 0}
 							/>
 						)}
 					</Box>

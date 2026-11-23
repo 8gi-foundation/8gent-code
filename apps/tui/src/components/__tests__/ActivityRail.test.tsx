@@ -300,6 +300,25 @@ describe("ActivityRail", () => {
 		}
 	});
 
+	test("TASKS leaves the rail while the PLAN column already lists the same steps", () => {
+		const headings = (props: ActivityRailProps) =>
+			flatten(expand(render(props)))
+				.filter((el) => el.type === Text)
+				.map((el) => React.Children.toArray(el.props.children as React.ReactNode).join(""));
+		const running = [{ id: "s2", label: "run typecheck", progress: 50, detail: "1/2" }];
+		// Plan column open: the rail's TASKS repeats the PLAN column, so it goes.
+		expect(headings({ ...baseProps, tasks: running, planColumnShowsSteps: true })).not.toContain(
+			"TASKS",
+		);
+		// Plan column closed: the rail is the only place the task shows, so it stays.
+		expect(headings({ ...baseProps, tasks: running })).toContain("TASKS");
+		// A waiting-for-answer row is not in the PLAN column, so the rail keeps it.
+		const waiting = [{ id: "waiting", label: "waiting for your answer", tone: "waiting" as const }];
+		expect(headings({ ...baseProps, tasks: waiting, planColumnShowsSteps: true })).toContain(
+			"TASKS",
+		);
+	});
+
 	test("snapshot of full rail is stable", () => {
 		const rendered = render(baseProps);
 		const top = rendered.props as {

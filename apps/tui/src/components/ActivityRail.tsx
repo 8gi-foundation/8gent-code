@@ -176,6 +176,18 @@ interface ActivityRailProps {
 	height?: number;
 	/** Test seam: loop rows to show instead of reading the Control store. */
 	loopRows?: ReadonlyArray<LoopRow>;
+	/** The PLAN column is on screen and lists the plan's steps. Those steps
+	 *  are the TASKS rows, so TASKS leaves the rail; a waiting-for-answer row
+	 *  is not in the column and stays. */
+	planColumnShowsSteps?: boolean;
+}
+
+/** Whether the rail's TASKS section shows, given the PLAN column beside it. */
+function tasksOnRail(
+	p: Pick<ActivityRailProps, "tasks" | "planColumnShowsSteps">,
+): boolean {
+	if (!p.planColumnShowsSteps) return true;
+	return p.tasks.some((task) => task.tone === "waiting");
 }
 
 /** Rows of the screen the rail does not own: header, tab strip, shell frame, footer (measured at 100x32). */
@@ -184,10 +196,14 @@ export const RAIL_CHROME_ROWS = 9;
 /** Free rows left in the rail for the LOOPS block at a given terminal height. */
 export function railSpareRows(
 	height: number,
-	p: Pick<ActivityRailProps, "tasks" | "providers" | "agents" | "memory" | "bodyParts">,
+	p: Pick<
+		ActivityRailProps,
+		"tasks" | "providers" | "agents" | "memory" | "bodyParts" | "planColumnShowsSteps"
+	>,
 ): number {
-	const tasks =
-		p.tasks.length === 0
+	const tasks = !tasksOnRail(p)
+		? 0
+		: p.tasks.length === 0
 			? 1
 			: p.tasks.reduce(
 					(n, x) => n + taskLabelLines(x.label).length + (typeof x.progress === "number" ? 1 : 0),
@@ -201,7 +217,7 @@ export function railSpareRows(
 		: 0;
 	const used =
 		2 + // top padding and heading
-		(2 + tasks) +
+		(tasksOnRail(p) ? 2 + tasks : 0) +
 		(2 + 3) +
 		(2 + p.providers.length + asked) +
 		memory +
@@ -349,6 +365,7 @@ export function ActivityRail({
 	bodyParts,
 	height,
 	loopRows,
+	planColumnShowsSteps = false,
 }: ActivityRailProps) {
 	return (
 		<Box
@@ -373,6 +390,7 @@ export function ActivityRail({
 				</Text>
 			</Box>
 
+			{tasksOnRail({ tasks, planColumnShowsSteps }) ? (
 			<RailSection title="TASKS">
 				{tasks.length === 0 ? (
 					<Box flexShrink={0}>
@@ -405,6 +423,7 @@ export function ActivityRail({
 					))
 				)}
 			</RailSection>
+			) : null}
 
 			<RailSection title="TOOLS">
 				{(() => {
