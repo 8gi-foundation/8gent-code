@@ -39,4 +39,15 @@ describe("flavorResponse", () => {
 		const out = flavorResponse("done", { style: "completion", suffix: COMPLETION_PHRASES[0] });
 		expect(out).toBe(`done\n\n${COMPLETION_PHRASES[0]}`);
 	});
+
+	test("empty or whitespace-only content never gets a tagline", () => {
+		const flavor = {
+			style: "completion" as const,
+			prefix: "Right away.",
+			suffix: COMPLETION_PHRASES[0],
+		};
+		for (const empty of ["", " ", "\n\n", "\t \n"]) {
+			expect(flavorResponse(empty, flavor)).toBe(empty);
+		}
+	});
 });

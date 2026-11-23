@@ -2579,7 +2579,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				agentResult.unverified.length > 0 ||
 				isVerbatimScope(this.config.agentScope) ||
 				wantsBareReply(this.turnTask) ||
-				quickResult !== null
+				quickResult !== null ||
+				content.trim() === ""
 				? content
 				: flavorResponse(content, flavor),
 		).text;
@@ -4553,7 +4554,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			const flavoredContent = fixCompletedLine(
 				gatedNative.violated ||
 					isVerbatimScope(this.config.agentScope) ||
-					wantsBareReply(this.turnTask)
+					wantsBareReply(this.turnTask) ||
+					content.trim() === ""
 					? content
 					: flavorResponse(content, flavor),
 			).text;

@@ -243,6 +243,8 @@ export interface FlavoredResponse {
  * Add personality flavor to a response
  */
 export function flavorResponse(content: string, flavor: FlavoredResponse): string {
+	// A tagline around nothing is a reply that says "done" with no content.
+	if (content.trim() === "") return content;
 	let result = content;
 
 	if (flavor.prefix) {
