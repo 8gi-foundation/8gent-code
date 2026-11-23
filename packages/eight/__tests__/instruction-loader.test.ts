@@ -34,29 +34,34 @@ afterEach(() => {
 });
 
 describe("loadInstructions priority", () => {
-	it("prefers AGENTS.md over 8GENT.md and CLAUDE.md in a directory", () => {
+	it("loads AGENTS.md first, then the different files beside it (#259)", () => {
 		fs.writeFileSync(path.join(tmpRoot, "AGENTS.md"), "from-agents");
 		fs.writeFileSync(path.join(tmpRoot, "8GENT.md"), "from-8gent");
 		fs.writeFileSync(path.join(tmpRoot, "CLAUDE.md"), "from-claude");
 
 		const result = loadInstructions(tmpRoot);
 
-		expect(result).toContain("from-agents");
-		expect(result).not.toContain("from-8gent");
-		expect(result).not.toContain("from-claude");
+		expect(result.indexOf("from-agents")).toBeGreaterThanOrEqual(0);
+		expect(result.indexOf("from-8gent")).toBeGreaterThan(result.indexOf("from-agents"));
+		expect(result.indexOf("from-claude")).toBeGreaterThan(result.indexOf("from-8gent"));
 	});
 
-	it("prefers 8GENT.md over CLAUDE.md when no AGENTS.md is present", () => {
-		fs.writeFileSync(path.join(tmpRoot, "8GENT.md"), "from-8gent");
+	it("loads a symlinked or copied CLAUDE.md once", () => {
+		fs.writeFileSync(path.join(tmpRoot, "AGENTS.md"), "one-rule-set");
+		fs.symlinkSync(path.join(tmpRoot, "AGENTS.md"), path.join(tmpRoot, "CLAUDE.md"));
+		fs.writeFileSync(path.join(tmpRoot, "8GENT.md"), "one-rule-set\n");
+
+		expect(loadInstructions(tmpRoot).split("one-rule-set").length - 1).toBe(1);
+	});
+
+	it("an empty AGENTS.md does not hide the CLAUDE.md beside it", () => {
+		fs.writeFileSync(path.join(tmpRoot, "AGENTS.md"), "\n");
 		fs.writeFileSync(path.join(tmpRoot, "CLAUDE.md"), "from-claude");
 
-		const result = loadInstructions(tmpRoot);
-
-		expect(result).toContain("from-8gent");
-		expect(result).not.toContain("from-claude");
+		expect(loadInstructions(tmpRoot)).toContain("from-claude");
 	});
 
-	it("falls back to CLAUDE.md only when no vendor-neutral file exists", () => {
+	it("loads CLAUDE.md when it is the only file", () => {
 		fs.writeFileSync(path.join(tmpRoot, "CLAUDE.md"), "from-claude");
 
 		expect(loadInstructions(tmpRoot)).toContain("from-claude");

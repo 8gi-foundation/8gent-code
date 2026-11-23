@@ -1,21 +1,22 @@
 /**
  * Instruction Loader - Auto-discover and merge AGENTS.md / 8GENT.md / CLAUDE.md
  *
- * Priority order per directory: AGENTS.md > 8GENT.md > CLAUDE.md (first found wins).
- * AGENTS.md is the vendor-neutral open standard and is canonical: 8gent is not
- * married to any vendor, so the open file wins. CLAUDE.md is a last-resort
- * fallback only - it loads when no vendor-neutral file is present.
+ * Order per directory: AGENTS.md, then 8GENT.md, then CLAUDE.md. AGENTS.md is
+ * the vendor-neutral open standard and comes first. A second or third file in
+ * the same directory also loads when it is a different file with different
+ * text (#259): a short generated AGENTS.md must not hide the project's real
+ * rules in the CLAUDE.md beside it. A symlink or a copy loads once.
  * Merge order: standing rules (~/.claude) < global (~/.8gent) < project root < cwd
  * (later overrides earlier)
  *
  * @see https://github.com/8gi-foundation/8gent-code/issues/941
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-/** File names to search for, in priority order (first match per directory wins) */
+/** File names to search for in each directory, in load order. */
 const INSTRUCTION_FILES = ["AGENTS.md", "8GENT.md", "CLAUDE.md"] as const;
 
 /**
@@ -53,6 +54,44 @@ function findStandingRules(): string | null {
 	} catch {
 		return null;
 	}
+}
+
+/** One instruction file as it enters the merge. */
+interface InstructionEntry {
+	/** Absolute path of the file. */
+	path: string;
+	/** The text that goes into the prompt (trimmed, standing rules with their header). */
+	text: string;
+	/** Set when the file repeats an earlier one in its directory, which is then loaded once. */
+	sameAs?: string;
+}
+
+/**
+ * Every readable, non-empty instruction file in a directory, in load order.
+ * A file that is the same file as an earlier one (a symlink) or carries the
+ * same text is returned with `sameAs` set, so a caller can report it without
+ * loading it twice.
+ */
+function findInstructionFilesIn(dir: string): InstructionEntry[] {
+	const found: InstructionEntry[] = [];
+	const realPaths = new Map<string, string>();
+	for (const filename of INSTRUCTION_FILES) {
+		const path = join(dir, filename);
+		if (!existsSync(path)) continue;
+		let text: string;
+		let real: string;
+		try {
+			text = readFileSync(path, "utf-8").trim();
+			real = realpathSync(path);
+		} catch {
+			continue; // Unreadable file, skip
+		}
+		if (text.length === 0) continue;
+		const twin = realPaths.get(real) ?? found.find((f) => !f.sameAs && f.text === text)?.path;
+		found.push(twin ? { path, text, sameAs: twin } : { path, text });
+		if (!realPaths.has(real)) realPaths.set(real, path);
+	}
+	return found;
 }
 
 /**
@@ -144,22 +183,32 @@ export function loadInstructionParts(
 	cwd: string,
 	opts: { includeUserGlobal?: boolean } = {},
 ): string[] {
+	return loadInstructionEntries(cwd, opts)
+		.filter((e) => !e.sameAs)
+		.map((e) => e.text);
+}
+
+/** loadInstructionParts with each file's path, repeats included and marked. */
+function loadInstructionEntries(
+	cwd: string,
+	opts: { includeUserGlobal?: boolean } = {},
+): InstructionEntry[] {
 	const includeUserGlobal = opts.includeUserGlobal ?? true;
-	const parts: string[] = [];
+	const entries: InstructionEntry[] = [];
 	const homeDir = resolve(home());
 
 	// 1. Operator standing rules (always on, lowest priority)
 	const standing = includeUserGlobal ? findStandingRules() : null;
 	if (standing) {
-		parts.push(`# STANDING RULES (always on, every surface)\n\n${standing}`);
+		entries.push({
+			path: join(home(), STANDING_RULES_FILE),
+			text: `# STANDING RULES (always on, every surface)\n\n${standing}`,
+		});
 	}
 
 	// 2. Global instructions
 	const globalDir = join(homeDir, ".8gent");
-	const globalContent = includeUserGlobal ? findInstructionFile(globalDir) : null;
-	if (globalContent) {
-		parts.push(globalContent.trim());
-	}
+	if (includeUserGlobal) entries.push(...findInstructionFilesIn(globalDir));
 
 	// 3. Walk up from cwd, collecting project instructions
 	const projectDirs = walkUp(cwd, homeDir);
@@ -168,11 +217,10 @@ export function loadInstructionParts(
 		if (dir === globalDir) continue;
 		const atOrAboveHome = dir === homeDir || homeDir.startsWith(`${dir}/`) || dir === "/";
 		if (!includeUserGlobal && atOrAboveHome) continue;
-		const content = findInstructionFile(dir);
-		if (content) parts.push(content.trim());
+		entries.push(...findInstructionFilesIn(dir));
 	}
 
-	return parts;
+	return entries;
 }
 
 /**
@@ -182,6 +230,32 @@ export function loadInstructionParts(
 export const PROJECT_INSTRUCTIONS_CAP = 8000;
 
 const SEPARATOR = "\n\n---\n\n";
+const CUT_MARK = "\n... (truncated; read the full file for more)";
+
+/**
+ * How many characters of each file fit under the cap, lowest priority first.
+ *
+ * When everything fits, every file is whole. Over the cap, each file first
+ * gets an equal guaranteed share of half the budget, so no file is dropped to
+ * nothing (#259: the standing rules used to vanish whole). What is left goes
+ * to the files from the most specific down, so the project's own file is the
+ * last one to be cut.
+ */
+function allot(lengths: number[], cap: number): number[] {
+	const n = lengths.length;
+	const joined = lengths.reduce((a, b) => a + b, 0) + SEPARATOR.length * (n - 1);
+	if (joined <= cap) return [...lengths];
+	const budget = Math.max(0, cap - SEPARATOR.length * (n - 1) - CUT_MARK.length * n);
+	const share = Math.floor(budget / (2 * n));
+	const out = lengths.map((l) => Math.min(l, share));
+	let left = budget - out.reduce((a, b) => a + b, 0);
+	for (let i = n - 1; i >= 0 && left > 0; i--) {
+		const more = Math.min(lengths[i] - out[i], left);
+		out[i] += more;
+		left -= more;
+	}
+	return out;
+}
 
 /**
  * The loaded instructions as a trailing system-prompt section, or "" when
@@ -189,9 +263,9 @@ const SEPARATOR = "\n\n---\n\n";
  * the agent does for on-box providers alone. It goes LAST so the stable prompt prefix before it stays
  * byte-identical (#3222).
  *
- * Over the cap, files are kept from the most specific down (the project's own
- * file wins, so it is never the one dropped) and lower-priority files are
- * left out. A single file larger than the cap keeps its beginning.
+ * Over the cap, every file keeps at least its beginning and the most specific
+ * files keep the most (see `allot`). A shortened file ends with a line saying
+ * so.
  */
 export function projectInstructionsSection(
 	cwd: string,
@@ -201,23 +275,55 @@ export function projectInstructionsSection(
 	const parts = loadInstructionParts(cwd, { includeUserGlobal: opts.includeUserGlobal ?? false });
 	if (parts.length === 0) return "";
 
+	const room = allot(
+		parts.map((p) => p.length),
+		cap,
+	);
+	let shortened = 0;
 	const kept: string[] = [];
-	let budget = cap;
-	for (let i = parts.length - 1; i >= 0; i--) {
-		const part = parts[i];
-		if (part.length <= budget) {
-			kept.unshift(part);
-			budget -= part.length + SEPARATOR.length;
-			continue;
+	parts.forEach((part, i) => {
+		if (room[i] >= part.length) {
+			kept.push(part);
+			return;
 		}
-		if (kept.length === 0) {
-			const head = part.slice(0, budget).replace(/\n[^\n]*$/, "");
-			kept.unshift(`${head}\n... (truncated; read the full file for more)`);
-		}
-		break;
-	}
-	const omitted = parts.length - kept.length;
-	const note =
-		omitted > 0 ? `(${omitted} lower-priority instruction file(s) left out to fit)\n\n` : "";
+		shortened++;
+		const head = part.slice(0, room[i]).replace(/\n[^\n]*$/, "");
+		if (head.length > 0) kept.push(`${head}${CUT_MARK}`);
+	});
+	const note = shortened > 0 ? `(${shortened} instruction file(s) shortened to fit)\n\n` : "";
 	return `\n\n## PROJECT INSTRUCTIONS (AGENTS.md / 8GENT.md / CLAUDE.md)\n\n${note}${kept.join(SEPARATOR)}`;
+}
+
+/** One instruction file as `8gent doctor` reports it. */
+export interface InstructionFileRow {
+	path: string;
+	/** Characters in the file as loaded. */
+	chars: number;
+	/** Characters of it that reach an on-box model's prompt. 0 for a repeat. */
+	kept: number;
+	/** The earlier file this one repeats, when it is loaded once. */
+	sameAs?: string;
+}
+
+/**
+ * The instruction files found for a folder, lowest priority first, with how
+ * much of each fits under the cap. Counts the operator's own files, which
+ * reach on-box models only.
+ */
+export function instructionFileRows(
+	cwd: string,
+	opts: { cap?: number } = {},
+): InstructionFileRow[] {
+	const entries = loadInstructionEntries(cwd, { includeUserGlobal: true });
+	const loaded = entries.filter((e) => !e.sameAs);
+	const room = allot(
+		loaded.map((e) => e.text.length),
+		opts.cap ?? PROJECT_INSTRUCTIONS_CAP,
+	);
+	return entries.map((e) => {
+		const at = loaded.indexOf(e);
+		return e.sameAs
+			? { path: e.path, chars: e.text.length, kept: 0, sameAs: e.sameAs }
+			: { path: e.path, chars: e.text.length, kept: Math.min(e.text.length, room[at]) };
+	});
 }

@@ -3140,6 +3140,21 @@ async function doctorCommand() {
 			}
 		}
 	}
+	// Instruction files for this folder, and how much of each fits (#259).
+	{
+		const { instructionFileRows } = await import("../packages/eight/instruction-loader.ts");
+		const rows = instructionFileRows(process.cwd());
+		if (rows.length === 0) console.log(dim("  No instruction files for this folder"));
+		else console.log(green(`Instruction files for this folder: ${rows.length}`));
+		for (const r of rows) {
+			const state = r.sameAs
+				? `left out, same as ${r.sameAs}`
+				: r.kept < r.chars
+					? `shortened to ${r.kept} of ${r.chars} characters`
+					: `${r.chars} characters, whole`;
+			console.log(dim(`  ${r.path} (${state})`));
+		}
+	}
 	for (const t of ["mpv", "yt-dlp", "rg"]) {
 		try {
 			execSync(`which ${t}`, { stdio: "ignore" });

@@ -75,7 +75,7 @@ describe("project AGENTS.md in the live system prompt", () => {
 });
 
 describe("projectInstructionsSection cap", () => {
-	test("a lower-priority file is left out before the project's own file is cut", () => {
+	test("over the cap a lower-priority file is shortened, never dropped, and the project's own file stays whole (#259)", () => {
 		const globalDir = join(home, ".8gent");
 		mkdirSync(globalDir, { recursive: true });
 		writeFileSync(join(globalDir, "AGENTS.md"), "global rule\n".repeat(2000));
@@ -83,8 +83,10 @@ describe("projectInstructionsSection cap", () => {
 			const section = projectInstructionsSection(repo, { includeUserGlobal: true });
 			expect(section.length).toBeLessThan(PROJECT_INSTRUCTIONS_CAP + 200);
 			expect(section).toContain(SENTINEL);
-			expect(section).not.toContain("global rule");
-			expect(section).toContain("1 lower-priority instruction file(s) left out");
+			expect(section.length).toBeLessThanOrEqual(PROJECT_INSTRUCTIONS_CAP + 120);
+			expect(section).toContain("global rule");
+			expect(section).toContain("1 instruction file(s) shortened to fit");
+			expect(section.indexOf("global rule")).toBeLessThan(section.indexOf(SENTINEL));
 		} finally {
 			rmRetry(globalDir);
 		}
