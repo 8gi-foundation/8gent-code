@@ -52,9 +52,11 @@ beforeAll(async () => {
 	home = mkdtempSync(join(tmpdir(), "gate331-home-"));
 	repo = mkdtempSync(join(tmpdir(), "gate331-repo-"));
 	mkdirSync(join(home, ".8gent", "memory"), { recursive: true });
-	process.env.HOME = home;
+	// HOME and EIGHT_HOME stay on the run's temp home from the test preload.
+	// Paths computed once at module load (the board context path) keep the
+	// home of whichever file loads them first, so a home set here would leak
+	// into every later file in the process (#345).
 	process.env.EIGHT_DATA_DIR = join(home, ".8gent");
-	process.env.EIGHT_HOME = home;
 	process.env.EIGHT_TOOL_CAPABILITY_GATE = "0";
 	process.env["8GENT_TWO_STAGE_COMPACT"] = "0";
 	Reflect.deleteProperty(process.env, "EIGHT_HEADLESS");
