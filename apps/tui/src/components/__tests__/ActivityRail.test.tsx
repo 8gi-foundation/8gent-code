@@ -231,6 +231,18 @@ describe("ActivityRail", () => {
 		expect(partial).not.toContain("cache");
 	});
 
+	test("PROVIDERS leaves the rail when no provider is known, and holds its heading otherwise", () => {
+		const titles = (props: ActivityRailProps) =>
+			flatten(expand(render(props)))
+				.filter((el) => el.type === Text)
+				.map((el) => React.Children.toArray(el.props.children as React.ReactNode).join(""));
+		const none = titles({ ...baseProps, providers: [] });
+		expect(none).not.toContain("PROVIDERS");
+		expect(none).toContain("8GENTS");
+		const some = titles(baseProps);
+		expect(some).toContain("PROVIDERS");
+	});
+
 	test("a task's tone sets its colour: waiting is orange, a plan at rest is quiet (#3152)", () => {
 		const colourOf = (label: string, tone?: "waiting" | "quiet") =>
 			flatten(expand(render({ ...baseProps, tasks: [{ id: "x", label, tone }] })))

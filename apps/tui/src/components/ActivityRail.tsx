@@ -203,7 +203,7 @@ export function railSpareRows(
 		2 + // top padding and heading
 		(2 + tasks) +
 		(2 + 3) +
-		(2 + p.providers.length + asked) +
+		(p.providers.length > 0 ? 2 + p.providers.length + asked : 0) +
 		memory +
 		(2 + p.agents.length) +
 		(p.bodyParts ? 2 + 3 : 0);
@@ -435,20 +435,22 @@ export function ActivityRail({
 				})()}
 			</RailSection>
 
-			<RailSection title="PROVIDERS">
-				{providers.map((provider) => (
-					<React.Fragment key={provider.name}>
-						<NamedRow
-							name={`${PROVIDER_GLYPH[provider.state]} ${providerDisplay(provider.name)}`}
-							color={PROVIDER_COLOR[provider.state]}
-							trailing={provider.latency ?? PROVIDER_ROLE[provider.state]}
-						/>
-						{provider.asked ? (
-							<NamedRow name={`  ${askedNote(provider.asked)}`} color={t.textTertiary} />
-						) : null}
-					</React.Fragment>
-				))}
-			</RailSection>
+			{providers.length > 0 ? (
+				<RailSection title="PROVIDERS">
+					{providers.map((provider) => (
+						<React.Fragment key={provider.name}>
+							<NamedRow
+								name={`${PROVIDER_GLYPH[provider.state]} ${providerDisplay(provider.name)}`}
+								color={PROVIDER_COLOR[provider.state]}
+								trailing={provider.latency ?? PROVIDER_ROLE[provider.state]}
+							/>
+							{provider.asked ? (
+								<NamedRow name={`  ${askedNote(provider.asked)}`} color={t.textTertiary} />
+							) : null}
+						</React.Fragment>
+					))}
+				</RailSection>
+			) : null}
 
 			{hasMemoryRows(memory) ? (
 				<RailSection title="MEMORY">
