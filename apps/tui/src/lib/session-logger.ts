@@ -15,6 +15,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { appendOwnFile } from "../../../../packages/specifications/session/durable-ledger.js";
 
 // ============================================
 // Types
@@ -90,7 +91,7 @@ const FLUSH_INTERVAL_MS = 500;
 
 function ensureSessionsDir(): void {
 	if (!fs.existsSync(SESSIONS_DIR)) {
-		fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+		fs.mkdirSync(SESSIONS_DIR, { recursive: true, mode: 0o700 });
 	}
 }
 
@@ -129,7 +130,7 @@ function writePending(): void {
 	const chunk = `${pendingLines.join("\n")}\n`;
 	pendingLines = [];
 	try {
-		fs.appendFileSync(sessionFilePath, chunk, "utf-8");
+		appendOwnFile(sessionFilePath, chunk);
 	} catch {
 		// Silently ignore write failures — don't crash the TUI
 	}
@@ -198,7 +199,7 @@ export function initSessionLogger(id: string, model: string, provider: string): 
 
 	events.push(startEvent);
 	try {
-		fs.writeFileSync(sessionFilePath, `${JSON.stringify(startEvent)}\n`, "utf-8");
+		appendOwnFile(sessionFilePath, `${JSON.stringify(startEvent)}\n`);
 	} catch {
 		// ignore
 	}

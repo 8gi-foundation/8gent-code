@@ -110,7 +110,7 @@ function ownDir(dir: string): void {
  * a planted symlink cannot redirect it, a regular file only, and 0600 even on a
  * file that existed before. Opened per record, so no inode check is needed.
  */
-function openOwnFile(file: string, flags: number): number {
+export function openOwnFile(file: string, flags: number): number {
 	const fd = fs.openSync(file, flags | (fs.constants.O_NOFOLLOW ?? 0), 0o600);
 	try {
 		const st = fs.fstatSync(fd);
@@ -120,6 +120,21 @@ function openOwnFile(file: string, flags: number): number {
 	} catch (err) {
 		fs.closeSync(fd);
 		throw err;
+	}
+}
+
+/**
+ * Append `text` to a session history file the way SessionWriter does: created 0600,
+ * never through a symlink, a regular file only, and tightened to 0600 if it existed
+ * looser. One open per call, so no fd is kept between writes.
+ */
+export function appendOwnFile(file: string, text: string): void {
+	const c = fs.constants;
+	const fd = openOwnFile(file, c.O_WRONLY | c.O_APPEND | c.O_CREAT);
+	try {
+		fs.writeSync(fd, text);
+	} finally {
+		fs.closeSync(fd);
 	}
 }
 

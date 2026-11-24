@@ -15,6 +15,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { appendOwnFile } from "../../specifications/session/durable-ledger";
 import type { AuditEntry, AuditEntryType, Session } from "./types";
 
 const SESSIONS_DIR = path.join(process.env.HOME || "~", ".8gent", "audit");
@@ -86,7 +87,7 @@ export function createSession(sessionId?: string): Session {
 
 			// Append-only write. O_APPEND ensures atomicity on POSIX.
 			// SEC-H1: Owner-only permissions on session files (0o600)
-			fs.appendFileSync(filePath, line, { encoding: "utf-8", mode: 0o600 });
+			appendOwnFile(filePath, line);
 			cachedLastHash = hash;
 
 			return hash;

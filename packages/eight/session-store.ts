@@ -22,6 +22,7 @@
 import { randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { openOwnFile } from "../specifications/session/durable-ledger";
 import { redactTypedTextInMessage } from "../computer/desktop-approval";
 
 export const SESSION_FORMAT_VERSION = 1;
@@ -224,7 +225,13 @@ function cleanContent(v: unknown, depth = 0): unknown {
 
 function writeOwnerOnly(file: string, text: string, flag: "wx" | "a"): void {
 	// Owner-only: transcripts carry whatever was said and pasted (#3929).
-	fs.writeFileSync(file, text, { mode: 0o600, flag });
+	const c = fs.constants;
+	const fd = openOwnFile(file, c.O_WRONLY | c.O_CREAT | (flag === "wx" ? c.O_EXCL : c.O_APPEND));
+	try {
+		fs.writeSync(fd, text);
+	} finally {
+		fs.closeSync(fd);
+	}
 }
 
 function parseLines(text: string, file: string): SessionLine[] {
