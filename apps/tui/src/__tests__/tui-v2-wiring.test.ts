@@ -194,7 +194,8 @@ describe("gitView (audit #10: header and rail must agree)", () => {
 	});
 
 	test("in a repo: the branch and a short note that never repeats it", () => {
-		expect(r("up-to-date", "main")).toEqual({ branch: "main", sync: "in sync", noRepo: false });
+		// A clean branch is the normal state: name the branch, say nothing more. "in sync" on every header was noise.
+		expect(r("up-to-date", "main")).toEqual({ branch: "main", sync: "", noRepo: false });
 		expect(r("ahead", "feat/x", 3)).toMatchObject({ branch: "feat/x", sync: "3 ahead" });
 		expect(r("behind", "main", 0, 2)).toMatchObject({ sync: "2 behind" });
 		// A local-only branch is the normal state of work in progress: name the branch, say nothing more.

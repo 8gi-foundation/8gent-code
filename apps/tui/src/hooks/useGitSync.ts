@@ -81,7 +81,7 @@ function buildLabel(branch: string, status: GitSyncStatus, ahead: number, behind
  * WORKSPACE rail and the footer can never disagree (audit #10: the header
  * said "⎇ - no repo" while the rail said "branch -").
  *
- * - In a repo: the branch, and a short sync note ("in sync", "3 ahead").
+ * - In a repo: the branch, and a sync note only when it asks for action ("3 ahead", "diverged").
  * - Outside one: no branch, and the one fact "no repo".
  * - Before the first check: nothing at all. An unknown value is not shown.
  */
@@ -103,7 +103,8 @@ export function gitView(r: Pick<GitSyncResult, "status" | "branch" | "ahead" | "
 		case "detached":
 			return { branch: "HEAD", sync: "detached", noRepo: false };
 		case "up-to-date":
-			return { branch: r.branch, sync: "in sync", noRepo: false };
+			// A clean branch is the normal state: the header shows the branch alone, as it does for no-upstream.
+			return { branch: r.branch, sync: "", noRepo: false };
 		case "ahead":
 			return { branch: r.branch, sync: `${r.ahead} ahead`, noRepo: false };
 		case "behind":
