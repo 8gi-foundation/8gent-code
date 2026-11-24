@@ -285,6 +285,28 @@ describe("ActivityRail", () => {
 		}
 	});
 
+	test("the primary row drops the model the turn line already names, keeps the provider", () => {
+		const texts = (turnModel?: string) =>
+			flatten(
+				expand(
+					render({
+						...baseProps,
+						turnModel,
+						providers: [{ name: "8gent:eight-1.0-q3:14b", state: "primary", latency: "12ms" }],
+					}),
+				),
+			)
+				.filter((el) => el.type === Text)
+				.map((el) => React.Children.toArray(el.props.children as React.ReactNode).join(""));
+		// Same model as the turn line: the rail shows the provider only.
+		expect(texts("eight-1.0-q3:14b")).toContain("● 8gent");
+		expect(texts("eight-1.0-q3:14b")).not.toContain("● 8gent eight-1.0-q3:14b");
+		// A different model on the turn line: the rail still names the model it runs.
+		expect(texts("qwen3.8:27b")).toContain("● 8gent eight-1.0-q3:14b");
+		// No turn line model given: unchanged.
+		expect(texts(undefined)).toContain("● 8gent eight-1.0-q3:14b");
+	});
+
 	test("every provider in the registry is named by its own id, 8gent included", () => {
 		// The registry is the list: a provider added to it is covered here with
 		// no edit to the rail. Its ids carry no colon, which is what makes the

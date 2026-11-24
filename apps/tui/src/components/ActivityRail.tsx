@@ -160,6 +160,9 @@ interface ActivityRailProps {
 	tasks: ReadonlyArray<ActiveTask>;
 	tools: ReadonlyArray<ToolStatus>;
 	providers: ReadonlyArray<ProviderRow>;
+	/** The model the turn line already names. When the primary row runs this
+	 *  same model, the rail keeps the provider and drops the repeated model. */
+	turnModel?: string;
 	memory?: MemoryStats;
 	agents: ReadonlyArray<AgentRow>;
 	/** Live turn signals - when set, the TOOLS section reflects the active
@@ -228,6 +231,20 @@ export function providerDisplay(value: string): string {
 	const provider = v.slice(0, cut);
 	const model = v.slice(cut + 1).trim();
 	return model ? `${provider} ${model}` : provider;
+}
+
+/**
+ * The primary row's name when the turn line already shows its model: the
+ * provider alone. Any other case is `providerDisplay`, unchanged. The split
+ * is the same first colon as `providerDisplay`.
+ */
+export function providerRailName(value: string, turnModel?: string): string {
+	const v = value.trim();
+	const cut = v.indexOf(":");
+	const want = turnModel?.trim();
+	if (cut < 0 || !want) return providerDisplay(value);
+	const model = v.slice(cut + 1).trim();
+	return model === want ? v.slice(0, cut) : providerDisplay(value);
 }
 
 const TOOL_GLYPH: Record<ToolState, string> = {
@@ -341,6 +358,7 @@ export function ActivityRail({
 	tasks,
 	tools,
 	providers,
+	turnModel,
 	memory,
 	agents,
 	isProcessing = false,
@@ -439,7 +457,10 @@ export function ActivityRail({
 				{providers.map((provider) => (
 					<React.Fragment key={provider.name}>
 						<NamedRow
-							name={`${PROVIDER_GLYPH[provider.state]} ${providerDisplay(provider.name)}`}
+							name={`${PROVIDER_GLYPH[provider.state]} ${providerRailName(
+								provider.name,
+								provider.state === "primary" ? turnModel : undefined,
+							)}`}
 							color={PROVIDER_COLOR[provider.state]}
 							trailing={provider.latency ?? PROVIDER_ROLE[provider.state]}
 						/>

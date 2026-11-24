@@ -9501,6 +9501,7 @@ export function App({
 								tasks={activeTasks}
 								tools={recentTools}
 								providers={providerRows}
+								turnModel={readiness.model || undefined}
 								agents={agentRows}
 								isProcessing={isProcessing}
 								activeTool={activeTool || (isProcessing ? "reasoning" : null)}
