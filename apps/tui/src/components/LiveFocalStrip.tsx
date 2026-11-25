@@ -162,10 +162,10 @@ export function LiveFocalStrip({
 			: isProcessing
 				? activeStep
 				: finished
-					? `finished ${clock(lastTurnEndedAt)}`
+					? clock(lastTurnEndedAt)
 					: "";
 	// At rest READY says it all: no "idle" beside it (#3238).
-	// The state word ("finished", "waiting") is never cut; an active
+	// The state word ("waiting") is never cut; an active
 	// step may be, past its first 12 columns.
 	const middleMin =
 		blocked?.state === "none"
@@ -188,7 +188,7 @@ export function LiveFocalStrip({
 					labelWidth,
 					middle,
 					middleMin,
-					middleShort: showApprovalBorder ? "waiting" : finished ? "finished" : undefined,
+					middleShort: showApprovalBorder ? "waiting" : undefined,
 					route: shownRoute,
 					asked: routeAsked,
 					tokens,

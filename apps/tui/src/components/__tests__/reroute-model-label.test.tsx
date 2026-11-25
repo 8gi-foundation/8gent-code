@@ -22,7 +22,7 @@ import { buildFooterSegments } from "../StatusFooter.js";
 
 const ASKED = "eight-1.0-q3:14b";
 const RAN = "qwen3.8:27b-mlx";
-const done = { middle: "finished 5:40 AM", middleMin: 16, middleShort: "finished" };
+const done = { middle: "5:40 AM", middleMin: 16 };
 
 describe("NOW strip", () => {
 	test("wide: the model that ran, then the asked one as a note", () => {
@@ -32,7 +32,7 @@ describe("NOW strip", () => {
 
 	test("the note gives way before the model that ran is cut", () => {
 		// Room for the whole route but not the note.
-		const fit = fitNowStrip({ width: 90, ...done, route: RAN, asked: ASKED, tokens: "51K tok" });
+		const fit = fitNowStrip({ width: 80, ...done, route: RAN, asked: ASKED, tokens: "51K tok" });
 		expect(fit.asked).toBe("");
 		expect(fit.route).toBe(RAN);
 	});
