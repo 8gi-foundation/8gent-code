@@ -105,7 +105,8 @@ describe("the NOW strip shows the state, not the ^Y mode (#3123)", () => {
 		expect(running).toContain("thinking...");
 		const done = draw({ lastTurnEndedAt: Date.now() - 60_000, lastTurnSuccess: true });
 		expect(done).toContain("DONE");
-		expect(done).toContain("finished");
+		expect(done).toMatch(/\d{1,2}:\d{2}/);
+		expect(done).not.toContain("finished");
 		expect(draw({})).toContain("READY");
 		for (const out of [running, done, draw({})]) expect(out).not.toContain("Planning");
 	});
