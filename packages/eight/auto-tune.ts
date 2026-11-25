@@ -13,6 +13,8 @@
  * sibling PR lands. For now we inline the schema verbatim from the spec.
  */
 
+import type { RolesSettings } from "../settings/schema";
+
 // ─── Settings schema (inlined until @8gent/settings package lands) ──────────
 export interface Settings {
 	version: 1;
@@ -30,6 +32,8 @@ export interface Settings {
 			"orchestrator" | "engineer" | "qa",
 			{ provider: string; model: string }
 		>;
+		/** Role routing (#73); see packages/settings/schema.ts. */
+		roles?: RolesSettings;
 	};
 	providers: Record<
 		"apfel" | "ollama" | "lmstudio" | "openrouter",
