@@ -146,6 +146,7 @@ import {
 } from "./lib/external-agent-runner.js";
 import { GoalClient } from "./lib/goal-client.js";
 import { InProcessGoalTransport } from "./lib/in-process-goal-transport.js";
+import { makeWelcomeMessage } from "./lib/welcome.js";
 import { markIntroSeen, readSeenVersion, shouldShowIntro } from "./lib/intro-gate.js";
 import { useIntroWatchdog } from "./lib/intro-watchdog.js";
 import { messageId } from "./lib/message-id.js";
@@ -1115,16 +1116,6 @@ export function App({
 	// Raw stdout, for terminal sequences such as /copy's OSC 52.
 	const { stdout: inkStdout } = useStdout();
 
-	// Personality greetings (inline for independence)
-	const GREETINGS = [
-		"Good day. What shall we build?",
-		"Ah, a new task. Excellent.",
-		"Ready to craft something magnificent?",
-		"At your service. What's the mission?",
-		"Splendid to see you. Where shall we begin?",
-	];
-	const randomGreeting = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
-
 	// Core state
 	// Per-tab message storage (tab-aware logic wired after workspaceTabs hook below)
 	const tabMessagesRef = useRef<Map<string, Message[]>>(new Map());
@@ -1139,14 +1130,7 @@ export function App({
 	// Singleton task manager handle for the living-plan rail. Lives in
 	// ~/.8gent/tasks.json and survives across sessions.
 	const taskManagerRef = useRef(getTaskManager());
-	const [messages, setMessagesRaw] = useState<Message[]>([
-		{
-			id: "welcome",
-			role: "system",
-			content: `\u221E ${randomGreeting}\n/help for commands, Tab for suggestions, or just ask.`,
-			timestamp: new Date(),
-		},
-	]);
+	const [messages, setMessagesRaw] = useState<Message[]>([makeWelcomeMessage()]);
 	// Per-tab processing state lives in usePerTabAgents below. We still keep a
 	// stable derived `isProcessing` for the *active* tab so the rest of the UI
 	// (header, input gating, status verb) reads from a single boolean. A second

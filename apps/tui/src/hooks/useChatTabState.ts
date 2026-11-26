@@ -28,6 +28,7 @@ import type {
 import { tabVoices } from "../../../../packages/tools/speak.js";
 import type { Message } from "../app.js";
 import { withoutConsultLines } from "../lib/consult-command.js";
+import { makeWelcomeMessage } from "../lib/welcome.js";
 import { type AgentRuntime, providerToRuntime } from "../lib/model-selection.js";
 
 // ============================================
@@ -111,28 +112,6 @@ function loadPersistedMessages(tabId: string): Message[] | null {
 
 function mapProviderToRuntime(provider: string): AgentRuntime {
 	return providerToRuntime(provider);
-}
-
-// ============================================
-// Default welcome message
-// ============================================
-
-const GREETINGS = [
-	"Good day. What shall we build?",
-	"Ah, a new task. Excellent.",
-	"Ready to craft something magnificent?",
-	"At your service. What's the mission?",
-	"Splendid to see you. Where shall we begin?",
-];
-
-function makeWelcomeMessage(): Message {
-	const greeting = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
-	return {
-		id: "welcome",
-		role: "system",
-		content: `\u221E ${greeting}\n\nTry /help for commands, Tab for suggestions, or just ask.`,
-		timestamp: new Date(),
-	};
 }
 
 // ============================================
