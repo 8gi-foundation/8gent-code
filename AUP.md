@@ -1,11 +1,10 @@
 # 8GI Acceptable Use Policy
 
-**DRAFT - PENDING LEGAL REVIEW. This document is not yet in effect.**
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 (DRAFT - Pending Legal Review) |
-| **Effective Date** | TBD |
+| **Version** | 1.0 |
+| **Effective Date** | <set on ratification - REQUIRED> |
 | **Last Updated** | 2026-03-28 |
 | **Reference** | [8GI Constitution](https://8gent.world/constitution) |
 | **License** | Apache License 2.0 with AUP addendum |
@@ -133,4 +132,3 @@ https://8gent.world/constitution
 
 ---
 
-**DRAFT - This document is pending legal review and is not yet in effect. Do not rely on this document as a final legal instrument. The 8GI Foundation will announce the effective date once legal review is complete.**
