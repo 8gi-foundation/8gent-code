@@ -1,7 +1,8 @@
 /**
  * 8gent Code - Terminal Hook
  *
- * Manages PTY-backed terminal tabs. Each tab gets its own session.
+ * Manages PTY-backed terminal tabs. Each tab gets its own session, which lives
+ * until the tab is closed (not until the view unmounts).
  * The TUI runs under Bun, where node-pty cannot deliver onData
  * events directly, so the actual PTY work is delegated to a Node
  * subprocess (`pty-bridge.cjs`) wrapped by @8gent/terminal-tab's
@@ -12,7 +13,7 @@
  * into a tab's PTY.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 // Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
 // These are the canonical surface for inter-package use; deep imports would
 // bypass each package's documented API. Suppressed by design.
@@ -141,8 +142,14 @@ export function listTerminals(): string[] {
 }
 
 // -------------------------------------------------------
-// Per-tab hook
+// Per-tab state, owned by this module and not by the view
 // -------------------------------------------------------
+//
+// A terminal tab outlives its view: the view unmounts whenever the person
+// switches to another tab, and the program in the tab (a shell, claude, pi)
+// must keep running, keep its output, and stay reachable by write_terminal and
+// read_terminal from chat tab 1. Only closing the tab, or the program exiting,
+// ends a session.
 
 export interface TerminalState {
 	lines: string[];
@@ -156,134 +163,208 @@ export interface TerminalSpawnOpts {
 	args?: string[];
 }
 
-export function useTerminal(tabId: string, cwdOrOpts?: string | TerminalSpawnOpts) {
-	const opts: TerminalSpawnOpts =
-		typeof cwdOrOpts === "string" ? { cwd: cwdOrOpts } : (cwdOrOpts ?? {});
-	const [state, setState] = useState<TerminalState>({
-		lines: [],
-		isRunning: false,
-		pid: null,
-	});
+interface TabState {
+	opts: TerminalSpawnOpts;
+	session: PtySession | null;
+	buffer: RingBuffer;
+	pending: string;
+	running: boolean;
+	pid: number | null;
+	subs: Set<() => void>;
+}
 
-	const sessionRef = useRef<PtySession | null>(null);
-	const bufferRef = useRef<RingBuffer>(new RingBuffer(MAX_LINES));
-	const pendingRef = useRef<string>(""); // partial line buffer
+const _tabs = new Map<string, TabState>();
 
-	const flushLines = useCallback(() => {
-		setState((prev) => ({ ...prev, lines: bufferRef.current.toArray() }));
-	}, []);
+/** How long a tab may show nothing before it says it is still waiting. */
+const STILL_STARTING_MS = 2000;
 
-	const appendOutput = useCallback(
-		(data: string) => {
-			const split = splitOutput(pendingRef.current, data);
-			pendingRef.current = split.pending;
+function snapshot(tab: TabState | undefined): TerminalState {
+	if (!tab) return { lines: [], isRunning: false, pid: null };
+	return { lines: tab.buffer.toArray(), isRunning: tab.running, pid: tab.pid };
+}
 
-			const newLines = split.lines;
-			if (newLines.length === 0) return;
+function notify(tab: TabState): void {
+	for (const fn of tab.subs) fn();
+}
 
-			bufferRef.current.pushMany(newLines);
-			flushLines();
-		},
-		[flushLines],
-	);
+/** A plain line in the tab itself, so a failure is seen where the person is looking. */
+function tabNotice(tab: TabState, text: string): void {
+	tab.buffer.pushMany([text]);
+	notify(tab);
+}
 
-	// Spawn PTY when tab is first shown
-	const spawn = useCallback(() => {
-		if (sessionRef.current) return; // already running
+function startTab(tabId: string, tab: TabState): void {
+	const workDir = tab.opts.cwd || process.cwd();
+	const command = tab.opts.command ?? SHELL;
+	const args = tab.opts.args ?? (tab.opts.command ? [] : ["-i"]);
+	tab.buffer = new RingBuffer(MAX_LINES);
+	tab.pending = "";
+	tab.running = false;
+	tab.pid = null;
 
-		const workDir = opts.cwd || process.cwd();
-		const command = opts.command ?? SHELL;
-		const args = opts.args ?? (opts.command ? [] : ["-i"]);
+	let session: PtySession;
+	try {
 		// A program tab (/term pi) gets a PATH without "." or in-project entries,
 		// so what it runs cannot find a binary the folder planted (#4769).
-		const session = new PtySession({
+		session = new PtySession({
 			command,
 			args,
 			cwd: workDir,
-			...(opts.command ? { env: presetEnv(workDir) } : {}),
+			...(tab.opts.command ? { env: presetEnv(workDir) } : {}),
 			cols: 120,
 			rows: 30,
 		});
+	} catch (err) {
+		tab.session = null;
+		tabNotice(
+			tab,
+			`could not start a terminal: ${err instanceof Error ? err.message : String(err)}`,
+		);
+		return;
+	}
+	tab.session = session;
+	let ready = false;
 
-		sessionRef.current = session;
-		bufferRef.current = new RingBuffer(MAX_LINES);
-		pendingRef.current = "";
+	session.onData((data) => {
+		const r = splitOutput(tab.pending, data);
+		tab.pending = r.pending;
+		if (r.lines.length === 0) return;
+		tab.buffer.pushMany(r.lines);
+		notify(tab);
+	});
+	session.onExit((code) => {
+		if (tab.session !== session) return; // replaced by a restart
+		_registry.delete(tabId);
+		tab.running = false;
+		tab.pid = null;
+		// Ended before it ever started: a silent "stopped" would read as a stall.
+		if (!ready && code !== 66) {
+			const why = session.lastError ?? `exit code ${code ?? "unknown"}`;
+			tab.buffer.pushMany([`could not start a terminal: ${why}`]);
+		}
+		notify(tab);
+	});
+	_registry.set(tabId, {
+		session,
+		label: (tab.opts.command ?? SHELL).split("/").pop() || "shell",
+		readApproved: false,
+		writeApproved: false,
+		buffer: tab.buffer,
+	});
 
-		session.onData(appendOutput);
-		session.onExit(() => {
-			_registry.delete(tabId);
-			sessionRef.current = null;
-			setState({ lines: bufferRef.current.toArray(), isRunning: false, pid: null });
-		});
+	session.ready.then(() => {
+		if (tab.session !== session) return;
+		ready = true;
+		tab.running = true;
+		tab.pid = session.pid;
+		notify(tab);
+	});
+	setTimeout(() => {
+		if (tab.session === session && !ready && session.isAlive) {
+			tabNotice(tab, "still starting a terminal: no answer from the helper after 2 seconds");
+		}
+	}, STILL_STARTING_MS).unref?.();
+}
 
-		_registry.set(tabId, {
-			session,
-			label: (opts.command ?? SHELL).split("/").pop() || "shell",
-			readApproved: false,
-			writeApproved: false,
-			buffer: bufferRef.current,
-		});
+/** Open the tab's session, or return the one already running for it. */
+export function openTerminal(tabId: string, opts: TerminalSpawnOpts = {}): void {
+	if (_tabs.has(tabId)) return;
+	const tab: TabState = {
+		opts,
+		session: null,
+		buffer: new RingBuffer(MAX_LINES),
+		pending: "",
+		running: false,
+		pid: null,
+		subs: new Set(),
+	};
+	_tabs.set(tabId, tab);
+	startTab(tabId, tab);
+}
 
-		session.ready.then(() => {
-			setState({ lines: [], isRunning: true, pid: session.pid });
-		});
-	}, [tabId, opts.cwd, opts.command, opts.args, appendOutput]);
+/** End a tab's session and forget it. Called when the tab is closed. */
+export function closeTerminal(tabId: string): void {
+	const tab = _tabs.get(tabId);
+	_registry.delete(tabId);
+	_tabs.delete(tabId);
+	const session = tab?.session;
+	if (!tab || !session) return;
+	tab.session = null;
+	try {
+		session.kill();
+	} catch {
+		/* already dead */
+	}
+}
 
-	// Spawn on mount, kill on unmount
+/** Close every session whose tab is no longer open. */
+export function pruneTerminals(openTabIds: ReadonlySet<string>): void {
+	for (const id of [..._tabs.keys()]) if (!openTabIds.has(id)) closeTerminal(id);
+}
+
+/** Subscribe to a tab's changes; returns the unsubscribe. The session is not touched. */
+export function subscribeTerminal(tabId: string, fn: () => void): () => void {
+	const tab = _tabs.get(tabId);
+	if (!tab) return () => {};
+	tab.subs.add(fn);
+	return () => tab.subs.delete(fn);
+}
+
+/** What the tab shows now. */
+export function terminalState(tabId: string): TerminalState {
+	return snapshot(_tabs.get(tabId));
+}
+
+export function useTerminal(tabId: string, cwdOrOpts?: string | TerminalSpawnOpts) {
+	const opts: TerminalSpawnOpts =
+		typeof cwdOrOpts === "string" ? { cwd: cwdOrOpts } : (cwdOrOpts ?? {});
+	const [state, setState] = useState<TerminalState>(() => terminalState(tabId));
+
+	// Attach on mount, detach on unmount. Detaching never kills the session.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: opts only matter when the session is first created
 	useEffect(() => {
-		spawn();
-		return () => {
-			const session = sessionRef.current;
-			if (session) {
-				sessionRef.current = null;
-				_registry.delete(tabId);
-				try {
-					session.kill();
-				} catch {
-					/* already dead */
-				}
-			}
-		};
-	}, [tabId, spawn]);
+		openTerminal(tabId, opts);
+		setState(terminalState(tabId));
+		return subscribeTerminal(tabId, () => setState(terminalState(tabId)));
+	}, [tabId]);
 
-	/** Write a command line to the terminal (agent-sent — appends \n if missing). */
-	const write = useCallback((input: string) => {
-		const session = sessionRef.current;
-		if (!session) return;
-		session.write(input.endsWith("\n") ? input : `${input}\n`);
-	}, []);
+	/** Forward raw bytes to the PTY (user keystrokes - no newline injection). */
+	const writeRaw = useCallback(
+		(bytes: string) => {
+			_tabs.get(tabId)?.session?.write(bytes);
+		},
+		[tabId],
+	);
 
-	/** Forward raw bytes to the PTY (user keystrokes — no newline injection). */
-	const writeRaw = useCallback((bytes: string) => {
-		const session = sessionRef.current;
-		if (!session) return;
-		session.write(bytes);
-	}, []);
+	/** Write a command line to the terminal (appends \n if missing). */
+	const write = useCallback(
+		(input: string) => writeRaw(input.endsWith("\n") ? input : `${input}\n`),
+		[writeRaw],
+	);
 
 	/** Resize the PTY when terminal dimensions change */
-	const resize = useCallback((cols: number, rows: number) => {
-		const session = sessionRef.current;
-		if (!session) return;
-		session.resize(cols, rows);
-	}, []);
+	const resize = useCallback(
+		(cols: number, rows: number) => {
+			_tabs.get(tabId)?.session?.resize(cols, rows);
+		},
+		[tabId],
+	);
 
 	/** Kill and restart the shell */
 	const restart = useCallback(() => {
-		const session = sessionRef.current;
-		if (session) {
-			_registry.delete(tabId);
-			try {
-				session.kill();
-			} catch {
-				/* ignore */
-			}
-			sessionRef.current = null;
+		const tab = _tabs.get(tabId);
+		if (!tab) return;
+		const old = tab.session;
+		tab.session = null;
+		_registry.delete(tabId);
+		try {
+			old?.kill();
+		} catch {
+			/* ignore */
 		}
-		bufferRef.current.clear();
-		pendingRef.current = "";
-		setState({ lines: [], isRunning: false, pid: null });
-		setTimeout(spawn, 50);
-	}, [tabId, spawn]);
+		notify(tab);
+		setTimeout(() => startTab(tabId, tab), 50);
+	}, [tabId]);
 
 	return { ...state, write, writeRaw, resize, restart };
 }
