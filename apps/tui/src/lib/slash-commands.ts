@@ -42,6 +42,7 @@ export type SlashCommand =
 	| "compact"
 	| "stack"
 	| "context"
+	| "diff"
 	| "update"
 	| "judge"
 	| "bring-it-home"
@@ -454,6 +455,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["ctx"],
 		description: "Show what fills the context window, by kind",
 		usage: "/context",
+	},
+	{
+		name: "diff",
+		aliases: [],
+		description: "Show the file changes made in this session",
+		usage: "/diff",
 	},
 	{
 		name: "stack",
