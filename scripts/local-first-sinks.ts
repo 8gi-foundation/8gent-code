@@ -292,8 +292,8 @@ export const SINKS: Sink[] = [
 		hosts: ["html.duckduckgo.com"],
 		files: ["packages/tools/web.ts", "packages/tools/browser/web-search.ts"],
 		waiver: {
-			ref: "#4912",
-			expires: "2026-11-07",
+			ref: "#364",
+			expires: "2026-12-26",
 			why: "Decision needed from 8PO and James: web_search on by default, or behind a one-time yes that names DuckDuckGo. Tracked in docs/security/off-device-data.md.",
 		},
 	},
@@ -539,8 +539,8 @@ export interface InstallSite {
 }
 
 const INSTALL_WAIVER: Waiver = {
-	ref: "#4915",
-	expires: "2026-11-07",
+	ref: "#364",
+	expires: "2026-12-26",
 	why: "Core must work after one install. Each entry goes when its install or install text is gone from the default path.",
 };
 
