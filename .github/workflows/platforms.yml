@@ -51,7 +51,7 @@ jobs:
       # bunx node-gyp@latest race cannot turn this leg red on an unrelated PR.
       - name: "Pin node-gyp for native builds"
         if: runner.os == 'Linux'
-        run: npm install -g --no-fund --no-audit node-gyp@12.4.0 && node-gyp --version
+        run: npm install -g --no-fund --no-audit node-gyp@13.1.0 && node-gyp --version
 
       - name: Install dependencies
         run: bun install
