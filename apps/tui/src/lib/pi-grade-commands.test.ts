@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { slashMenuRows } from "../components/command-input.js";
 import { formatSlashHelp } from "./slash-commands.js";
-import { editDistance, nearestNames, unknownSlashAnswer } from "./slash-registry.js";
+import {
+	editDistance,
+	getBuiltInSlashRegistry,
+	nearestNames,
+	unknownSlashAnswer,
+} from "./slash-registry.js";
 
 const none = { skillExists: async () => false, templateMatches: () => false };
 const empty = { entries: [], byToken: new Map(), collisions: [] };
@@ -30,7 +35,13 @@ describe("unknown command suggests", () => {
 		const out = await unknownSlashAnswer("/modle", empty, none);
 		expect(out).toContain("Did you mean");
 		expect(out).toContain("/model");
-		expect(out).toContain("Type /help.");
+	});
+	test("a typo for /quit gets the single best guess", async () => {
+		const full = { entries: [], byToken: new Map(), collisions: [] };
+		expect(await unknownSlashAnswer("/quite", getBuiltInSlashRegistry(), none)).toBe(
+			"Unknown command /quite. Did you mean /quit?",
+		);
+		expect(full.entries.length).toBe(0);
 	});
 	test("no near match keeps the plain answer", async () => {
 		expect(await unknownSlashAnswer("/zzqqxxvv", empty, none)).toBe(
