@@ -50,7 +50,7 @@ jobs:
 
       # Same pin as ci.yml (#4143): parallel native installs race on node-gyp.
       - name: "Pin node-gyp for native builds"
-        run: npm install -g --no-fund --no-audit node-gyp@12.4.0 && node-gyp --version
+        run: npm install -g --no-fund --no-audit node-gyp@13.1.0 && node-gyp --version
 
       - name: Install dependencies
         run: bun install
