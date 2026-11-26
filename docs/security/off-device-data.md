@@ -18,7 +18,7 @@ User data here means audio, prompt text, tool results, files, images, keys, and 
 
 | Id | What leaves | Where | Why it is on | Status |
 | --- | --- | --- | --- | --- |
-| web-search | The search words the model writes | DuckDuckGo (`html.duckduckgo.com`) | `web_search` is in the default tool set and in the auto-allowed read-only set in `packages/permissions/permission-mode.ts`. The model can call it with no prompt to the person. | Known item, waiver #4912, expires 2026-11-07. Needs a decision: on by default, or behind a one-time yes that names DuckDuckGo. |
+| web-search | The search words the model writes | DuckDuckGo (`html.duckduckgo.com`) | `web_search` is in the default tool set and in the auto-allowed read-only set in `packages/permissions/permission-mode.ts`. The model can call it with no prompt to the person. | Known item, waiver #4912, expires 2026-12-26. Needs a decision: on by default, or behind a one-time yes that names DuckDuckGo. |
 
 That one is the only entry the gate waives for user data. Run `bun scripts/local-first-gate.ts --no-waivers` to see it fail.
 
