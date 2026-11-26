@@ -27,6 +27,11 @@ jobs:
       # node-gyp is on PATH, and parallel installs race on that download (the
       # same race .github/docker/linux-ci/Dockerfile pins node-gyp to avoid).
       # ubuntu-latest already ships python3, make and g++, so no apt step.
+      - name: Setup Node 22 (native deps must build against the Node we ship)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
       - name: "Pin node-gyp for native builds"
         run: npm install -g --no-fund --no-audit node-gyp@12.4.0 && node-gyp --version
 
@@ -162,11 +167,6 @@ jobs:
           test -f dist/cli.js || (echo "Build failed: dist/cli.js not found" && exit 1)
           head -1 dist/cli.js | grep -qxF "#!/usr/bin/env -S bun --no-env-file --config=/dev/null" || (echo "Safe shebang missing (#4013)" && exit 1)
           echo "Build OK: $(wc -c < dist/cli.js | tr -d ' ') bytes"
-
-      - name: Setup Node 22 (Node bundle tests)
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '22'
 
       # #4660: the Node TUI must render coloured text at every colour level. Runs after the build
       # because it needs dist/node/tui.js; EIGHT_REQUIRE_NODE_BUNDLE makes a missing bundle or Node a failure.
