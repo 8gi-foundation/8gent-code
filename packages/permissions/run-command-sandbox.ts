@@ -13,6 +13,7 @@
  *   ~/.8gent/{sessions,logs,checkpoints}/, daemon.log, approvals-audit.jsonl
  *   ~/.8gent/{policies.yaml,policy-checksum,mcp.json,.env,keys.env,bin/}
  *   ~/.8gent/skills-trust.json (which project skills may replace user/bundled ones)
+ *   ~/.8gent/stream-rules.json (a system-role correction injected into future turns, #72)
  *   ~/.8gent/keys/ (state-hmac.key, the /goal state and approval grant signing key)
  *
  * The same set is applied under EIGHT_HOME/.8gent and EIGHT_DATA_DIR when
@@ -83,6 +84,7 @@ export const PROTECTED_DATA_FILES = [
 	"update-resume.json",
 	"yolo.json", // the one yes to run tools without cards: a tool that wrote it would grant itself yolo (8SO)
 	"skills-trust.json", // sha256 pins that let a project skill replace a user/bundled one (#4125, 8SO)
+	"stream-rules.json", // puts a system-role note into future turns (#72, 8SO)
 ] as const;
 
 /**

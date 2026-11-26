@@ -1,0 +1,7 @@
+[
+  {
+    "pattern": "[Aa]s an AI( language)? model",
+    "correction": "Do not describe yourself as an AI model. Answer the question directly.",
+    "max_retries": 1
+  }
+]
