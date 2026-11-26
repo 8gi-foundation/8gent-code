@@ -146,6 +146,7 @@ import {
 } from "./lib/external-agent-runner.js";
 import { GoalClient } from "./lib/goal-client.js";
 import { InProcessGoalTransport } from "./lib/in-process-goal-transport.js";
+import { NEW_THREAD_LINE } from "./lib/new-thread-line.js";
 import { markIntroSeen, readSeenVersion, shouldShowIntro } from "./lib/intro-gate.js";
 import { useIntroWatchdog } from "./lib/intro-watchdog.js";
 import { messageId } from "./lib/message-id.js";
@@ -1820,7 +1821,7 @@ export function App({
 					{
 						id: `welcome-${activeTabId}`,
 						role: "system",
-						content: "\u221E New thread. What shall we work on?",
+						content: NEW_THREAD_LINE,
 						timestamp: new Date(),
 					},
 				];
