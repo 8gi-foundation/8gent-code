@@ -71,6 +71,9 @@ const ALL_TABLES = [
 	"memories",
 ];
 
+/** The session-turn index written by session-index.ts. Only an "all" purge clears it: turns carry no userId. */
+const SESSION_INDEX_TABLES = ["session_turns_fts", "session_turns_state"];
+
 export function purgeMemory(db: Database, scope: PurgeScope): PurgeResult {
 	const deleted: Record<string, number> = {};
 	const remaining: Record<string, number> = {};
@@ -94,8 +97,22 @@ export function purgeMemory(db: Database, scope: PurgeScope): PurgeResult {
 			}
 			// Triggers already emptied the index entry by entry; rebuild drops any stale terms.
 			db.exec("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')");
+			// /history search keeps a copy of every session turn in its own tables
+			// (session-index.ts). "Everything" includes those transcripts.
+			for (const t of SESSION_INDEX_TABLES) {
+				if (!tableExists(db, t)) continue;
+				deleted[t] = count(db, t);
+				db.prepare(`DELETE FROM ${t}`).run();
+			}
+			// A delete only tombstones FTS5 terms; rebuilding from the now empty table drops them.
+			if (tableExists(db, "session_turns_fts")) {
+				db.exec("INSERT INTO session_turns_fts(session_turns_fts) VALUES('rebuild')");
+			}
 			for (const t of ["memories", ...ALL_TABLES.filter((x) => x !== "memories")]) {
 				remaining[t] = count(db, t);
+			}
+			for (const t of SESSION_INDEX_TABLES) {
+				if (tableExists(db, t)) remaining[t] = count(db, t);
 			}
 			remaining.memories_fts = tableExists(db, "memories_fts_docsize")
 				? count(db, "memories_fts_docsize")
