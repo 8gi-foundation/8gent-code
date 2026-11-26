@@ -49,6 +49,11 @@ jobs:
           bun-version: 1.4.3
 
       # Same pin as ci.yml (#4143): parallel native installs race on node-gyp.
+      - name: Setup Node 22 (native deps must build against the Node we ship)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
       - name: "Pin node-gyp for native builds"
         run: npm install -g --no-fund --no-audit node-gyp@12.4.0 && node-gyp --version
 
