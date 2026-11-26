@@ -870,7 +870,7 @@ export class Agent {
 			// out of the viewport on first launch.
 			if (process.env.DEBUG === "1") {
 				console.log(
-					"[8gent] First run detected - onboarding available. The agent can ask setup questions.",
+					"[8gent] First run detected - onboarding available. 8gent can ask setup questions.",
 				);
 			}
 		}
