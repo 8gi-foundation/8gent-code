@@ -8,6 +8,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { addPolicy } from "../permissions/policy-engine";
+import { resolveProgram } from "./grant";
 import { createExtensionManager } from "./index";
 import { collectExtensionTools, loadAllExtensions } from "./loader";
 import { enableExtension, parseProcessManifest, startProcessExtension } from "./process";
@@ -144,10 +145,10 @@ describe("enabled extension", () => {
 			manifest("./server");
 			await enableExtension(dir, "manifest.json", yes);
 			await expect(startProcessExtension(dir, { attended: true })).rejects.toThrow();
-			// A command that climbs out of the folder is refused.
+			// A command that climbs out of the folder is never offered, so never enabled.
 			manifest("../../../../../../../../bin/sh");
-			await enableExtension(dir, "manifest.json", yes);
-			await expect(startProcessExtension(dir, { attended: true })).rejects.toThrow("outside");
+			expect(await enableExtension(dir, "manifest.json", yes)).toBe(false);
+			await expect(startProcessExtension(dir, { attended: true })).rejects.toThrow();
 			// So is an argument that does.
 			manifest("python3", ["../x.py"]);
 			await enableExtension(dir, "manifest.json", yes);
@@ -166,8 +167,9 @@ describe("enabled extension", () => {
 			path.join(dir, "manifest.json"),
 			JSON.stringify({ name: "hello", version: "1", description: "d", command: "./sh" }),
 		);
-		await enableExtension(dir, "manifest.json", yes);
-		await expect(startProcessExtension(dir, { attended: true })).rejects.toThrow("outside");
+		expect(await enableExtension(dir, "manifest.json", yes)).toBe(false);
+		expect(() => resolveProgram(dir, "./sh")).toThrow("outside");
+		await expect(startProcessExtension(dir, { attended: true })).rejects.toThrow();
 	});
 
 	test("control characters cannot spoof the consent prompt", async () => {
@@ -203,7 +205,8 @@ describe("enabled extension", () => {
 			return false;
 		});
 		expect(shown).toContain('["a b","c"]');
-		expect(shown).toContain('"echo"');
+		// The resolved program is shown, so the person sees which echo would run.
+		expect(shown).toContain(JSON.stringify(resolveProgram(dir, "echo")));
 	});
 
 	test("loading twice leaves one live child", async () => {

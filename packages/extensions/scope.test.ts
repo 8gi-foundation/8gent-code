@@ -6,13 +6,14 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { grantText } from "./grant";
 import { createExtensionManager } from "./index";
 import { collectExtensionTools, loadExtension } from "./loader";
+import { currentFingerprint } from "./process";
 import { createScope } from "./scope";
 
 const bus = new EventEmitter();
@@ -50,13 +51,17 @@ function writeExt(name: string, version: number, entry = ENTRY(version)): string
 	);
 	fs.writeFileSync(path.join(dir, "index.js"), entry);
 	// In-process loading is off until enabled; this fixture is the enabled case.
+	grant(dir);
+	return dir;
+}
+
+/** The grant binds the manifest and the entry file (#47). */
+function grant(dir: string): void {
+	const bytes = fs.readFileSync(path.join(dir, "8gent-extension.json"));
 	fs.writeFileSync(
 		path.join(dir, ".enabled"),
-		createHash("sha256")
-			.update(fs.readFileSync(path.join(dir, "8gent-extension.json")))
-			.digest("hex"),
+		grantText(currentFingerprint(dir, "8gent-extension.json", bytes)),
 	);
-	return dir;
 }
 
 beforeEach(() => {
@@ -105,6 +110,12 @@ describe("extension scope (EIGHT_EXT_SCOPE=1)", () => {
 		await mgr.loadAll({ attended: true });
 
 		fs.writeFileSync(path.join(dir, "index.js"), ENTRY(2));
+		// An edited entry file is a changed program: off until the person reviews it (#47).
+		const off = await mgr.reload("alpha");
+		expect(off.errors.join()).toContain("program changed since you enabled it");
+		expect(mgr.getTools()["alpha:echo"]).toBeUndefined();
+		expect(live.count).toBe(0);
+		grant(dir);
 		const res = await mgr.reload("alpha");
 		expect(res.errors).toEqual([]);
 

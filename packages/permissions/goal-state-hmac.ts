@@ -21,7 +21,9 @@ import { resolveHome } from "../core/home";
 import { realpathLoose, securityEnvSnapshot } from "./run-command-sandbox.js";
 
 /**
- * Where the HMAC key lives on disk: <data dir>/keys/state-hmac.key.
+ * Where the HMAC key lives on disk: <data dir>/keys/state-hmac.key, or
+ * <data dir>/keys/<name> for another key with the same protections (the
+ * extension run-approval key, #47).
  *
  * The data dir is EIGHT_DATA_DIR from the startup security env snapshot
  * (absolute only, and ignored when a .env declares it), else <home>/.8gent,
@@ -32,13 +34,13 @@ import { realpathLoose, securityEnvSnapshot } from "./run-command-sandbox.js";
  * its own state. Running from home itself, or from one of its ancestors, is
  * not a cloned repo and is allowed.
  */
-export function getKeyPath(): string {
+export function getKeyPath(name = "state-hmac.key"): string {
 	const v = securityEnvSnapshot().values;
 	const dataDir = v.EIGHT_DATA_DIR;
 	// The fallback dir and the run-from-home exemption both come from the snapshot (8SO, a contributor).
 	const home = resolveHome({ EIGHT_HOME: v.EIGHT_HOME, HOME: v.HOME, USERPROFILE: v.USERPROFILE });
 	const base = dataDir && path.isAbsolute(dataDir) ? dataDir : path.join(home, ".8gent");
-	const keyPath = path.join(base, "keys", "state-hmac.key");
+	const keyPath = path.join(base, "keys", name);
 	const project = realpathLoose(process.cwd());
 	const realHome = realpathLoose(home);
 	const homeIsInProject = realHome === project || realHome.startsWith(project + path.sep);
@@ -99,8 +101,8 @@ function readExistingKey(keyPath: string): Buffer {
  * not a regular file, owned by another user, readable or writable by
  * group or other, the wrong size, or cannot be read (#4132).
  */
-export function loadOrCreateKey(): Buffer {
-	const keyPath = getKeyPath();
+export function loadOrCreateKey(name = "state-hmac.key"): Buffer {
+	const keyPath = getKeyPath(name);
 	const dir = path.dirname(keyPath);
 
 	if (!fs.existsSync(dir)) {
@@ -145,10 +147,25 @@ export function loadOrCreateKey(): Buffer {
 }
 
 /**
+ * The named key when it already exists, null when it was never created. Never
+ * creates one; throws on the same untrusted files loadOrCreateKey refuses.
+ */
+export function loadKeyIfPresent(name: string): Buffer | null {
+	const keyPath = getKeyPath(name);
+	try {
+		fs.lstatSync(keyPath);
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+		throw e;
+	}
+	return readExistingKey(keyPath);
+}
+
+/**
  * Deterministic JSON stringify so signing is stable across runs.
  * Keys sorted at every nesting level.
  */
-function canonicalStringify(value: unknown): string {
+export function canonicalStringify(value: unknown): string {
 	if (value === null || typeof value !== "object") {
 		return JSON.stringify(value);
 	}

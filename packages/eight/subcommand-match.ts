@@ -45,6 +45,7 @@ export const KNOWN_SUBCOMMANDS = [
 	"perms",
 	"keys",
 	"env",
+	"ext",
 	"install",
 	"packages",
 	"publish",
