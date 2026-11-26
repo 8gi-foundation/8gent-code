@@ -70,20 +70,140 @@ function firstLine(text: string): string {
 			.replace(/^\s*\[BLOCKED\]\s*/, "")
 			.replace(/^\s*Error(?: running tool "[^"]*")?:\s*/, "")
 			.trim();
-		if (line) return clip(line, CAUSE_MAX);
+		if (line) return clip(redact(line), CAUSE_MAX);
 	}
 	return "unknown error";
 }
+
+/** Key-shaped runs a provider may echo back in an error body. Never shown. */
+const SECRET =
+	/\b(?:sk|pk|rk|or|gsk|xai)-[A-Za-z0-9_-]{8,}|\bBearer\s+\S+|\b(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{32,}\b/g;
+
+function redact(s: string): string {
+	return s.replace(SECRET, "[hidden]");
+}
+
+/** Providers that run on this machine: a connection error means the server is not running. */
+const LOCAL = new Set(["8gent", "ollama", "lmstudio", "llama-server", "apfel", "apple-foundation"]);
+
+/** The key command's provider name: the TUI-only free alias shares OpenRouter's key. */
+function keyName(provider: string): string {
+	return provider === "openrouter-free" ? "openrouter" : provider;
+}
+
+/**
+ * One provider's failure as a cause and one next step. The cause
+ * names the provider and the HTTP status or error class; the next step names the one
+ * command that fixes it. The provider's own text is never shown past its first line,
+ * and key-shaped runs in it are hidden.
+ */
+export function describeProviderFailure(
+	provider: string,
+	error: string,
+): { cause: string; next: string } {
+	const e = clean(error);
+	const status = /\bHTTP (\d{3})\b/.exec(e)?.[1] ?? /^(\d{3})\b/.exec(e.trim())?.[1];
+	const http = status ? `HTTP ${status}, ` : "";
+	const keys = `8gent keys set ${keyName(provider)}`;
+	if (/No API key for/i.test(e)) {
+		const env = /\(([A-Z][A-Z0-9_]*_(?:API_)?KEY)\)/.exec(e)?.[1];
+		return {
+			cause: `${provider}: no API key${env ? ` (${env})` : ""}`,
+			next: `${keys}, then restart 8gent; or /provider to pick a local one`,
+		};
+	}
+	if (
+		status === "401" ||
+		status === "403" ||
+		/invalid api key|unauthori[sz]ed|authentication|forbidden|invalid.*token/i.test(e)
+	) {
+		return {
+			cause: `${provider}: ${http}key rejected`,
+			next: `${keys} with a new key, then restart 8gent; or /provider to pick another`,
+		};
+	}
+	if (status === "402" || /insufficient|balance|out of credit|payment required/i.test(e)) {
+		return {
+			cause: `${provider}: ${http}no credit left`,
+			next: "top up that account, or /provider to pick another",
+		};
+	}
+	if (
+		status === "404" ||
+		/model.{0,40}(?:not found|does not exist|not exist)|no such model|unknown model/i.test(e)
+	) {
+		return {
+			cause: `${provider}: ${http}model not found`,
+			next: `/model to pick one ${provider} serves`,
+		};
+	}
+	if (status === "429" || /rate[ -]?limit|too many requests|quota/i.test(e)) {
+		return {
+			cause: `${provider}: ${http}rate limited`,
+			next: "wait a minute, or /provider to pick another",
+		};
+	}
+	if (status?.startsWith("5") || /overloaded|server error/i.test(e)) {
+		return {
+			cause: `${provider}: ${http}provider-side error`,
+			next: "send again, or /provider to pick another",
+		};
+	}
+	if (/timed? ?out|timeout|ETIMEDOUT|stalled/i.test(e)) {
+		return {
+			cause: `${provider}: timed out`,
+			next: "send again, or /provider to pick another",
+		};
+	}
+	const net =
+		/ECONNREFUSED|ENOTFOUND|ECONNRESET|EAI_AGAIN|fetch failed|socket hang up|unreachable|network/i.exec(
+			e,
+		);
+	if (net) {
+		return LOCAL.has(provider)
+			? {
+					cause: `${provider}: not running (${net[0]})`,
+					next: "start the model server, or /provider to pick another",
+				}
+			: {
+					cause: `${provider}: network error (${net[0]})`,
+					next: "check the phone or computer is online, then send again",
+				};
+	}
+	return { cause: `${provider}: ${redact(firstLine(e))}`, next: NEXT.provider as string };
+}
+
+/** `  - provider/model: error` lines of an "All providers exhausted" error. */
+const FAILED_STEP = /^\s*-\s*([^/\s]+)\/(.+?): (.*)$/;
+/** First line of a pinned provider's error: `provider/model failed: error`. */
+const PINNED = /^\s*(?:\[Error\]\s*)?(?:Error:\s*)?([^/\s]+)\/(\S+) failed: (.+)$/;
 
 export function classifyError(text: string): ErrorRow {
 	const t = clean(text);
 	const exhausted = /^\s*(?:\[Error\]\s*)?All providers exhausted \((\d+) attempted\)/.exec(t);
 	if (exhausted) {
+		const steps = t
+			.split("\n")
+			.map((l) => FAILED_STEP.exec(l))
+			.filter((m): m is RegExpExecArray => m !== null);
+		const n = Number(exhausted[1]);
+		// The first step is the provider the turn asked for: its failure is the one to fix.
+		const first = steps[0];
+		if (!first) {
+			return { kind: "provider", cause: `all providers failed (${n} tried)`, next: NEXT.provider };
+		}
+		const d = describeProviderFailure(first[1], first[3]);
 		return {
 			kind: "provider",
-			cause: `all providers failed (${exhausted[1]} tried)`,
-			next: NEXT.provider,
+			cause: clip(n > 1 ? `${d.cause} (${n} tried)` : d.cause, CAUSE_MAX),
+			next: d.next,
 		};
+	}
+	// Only agent.ts's pinned-provider error (failover-provider-config.ts pinnedProviderError).
+	const pinned = /chosen explicitly/.test(t) ? PINNED.exec(t.split("\n")[0] ?? "") : null;
+	if (pinned) {
+		const d = describeProviderFailure(pinned[1], pinned[3]);
+		return { kind: "provider", cause: clip(d.cause, CAUSE_MAX), next: d.next };
 	}
 	let kind: ErrorKind = "error";
 	if (/\[BLOCKED\]|refused by policy|\[PERMISSION DENIED\]|blocked by policy/i.test(t))

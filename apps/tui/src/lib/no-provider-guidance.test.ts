@@ -6,6 +6,40 @@ import {
 	unreachableLine,
 } from "./no-provider-guidance.js";
 
+describe("the phone's NO MODEL card", () => {
+	const termux = { PREFIX: "/data/data/com.termux/files/usr" };
+
+	test("on Termux it offers llama.cpp on the phone first, then OpenRouter free", () => {
+		const copy = guidanceCopy("linux", termux);
+		expect(copy.paths.map((p) => p.n)).toEqual(["1", "2"]);
+		const [local, hosted] = copy.paths;
+		expect(local?.title).toMatch(/on this phone/);
+		expect(local?.title).toMatch(/nothing leaves the phone/);
+		expect(local?.steps[0]).toBe("pkg install llama-cpp");
+		expect(local?.steps[1]).toMatch(/^llama-server -hf \S+/);
+		expect(local?.steps[2]).toMatch(/\/provider llama-server$/);
+		expect(hosted?.title).toMatch(/leave the phone/);
+		expect(hosted?.steps.join("\n")).toContain("8gent keys set openrouter");
+		expect(hosted?.steps.join("\n")).toContain("/model auto:free");
+	});
+
+	test("it never names Ollama on a phone", () => {
+		const text = JSON.stringify(guidanceCopy("android" as NodeJS.Platform, {}));
+		expect(text.toLowerCase()).not.toContain("ollama");
+	});
+
+	test("a laptop keeps the Ollama card", () => {
+		expect(JSON.stringify(guidanceCopy("darwin", {}))).toContain("ollama");
+	});
+
+	test("every shell line pastes as it stands: the note is a # comment", () => {
+		for (const step of guidanceCopy("linux", termux).paths[0]?.steps ?? []) {
+			const code = step.split("#")[0] ?? "";
+			expect(code).not.toContain(" ");
+		}
+	});
+});
+
 describe("providerKeyStatus", () => {
 	const lookup =
 		(keys: Record<string, { needsKey: boolean; hasKey: boolean }>) => (name: string) => {
