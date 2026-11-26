@@ -192,8 +192,8 @@ The Control Plane is implemented as a single Bun process running: `TaskQueue` (S
 **EC-13: DDoS on Tool Shed API**
 - **Layer:** Tool Shed
 - **What goes wrong:** External attacker floods Tool Shed API. Since Tool Shed is a shared service, all users' pattern queries fail simultaneously.
-- **Going right looks like:** DDoS protection at edge (Cloudflare/Fly.io proxy). Tool Shed behind API gateway with rate limiting. Users fall back to local-only mode.
-- **Survival:** Fly.io edge provides basic DDoS protection. Add API key authentication. Rate limit per API key. Local cache ensures users degrade gracefully.
+- **Going right looks like:** DDoS protection at edge (CDN or reverse proxy). Tool Shed behind API gateway with rate limiting. Users fall back to local-only mode.
+- **Survival:** The edge layer provides basic DDoS protection. Add API key authentication. Rate limit per API key. Local cache ensures users degrade gracefully.
 - **Severity:** HIGH (all enhanced features go offline simultaneously)
 
 ### MULTI-TENANCY
@@ -376,7 +376,7 @@ No changes needed. Current architecture handles this. Focus on:
 ### Milestone 5: 1,000,000 Users (LATER - Dominance)
 
 1. **Federated Control Planes.** Each Lotus Ring 1 chief runs their own Control Plane cluster. Global coordinator for cross-ring communication. Eventually consistent state.
-2. **Edge inference.** Push model serving to edge (Fly Machines, Cloudflare Workers AI). Reduce round-trip for inference.
+2. **Edge inference.** Push model serving to edge (Cloudflare Workers AI). Reduce round-trip for inference.
 3. **Pattern CDN.** Popular collective patterns served from CDN. Edge-cached. Real-time updates via WebSocket for subscribers.
 4. **Canary infrastructure.** All updates (models, patterns, policies, code) go through canary pipeline: 1% -> 10% -> 50% -> 100%. Automatic rollback on regression.
 5. **Observability platform.** Distributed tracing across all 4 layers. User-facing status page. SLA monitoring. Incident management.

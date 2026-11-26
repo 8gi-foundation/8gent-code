@@ -1,21 +1,12 @@
 # Deployment
 
-The daemon deployment lives in a separate private repo: **8gent-vessel** (`~/8gent-vessel/`).
+8gent Code describes the daemon protocol and how to self-host the daemon. It does not describe any particular hosted deployment.
 
-This keeps deployment secrets, infrastructure config, and cloud credentials out of the public 8gent-code repo.
+## Self-hosting the daemon
 
-## The Vessel
+The daemon is `packages/daemon/index.ts`. It speaks the WebSocket protocol in `docs/specs/DAEMON-PROTOCOL.md`. You can run it on any host you control, in a container or directly.
 
-"The Vessel" is the cloud container that runs the 8gent daemon. It pulls 8gent-code at build time and runs `packages/daemon/index.ts` with OpenRouter as the default LLM provider.
-
-- **App name:** eight-vessel
-- **Platform:** Fly.io
-- **Region:** dub (Dublin)
-- **Endpoint:** `wss://daemon.example.com`
-
-## Local Development
-
-Run the daemon locally (no Docker needed):
+Run it locally (no Docker needed):
 
 ```bash
 bun run packages/daemon/index.ts
@@ -27,33 +18,19 @@ Test the WebSocket protocol:
 bun run scripts/test-ws-client.ts
 ```
 
-## Cloud Testing
-
-Test against the deployed vessel:
+Test against a daemon you host elsewhere:
 
 ```bash
-DAEMON_URL=wss://daemon.example.com bun run scripts/test-ws-client.ts
+DAEMON_URL=wss://your-host.example bun run scripts/test-ws-client.ts
 ```
 
-## Deployment Instructions
+## Container notes
 
-See the README in the 8gent-vessel repo for full deploy commands.
+- Runtime: Bun.
+- Port: the WebSocket gateway listens on `18789`.
+- State: mount a persistent volume at the data directory (default `~/.8gent/`), or set `EIGHT_DATA_DIR`.
+- Keep deployment secrets and infrastructure config out of this repository.
 
-## Architecture
+## Hosted service
 
-```
-8gent-code (public, GitHub)
-  +-- packages/daemon/     <- the kernel
-  +-- docs/DAEMON-PROTOCOL.md  <- the contract
-
-8gent-vessel (private)
-  +-- Dockerfile           <- pulls 8gent-code, runs daemon
-  +-- fly.toml             <- Fly.io config (eight-vessel, dub)
-  +-- .env.example         <- required env vars
-
-Fly.io (eight-vessel, dub)
-  +-- Bun runtime
-  +-- WebSocket gateway (:18789)
-  +-- OpenRouter (LLM inference)
-  +-- /root/.8gent/ (persistent volume: eight_data)
-```
+For the hosted service, see the platform repos (control plane, model proxy).

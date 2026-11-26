@@ -4,8 +4,7 @@ Lotus-class model proxy. OpenAI-compatible HTTP gateway with Clerk JWT
 auth, per-tenant rate limiting, OpenRouter routing, and structured
 stdout usage logging.
 
-Designed for the Hetzner prod box behind Caddy. Caddy terminates TLS
-on `api.8gentos.com` and reverse-proxies to `127.0.0.1:8080`.
+Designed to run behind a reverse proxy that terminates TLS and forwards to `127.0.0.1:8080`.
 
 ## Endpoints
 
@@ -126,7 +125,7 @@ limiter (refill, exhaustion, per-tenant isolation), and the routes
 ## Architecture
 
 ```
-Caddy (api.8gentos.com)
+Reverse proxy (TLS)
    |
    v
 g8way :8080
