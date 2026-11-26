@@ -95,7 +95,7 @@ export function outcomeSentence(text: string, max = 160): string {
 		.replace(/[`*_#>]/g, "")
 		.replace(/\s+/g, " ")
 		.trim();
-	if (!flat) return "finished";
+	if (!flat) return "";
 	const m = flat.match(/^.*?[.!?](?=\s|$)/);
 	const first = (m ? m[0] : flat).trim();
 	return first.length <= max ? first : `${first.slice(0, max - 3)}...`;
@@ -118,6 +118,9 @@ const DEFAULT_SURFACE_BANNED: RegExp[] = [
 export function isPlainForDefaultSurface(sentence: string): boolean {
 	return !DEFAULT_SURFACE_BANNED.some((re) => re.test(sentence));
 }
+
+/** The run ended with no answer: said plainly, never dressed up as done. */
+export const NO_ANSWER_SENTENCE = "No answer was produced. Send your request again.";
 
 /** The Done line's outcome: the first sentence if it is plain, else "" (the line then reads "Done."). */
 export function doneOutcome(text: string): string {
