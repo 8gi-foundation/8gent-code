@@ -267,19 +267,43 @@ describe("ActivityRail", () => {
 		)
 			.filter((el) => el.type === Text)
 			.map((el) => React.Children.toArray(el.props.children as React.ReactNode).join(""));
-		expect(texts).toContain("● lmstudio ornith-1.0-9b");
-		expect(texts).toContain("○ apfel MiniMax-M2.7");
+		expect(texts).toContain("● lmstudio");
+		expect(texts).toContain("○ apfel");
 		expect(texts).toContain("fallback");
 	});
 
-	test("the primary row names its real provider, never a tier word", () => {
-		const texts = (name: string) =>
-			flatten(expand(render({ ...baseProps, providers: [{ name, state: "primary" }] })))
-				.filter((el) => el.type === Text)
-				.map((el) => React.Children.toArray(el.props.children as React.ReactNode).join(""));
-		expect(texts("8gent:eight-1.0-q3:14b")).toContain("● 8gent eight-1.0-q3:14b");
-		expect(texts("ollama:qwen3.8:27b-mlx")).toContain("● ollama qwen3.8:27b-mlx");
-		expect(texts("openrouter:auto:free")).toContain("● openrouter auto:free");
+	const rowTexts = (providers: ActivityRailProps["providers"]) =>
+		flatten(expand(render({ ...baseProps, providers })))
+			.filter((el) => el.type === Text)
+			.map((el) => React.Children.toArray(el.props.children as React.ReactNode).join(""));
+
+	test("the provider row names the provider, not the model the DONE card already shows (#360)", () => {
+		const texts = rowTexts([{ name: "ollama:qwen3.5:9b-32k", state: "primary", latency: "1ms" }]);
+		expect(texts).toContain("● ollama");
+		expect(texts.join(" ")).not.toContain("qwen3.5");
+	});
+
+	test("a rerouted row keeps the model that ran, the fact the rail exists to show (#3106)", () => {
+		const texts = rowTexts([
+			{ name: "8gent:qwen3.8:27b-mlx", state: "primary", asked: "eight-1.0-q3:14b" },
+		]);
+		expect(texts).toContain("● 8gent qwen3.8:27b-mlx");
+	});
+
+	test("two routes on one provider keep their models, so the rows stay apart (#360)", () => {
+		const texts = rowTexts([
+			{ name: "lmstudio:ornith-1.0-9b", state: "primary" },
+			{ name: "lmstudio:MiniMax-M2.7", state: "fallback" },
+		]);
+		expect(texts).toContain("● lmstudio ornith-1.0-9b");
+		expect(texts).toContain("○ lmstudio MiniMax-M2.7");
+	});
+
+	test("the primary row names its real provider, never a tier word (#360)", () => {
+		const texts = (name: string) => rowTexts([{ name, state: "primary" }]);
+		expect(texts("8gent:eight-1.0-q3:14b")).toContain("● 8gent");
+		expect(texts("ollama:qwen3.8:27b-mlx")).toContain("● ollama");
+		expect(texts("openrouter:auto:free")).toContain("● openrouter");
 		for (const word of ["local:", "fallback:free", "route:available", "remote:standby"]) {
 			expect(texts("8gent:eight-1.0-q3:14b").join(" ")).not.toContain(word);
 		}
