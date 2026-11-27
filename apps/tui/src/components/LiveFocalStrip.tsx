@@ -2,8 +2,10 @@
  * LiveFocalStrip - single horizontal strip above the message list that
  * always answers "what is happening NOW?"
  *
- * One canonical pulse: state + active step on the left, route + context
- * meter + token count on the right. Border is teal by default and flips
+ * One canonical pulse: state + active step on the left, route + token
+ * count on the right. The context meter shows here only when the footer
+ * row does not draw it (`meter`, #9): one reading, never two.
+ * Border is teal by default and flips
  * to orange when an approval is pending so the eye lands on it without
  * a second glance.
  *
@@ -70,6 +72,9 @@ interface LiveFocalStripProps {
 	 *  metadata); `unknown` shows "? unknown"; `fresh` shows "--" until the
 	 *  first reply is measured. */
 	contextState?: "provider" | "server" | "override" | "unknown" | "fresh";
+	/** Draw the ctx meter. True only when the footer row does not draw it:
+	 *  the footer is its home wherever it fits there (#9). */
+	meter?: boolean;
 	approvalPending?: boolean;
 	/** The agent runs unattended (Infinite): no card can wait on the person,
 	 *  so the border never turns orange. The word is not repeated here: the
@@ -84,8 +89,8 @@ interface LiveFocalStripProps {
 	lastTurnSuccess?: boolean | null;
 	/** False (Ctrl+A) stills the spinner and skips the settle beat. */
 	animate?: boolean;
-	/** Columns the strip takes, borders included. When known, the route and
-	 *  meter give way before the state text is ever cut (audit #9). */
+	/** Columns the strip takes, borders included. When known, the route gives
+	 *  way before the state text is ever cut (audit #9). */
 	width?: number;
 	/** Can the active tab run a turn (lib/readiness.ts, #3290)? When not,
 	 *  the state word is NO MODEL (or CHECK while the first probe or build is
@@ -127,6 +132,7 @@ export function LiveFocalStrip({
 	tokens,
 	contextPct,
 	contextState = "provider",
+	meter = false,
 	approvalPending = false,
 	autonomous = false,
 	isProcessing = false,
@@ -181,7 +187,7 @@ export function LiveFocalStrip({
 					middle,
 					route: shownRoute === "-" ? "" : shownRoute,
 					asked: shownRoute && shownRoute !== "-" && routeAsked ? askedNote(routeAsked) : "",
-					meter: blocked?.state !== "none",
+					meter: meter && blocked?.state !== "none",
 				}
 			: fitNowStrip({
 					width,
@@ -191,6 +197,7 @@ export function LiveFocalStrip({
 					middleShort: showApprovalBorder ? "waiting" : finished ? "finished" : undefined,
 					route: shownRoute,
 					asked: routeAsked,
+					meter,
 					tokens,
 				});
 	return (

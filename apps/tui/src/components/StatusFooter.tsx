@@ -24,7 +24,7 @@
  */
 
 import { Box, Text } from "ink";
-import React, { useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import {
 	type PermissionMode,
 	isPermissionMode,
@@ -642,6 +642,42 @@ export function fitFooterRow(
 	return rows[rows.length - 1] as { segments: FooterSegment[]; hints: string[] };
 }
 
+/**
+ * Does the steady footer row draw the ctx meter (#9)? The same fit as the drawn
+ * row; toasts and notices are passing, so they do not count. The NOW strip draws
+ * the meter only when this is false: one reading, never two.
+ */
+export function footerDrawsCtx(
+	data: FooterData,
+	width: number,
+	leading = false,
+	dj = false,
+): boolean {
+	return fitFooterRow(buildFooterSegments(data), width, leading, dj).segments.some(
+		(s) => s.key === "ctx",
+	);
+}
+
+/**
+ * Is the footer the ctx meter's home (#9)? Decided from the row a running turn
+ * draws, with Esc stop present, so the home never changes when a turn starts or
+ * ends. Where that row has no room, the NOW strip is the home in every state, and
+ * an idle footer that does fit the reading draws it as well.
+ */
+export function footerHoldsCtx(
+	data: FooterData,
+	width: number,
+	leading = false,
+	dj = false,
+): boolean {
+	const midTurn: FooterData = {
+		...data,
+		turnRunning: true,
+		turnCalls: Math.max(data.turnCalls ?? 0, STOP_HINT_CALLS + 1),
+	};
+	return footerDrawsCtx(midTurn, width, leading, dj);
+}
+
 /** A permission switch the footer is announcing (#3174). */
 export interface FooterToast {
 	mode: PermissionMode;
@@ -744,6 +780,7 @@ export function StatusSegments({
 	leading = false,
 	notice,
 	dj = false,
+	onCtxShown,
 }: {
 	data: FooterData;
 	width: number;
@@ -754,6 +791,8 @@ export function StatusSegments({
 	notice?: string | null;
 	/** A DJ track is loaded, so ^D does something and its cap shows. */
 	dj?: boolean;
+	/** Told whether the footer is the ctx meter's home (footerHoldsCtx), when that changes (#9). */
+	onCtxShown?: (shown: boolean) => void;
 }) {
 	const all = buildFooterSegments(data);
 	const toastFit = toast ? fitFooterToast(all, width, toast, leading) : null;
@@ -762,6 +801,13 @@ export function StatusSegments({
 	const noticeFit = !toastFit && notice ? fitFooterNotice(all, width, notice, leading) : null;
 	const segments = toastFit ? toastFit.segments : noticeFit ? noticeFit.segments : row.segments;
 	const hints = toastFit || notice ? [] : row.hints;
+	const ctxShown = footerHoldsCtx(data, width, leading, dj);
+	const reported = useRef<boolean | null>(null);
+	useEffect(() => {
+		if (reported.current === ctxShown) return;
+		reported.current = ctxShown;
+		onCtxShown?.(ctxShown);
+	});
 	const segRef = useRef(null);
 	const hintRef = useRef(null);
 	const spans = footerClickSpans(segments, hints, leading);
