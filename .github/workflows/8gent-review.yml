@@ -34,6 +34,11 @@ jobs:
         with:
           bun-version: 1.4.3
 
+      - name: Setup Node 22 (native deps must build against the Node we ship)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
       - run: bun install --frozen-lockfile
 
       - name: Get PR diff
