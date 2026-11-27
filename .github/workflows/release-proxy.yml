@@ -34,6 +34,7 @@ jobs:
   # ---------------------------------------------------------------------------
   macos:
     runs-on: macos-14
+    timeout-minutes: 45
     env:
       APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERT_P12_BASE64 }}
       APPLE_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
@@ -46,6 +47,11 @@ jobs:
           bun-version: 1.4.3
       - name: Install workspace deps
         working-directory: .
+      - name: Setup Node 22 (native deps must build against the Node we ship)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
         run: bun install --frozen-lockfile
       - name: Compile darwin binaries
         run: |
@@ -80,6 +86,7 @@ jobs:
   # ---------------------------------------------------------------------------
   linux:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -87,6 +94,11 @@ jobs:
           bun-version: 1.4.3
       - name: Install workspace deps
         working-directory: .
+      - name: Setup Node 22 (native deps must build against the Node we ship)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
         run: bun install --frozen-lockfile
       - name: Compile linux binaries
         run: |
@@ -118,6 +130,7 @@ jobs:
   # ---------------------------------------------------------------------------
   windows:
     runs-on: windows-2022
+    timeout-minutes: 45
     env:
       WIN_CERT_PFX_BASE64: ${{ secrets.WINDOWS_AUTHENTICODE_PFX_BASE64 }}
       WIN_CERT_PASSWORD: ${{ secrets.WINDOWS_AUTHENTICODE_PASSWORD }}
@@ -128,6 +141,11 @@ jobs:
           bun-version: 1.4.3
       - name: Install workspace deps
         working-directory: .
+      - name: Setup Node 22 (native deps must build against the Node we ship)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
         run: bun install --frozen-lockfile
       - name: Compile windows binary
         run: bash scripts/compile.sh win-x64
@@ -175,6 +193,7 @@ jobs:
   release:
     needs: [macos, linux, windows]
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     if: startsWith(github.ref, 'refs/tags/proxy-v')
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
