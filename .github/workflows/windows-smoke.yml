@@ -33,7 +33,6 @@ jobs:
   windows:
     name: Windows (source + binary)
     runs-on: windows-latest
-    timeout-minutes: 45
     timeout-minutes: 30
     env:
       # No-model run: point the local-model decider at a closed port.
