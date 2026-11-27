@@ -38,7 +38,6 @@ jobs:
   windows-task:
     name: Windows (one task, standalone exe)
     runs-on: windows-latest
-    timeout-minutes: 45
     timeout-minutes: 25
     env:
       CI: "true"
