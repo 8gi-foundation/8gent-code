@@ -390,3 +390,48 @@ describe("taskLabelLines", () => {
 		for (const r of rows) expect(r.length).toBeLessThanOrEqual(30);
 	});
 });
+
+/** Every visible string in the TOOLS section, or null when the section is not drawn. */
+function toolsSectionText(props: ActivityRailProps): string | null {
+	const block = railColumn(props).find((b) =>
+		flatten(expand(b)).some((el) => el.props.children === "TOOLS"),
+	);
+	if (!block) return null;
+	return flatten(expand(block))
+		.map((el) => el.props.children)
+		.filter((c): c is string => typeof c === "string")
+		.join(" | ");
+}
+
+describe("ActivityRail TOOLS section is quiet when idle (zero rows say nothing)", () => {
+	const idle = { ...baseProps, tools: [], isProcessing: false, toolsCompleted: 0 };
+
+	test("the TOOLS section leaves the rail when no tool has run", () => {
+		expect(toolsSectionText(idle)).toBeNull();
+	});
+
+	test("idle after finished tools shows the done count, never 'active none' or 'queued 0'", () => {
+		const text = toolsSectionText({
+			...idle,
+			tools: [{ name: "read", state: "ok" }],
+			toolsCompleted: 7,
+		});
+		expect(text).not.toBeNull();
+		expect(text).toContain("done");
+		expect(text).toContain("7");
+		expect(text).not.toContain("active");
+		expect(text).not.toContain("none");
+		expect(text).not.toContain("queued");
+	});
+
+	test("a live turn shows the active tool", () => {
+		const text = toolsSectionText({
+			...idle,
+			isProcessing: true,
+			activeTool: "patch",
+			tools: [{ name: "patch", state: "running" }],
+		});
+		expect(text).toContain("active");
+		expect(text).toContain("patch");
+	});
+});

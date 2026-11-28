@@ -406,34 +406,34 @@ export function ActivityRail({
 				)}
 			</RailSection>
 
-			<RailSection title="TOOLS">
-				{(() => {
-					// Live turn state (chat-truth) wins over the tools array: while
-					// a turn runs with no tool in flight the agent is reasoning,
-					// and once it ends nothing is active or queued.
-					const arrayActive = isProcessing
-						? (tools.find((tl) => tl.state === "running")?.name ?? null)
-						: null;
-					const active = isProcessing ? (activeTool ?? arrayActive ?? "reasoning") : null;
-					const done = toolsCompleted ?? tools.filter((tl) => tl.state === "ok").length;
-					const queued = queuedToolCount(tools, isProcessing);
-					return (
-						<>
-							<MetricRow
-								label="active"
-								value={active ?? "none"}
-								color={active ? t.teal : t.textTertiary}
-							/>
+			{(() => {
+				// Live turn state (chat-truth) wins over the tools array: while
+				// a turn runs with no tool in flight the agent is reasoning,
+				// and once it ends nothing is active or queued.
+				const arrayActive = isProcessing
+					? (tools.find((tl) => tl.state === "running")?.name ?? null)
+					: null;
+				const active = isProcessing ? (activeTool ?? arrayActive ?? "reasoning") : null;
+				const done = toolsCompleted ?? tools.filter((tl) => tl.state === "ok").length;
+				const queued = queuedToolCount(tools, isProcessing);
+				// Quiet by default: a zero row ("active none", "queued 0") says
+				// nothing, so only rows that carry a value are drawn, and with no
+				// tool running, queued or finished the section leaves the rail.
+				if (!active && done === 0 && queued === 0) return null;
+				return (
+					<RailSection title="TOOLS">
+						{active ? (
+							<MetricRow label="active" value={active} color={t.teal} />
+						) : null}
+						{done > 0 ? (
 							<MetricRow label="done" value={String(done)} color={t.textSecondary} />
-							<MetricRow
-								label="queued"
-								value={String(queued)}
-								color={queued > 0 ? t.textPrimary : t.textTertiary}
-							/>
-						</>
-					);
-				})()}
-			</RailSection>
+						) : null}
+						{queued > 0 ? (
+							<MetricRow label="queued" value={String(queued)} color={t.textPrimary} />
+						) : null}
+					</RailSection>
+				);
+			})()}
 
 			<RailSection title="PROVIDERS">
 				{providers.map((provider) => (
