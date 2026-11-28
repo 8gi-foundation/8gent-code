@@ -9,6 +9,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.49] - 2026-11-28
+
+### Fixed
+- tests: turn-gate-records-331 keeps the run's EIGHT_HOME, so the board path stays under the temp home (#345) ([#378](https://github.com/8gi-foundation/8gent-code/pull/378))
+- ci: setup Node 22 in the smoke job too ([#367](https://github.com/8gi-foundation/8gent-code/pull/367))
+- ci: install dependencies on Node 22, the Node the product ships ([#363](https://github.com/8gi-foundation/8gent-code/pull/363))
+- telegram-bridge: observe strangers as sender id, time and text hash only (#339) ([#340](https://github.com/8gi-foundation/8gent-code/pull/340))
+
+### Security
+- security: renew the local-first gate waivers ([#368](https://github.com/8gi-foundation/8gent-code/pull/368))
+
 ## [0.20.48] - 2026-11-22
 
 ### Added
