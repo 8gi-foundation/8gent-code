@@ -150,6 +150,7 @@ import { markIntroSeen, readSeenVersion, shouldShowIntro } from "./lib/intro-gat
 import { useIntroWatchdog } from "./lib/intro-watchdog.js";
 import { messageId } from "./lib/message-id.js";
 import { motionEnabled } from "./lib/motion.js";
+import { NEW_THREAD_LINE } from "./lib/new-thread-line.js";
 import {
 	SETUP_SKIP_HINT,
 	SETUP_WELCOME_ID,
@@ -1820,7 +1821,7 @@ export function App({
 					{
 						id: `welcome-${activeTabId}`,
 						role: "system",
-						content: "\u221E New thread. What shall we work on?",
+						content: NEW_THREAD_LINE,
 						timestamp: new Date(),
 					},
 				];
