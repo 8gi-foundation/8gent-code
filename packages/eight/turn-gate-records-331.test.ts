@@ -9,7 +9,7 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rmRetry } from "../../tests/rm-retry";
@@ -49,12 +49,16 @@ let script: string[] = [INTENT];
 
 beforeAll(async () => {
 	for (const k of KEYS) saved[k] = process.env[k];
-	home = mkdtempSync(join(tmpdir(), "gate331-home-"));
-	repo = mkdtempSync(join(tmpdir(), "gate331-repo-"));
+	// Keep the run's EIGHT_HOME from the test preload (#3240) and make this
+	// file's folders under it, as the other tests in this package do, so the board path
+	// frozen at module load stays under the run's temp home.
+	const runHome = process.env.EIGHT_HOME ?? "";
+	if (!(runHome.startsWith(tmpdir()) || runHome.startsWith(realpathSync(tmpdir())))) throw new Error("EIGHT_HOME is not a temp dir");
+	home = mkdtempSync(join(runHome, "gate331-home-"));
+	repo = mkdtempSync(join(runHome, "gate331-repo-"));
 	mkdirSync(join(home, ".8gent", "memory"), { recursive: true });
 	process.env.HOME = home;
 	process.env.EIGHT_DATA_DIR = join(home, ".8gent");
-	process.env.EIGHT_HOME = home;
 	process.env.EIGHT_TOOL_CAPABILITY_GATE = "0";
 	process.env["8GENT_TWO_STAGE_COMPACT"] = "0";
 	Reflect.deleteProperty(process.env, "EIGHT_HEADLESS");
