@@ -81,6 +81,15 @@ export const TAB_ICONS: TabIcon[] = [
 	{ type: "control", icon: "+:", label: "Control" },
 ];
 
+/**
+ * The title a new tab gets when none is given. A chat is "Chat" with no
+ * number: the tab bar already numbers every tab, so "5] Chat 4" read as two
+ * numbers that disagreed.
+ */
+export function defaultTabTitle(type: TabType): string {
+	return TAB_ICONS.find((i) => i.type === type)?.label || type;
+}
+
 /** Singleton tab types (only one instance allowed) */
 const SINGLETON_TYPES: TabType[] = [
 	"notes",
@@ -404,9 +413,7 @@ export function useWorkspaceTabs() {
 					}
 				}
 
-				const icon = TAB_ICONS.find((i) => i.type === type);
-				const chatCount = type === "chat" ? prev.filter((t) => t.type === "chat").length + 1 : 0;
-				const defaultTitle = type === "chat" ? `Chat ${chatCount}` : icon?.label || type;
+				const defaultTitle = defaultTabTitle(type);
 
 				const now = new Date().toISOString();
 				newTab = {
