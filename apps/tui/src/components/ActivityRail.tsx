@@ -230,6 +230,30 @@ export function providerDisplay(value: string): string {
 	return model ? `${provider} ${model}` : provider;
 }
 
+/**
+ * The provider row's name in the PROVIDERS rail (#360). The model is already
+ * on the DONE card and the NOW strip, so a plain row names only its registry
+ * id. The model stays on the row in two cases: a reroute, where the model
+ * that ran is the fact the rail exists to show (#3106), and a provider that
+ * runs two routes, where the rows would otherwise read the same.
+ */
+export function providerRailLabel(
+	value: string,
+	all: ReadonlyArray<string>,
+	rerouted = false,
+): string {
+	const id = providerId(value);
+	const shared = all.filter((other) => providerId(other) === id).length > 1;
+	return shared || rerouted ? providerDisplay(value) : id;
+}
+
+/** The registry id before the first colon of `provider:model`. */
+function providerId(value: string): string {
+	const v = value.trim();
+	const cut = v.indexOf(":");
+	return cut < 0 ? v : v.slice(0, cut);
+}
+
 const TOOL_GLYPH: Record<ToolState, string> = {
 	idle: "○",
 	running: "◐",
@@ -439,7 +463,11 @@ export function ActivityRail({
 				{providers.map((provider) => (
 					<React.Fragment key={provider.name}>
 						<NamedRow
-							name={`${PROVIDER_GLYPH[provider.state]} ${providerDisplay(provider.name)}`}
+							name={`${PROVIDER_GLYPH[provider.state]} ${providerRailLabel(
+								provider.name,
+								providers.map((p) => p.name),
+								Boolean(provider.asked),
+							)}`}
 							color={PROVIDER_COLOR[provider.state]}
 							trailing={provider.latency ?? PROVIDER_ROLE[provider.state]}
 						/>

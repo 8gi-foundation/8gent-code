@@ -97,9 +97,10 @@ describe("PROVIDERS row", () => {
 		expect(note?.props.color).toBe(t.textTertiary);
 	});
 
-	test("no reroute: one row, no note", () => {
+	test("no reroute: one row, no note, and the model is on the DONE card, not here (#360)", () => {
 		const names = rail(deriveProviders({ primary: { name: `8gent:${ASKED}` }, fallback: null, offline: null })).map(str);
-		expect(names).toContain(`● 8gent ${ASKED}`);
+		expect(names).toContain("● 8gent");
+		expect(names.join(" ")).not.toContain(ASKED);
 		expect(names.join(" ")).not.toContain("asked");
 	});
 });
