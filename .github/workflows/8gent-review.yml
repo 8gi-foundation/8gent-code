@@ -18,6 +18,12 @@ jobs:
       # workflow was added. The review step never ran once.
       contents: read
       pull-requests: write
+    env:
+      # Job level, not step level: the post-review step's guard needs to see
+      # these too, otherwise it concludes 'no secret on this repo' while the
+      # review step had one.
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -27,10 +33,32 @@ jobs:
         with:
           bun-version: 1.4.3
 
+      - name: Setup Node 22 (native deps must build against the Node we ship)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
       - run: bun install --frozen-lockfile
 
       - name: Get PR diff
         run: git diff origin/${{ github.base_ref }}...HEAD > /tmp/pr.diff
+
+      - name: Configure the reviewer provider
+        run: |
+          # 8gent's provider registry ships with `openrouter` disabled and reads
+          # ~/.8gent/providers.json. On a fresh runner there is none, so the review
+          # command falls into its interactive setup menu and produces no output.
+          mkdir -p ~/.8gent
+          cat > ~/.8gent/providers.json <<'JSON'
+          {
+            "activeProvider": "groq",
+            "activeModel": "openai/gpt-oss-120b",
+            "providers": {
+              "groq": { "enabled": true },
+              "openrouter": { "enabled": true }
+            }
+          }
+          JSON
 
       - name: Run 8gent review
         env:
@@ -46,7 +74,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # The reviewer needs a model. There is no OPENROUTER_API_KEY secret on
+          # The reviewer needs a model that can complete a tool-using turn. The
+          # OPENROUTER_API_KEY on this repo can list models but 401s every chat request,
+          # and the GROQ route fails on the second call because 8gent replays
+          # reasoning_content (8gent-code#370). Until one of those is fixed the reviewer
+          # cannot review. This is the NORMAL case, so report it plainly.
+          # There is no OPENROUTER_API_KEY secret on
           # this repo and no local model on the runner, so a non-JSON body is the
           # NORMAL case, not an anomaly. Report that plainly instead of dying on
           # JSON.parse and painting the PR red for a reason unrelated to the code.
