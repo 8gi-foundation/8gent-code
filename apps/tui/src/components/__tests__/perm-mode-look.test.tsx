@@ -297,26 +297,21 @@ describe("header chip (#3174)", () => {
 		/>
 	);
 
-	test("Infinite, and only Infinite, puts INFINITE in the header", async () => {
-		for (const [mode, shows] of [
-			["infinite", true],
-			["guarded", false],
-			["plan", false],
-			["ask", false],
-		] as const) {
+	test("Infinite is named once per tab: the header never repeats it (the tab tag names it)", async () => {
+		for (const mode of ["infinite", "guarded", "plan", "ask"] as const) {
 			const { frame } = mount(header(mode, 160), 160);
 			await tick();
-			expect(frame().includes("INFINITE")).toBe(shows);
+			expect(frame().includes("INFINITE")).toBe(false);
 			instance?.unmount();
 			instance = null;
 		}
 	});
 
-	test("80 columns: the chip fits beside the branch, on the text row (#3238)", async () => {
+	test("80 columns: the branch keeps the header's text row, with no Infinite chip beside it", async () => {
 		const { frame } = mount(header("infinite", 80), 80);
 		await tick();
 		const lines = frame().split("\n");
-		expect(lines[1]).toContain("INFINITE");
+		expect(lines[1]).not.toContain("INFINITE");
 		expect(lines[1]).toContain("main");
 	});
 });

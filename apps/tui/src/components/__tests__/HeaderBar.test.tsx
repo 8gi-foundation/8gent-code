@@ -217,14 +217,11 @@ describe("HeaderBar", () => {
 		expect(statusClusterWidth(live)).toBe(0);
 	});
 
-	test("chips show only while they apply, in priority order ASK > INFINITE > MIC (#3238)", () => {
+	test("chips show only while they apply, in priority order ASK > MIC; Infinite is the tab tag, not a chip", () => {
 		expect(headerChips({ micOn: false, approvalPending: false, permMode: "ask" })).toEqual([]);
 		expect(headerChips({ micOn: false, approvalPending: false, permMode: "guarded" })).toEqual([]);
-		expect(headerChips({ micOn: true, approvalPending: true, permMode: "infinite" })).toEqual([
-			"ASK",
-			"INFINITE",
-			"● MIC",
-		]);
+		expect(headerChips({ micOn: false, approvalPending: false, permMode: "infinite" })).toEqual([]);
+		expect(headerChips({ micOn: true, approvalPending: true, permMode: "infinite" })).toEqual(["ASK", "● MIC"]);
 	});
 
 	for (const width of [80, 120, 160]) {
@@ -234,7 +231,7 @@ describe("HeaderBar", () => {
 				"\n",
 			);
 			expect(lines.length).toBe(3);
-			for (const chip of ["ASK", "INFINITE", "● MIC"]) {
+			for (const chip of ["ASK", "● MIC"]) {
 				expect(lines[1]).toContain(chip);
 				expect(lines[0]).not.toContain(chip);
 				expect(lines[2]).not.toContain(chip);
